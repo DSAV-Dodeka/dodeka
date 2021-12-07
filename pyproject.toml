@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "dodeka"
+version = "0.1.0"
+description = ""
+authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+confspawn = { git = "https://github.com/tiptenbrink/confspawn.git", branch = "main"}
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

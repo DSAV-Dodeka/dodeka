@@ -1,0 +1,5 @@
+FROM postgres:14-bullseye
+ADD postgresql.conf ~spwn@postgres_conf_dir@~/postgresql.conf
+ADD pg_hba.conf ~spwn@postgres_conf_dir@~/pg_hba.conf
+ADD barman.sh docker-entrypoint-initdb.d/barman.sh
+ADD barman.sql ~spwn@init_dir@~/barman.sql
