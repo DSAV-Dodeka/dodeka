@@ -4,5 +4,5 @@
 poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
 # metaconfig
 # db/configged should correspond to the directory of the built config
-docker build --tag dodeka/postgrestest db/configged
+docker build --tag tiptenbrink/postgres db/configged
 poetry run python -c "from spawn_db import spawn_deploy; spawn_deploy()"
