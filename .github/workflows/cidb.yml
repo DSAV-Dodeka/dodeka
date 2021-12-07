@@ -36,24 +36,49 @@ jobs:
       run: poetry install --no-interaction --no-root
     - name: Install library
       run: poetry install --no-interaction
-    - name: Build
+    - name: Config
       run: |
         cd build
-        ./build_db.sh
+        poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v1
       with:
         registry: ghcr.io
         username: tiptenbrink
         password: ${{ secrets.GHCR_TOKEN }}
-    - name: Push
-      run: |
-        docker push ghcr.io/tiptenbrink/postgres:latest
-        
-  deploy:
+    # Set up buildx for later build-push-action
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+    # Get cached Docker layers to save build time
+    - name: Cache Docker layers
+      uses: actions/cache@v2
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-
+    # Build up until the tiauthbuilder stage (i.e. including all dependencies)
+    - name: Build and push
+      uses: docker/build-push-action@v2
+      with:
+        context: db/configged
+        # Dockerfile stage
+        tags: ghcr.io/tiptenbrink/postgres:latest
+        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+        push: true
+    - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
+  deploy:
+    needs: build
     runs-on: ubuntu-latest
-    
+
     env:
       DB_ENV_PASS: ${{ secrets.DB_ENV_PASS }}
 
@@ -74,3 +99,5 @@ jobs:
           cd ~/deployments/secrets$DEPLOYID
           . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
           echo $TEST_SECRET
+          cd ~/deployments/deploy$DEPLOYID/deploy
+          ./deploy.sh
