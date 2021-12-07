@@ -8,6 +8,9 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    
+    env:
+      DB_ENV_PASS: ${{ secrets.DB_ENV_PASS }}
 
     steps:
     - uses: actions/checkout@v2
@@ -18,7 +21,11 @@ jobs:
         username: "dodekatest"
         key: ${{ secrets.SSH_PRIVATE_KEY_DODEKATEST }}
         port: ${{ secrets.SSH_DODEKATEST_PORT }}
+        envs: DB_ENV_PASS
         script: |
           export DEPLOYID="$(date +%s)"
           gh repo clone DSAV-Dodeka/dodeka ~/deployments/deploy$DEPLOYID
-    
+          gh repo clone DSAV-Dodeka/secrets ~/deployments/secrets$DEPLOYID
+          cd ~/deployments/secrets$DEPLOYID
+          . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
+          echo $TEST_SECRET
