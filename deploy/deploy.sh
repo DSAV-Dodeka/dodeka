@@ -16,4 +16,4 @@ mkdir -p "${RESOURCES_SOURCE}"
 # //TODO docker compose pull
 # Run the docker-compose.yml
 # -d for detached/background
-docker compose up -d
+docker compose up

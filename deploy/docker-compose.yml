@@ -11,7 +11,7 @@ services:
     command: -c config_file=${CONF_FILE}
     # Environment file to load into the container
     env_file:
-      - template_.env.deploy
+      - .env.deploy
     # Some environment variables depend on deployment variables, so we load those in manually
     environment:
       - PGDATA=${RESOURCES_TARGET}
