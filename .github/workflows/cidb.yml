@@ -39,7 +39,7 @@ jobs:
     - name: Config
       run: |
         poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
-      working-directory: ${{ github.workspace }} /build
+      working-directory: ${{ github.workspace }}/build
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v1
       with:
