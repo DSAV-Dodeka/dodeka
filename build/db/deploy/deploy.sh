@@ -8,7 +8,7 @@ cd "${0%/*}" || exit
 # env files are consumed by e.g. docker compose
 set -a
 # Load environment variables from .env.db file
-. .env.deploy
+. ./.env.deploy
 # Create the directory that will serve as the source for the container volume
 # -p ensures parent directories are created and there is no error if it already exists
 mkdir -p "${RESOURCES_SOURCE}"
@@ -16,4 +16,4 @@ mkdir -p "${RESOURCES_SOURCE}"
 # //TODO docker compose pull
 # Run the docker-compose.yml
 # -d for detached/background
-docker compose up
+docker compose up -d
