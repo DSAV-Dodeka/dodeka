@@ -20,7 +20,7 @@ mkdir -p "${RESOURCES_SOURCE}"
 docker compose up -d
 
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{.State.Status}}' d-dodeka-db-1 )" == "running" ];
+if [ "$( docker container inspect -f '{{.State.Status}}' ~spwn@container_name@~ )" == "running" ];
 then
     echo "PostgreSQL startup successful."
     # Copy deploy to new directory to make it easy to shut down
@@ -29,7 +29,7 @@ then
 else
     echo "PostgreSQL startup failed."
     # If fail, check logs
-    docker container logs d-dodeka-db-1
+    docker container logs ~spwn@container_name@~
     # Shut down and remove
     ./down.sh
     # Exit code 1 indicates failure
