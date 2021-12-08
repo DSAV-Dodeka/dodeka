@@ -7,7 +7,7 @@ barman_backup_dir = "/dodeka_barman"
 postgres_conf_dir = "/dodeka_conf"
 init_dir = "/dodeka_init"
 # metaconfig
-image_name = "ghcr.io/DSAV-Dodeka/postgres"
+image_name = "ghcr.io/dsav-dodeka/postgres"
 version = "latest"
 host_host = "127.0.0.1"
 host_port = "3141"
