@@ -11,7 +11,7 @@ six = "*"
 
 [[package]]
 name = "confspawn"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 category = "main"
 optional = false
@@ -25,7 +25,7 @@ dynaconf = {version = "^3.1.7", extras = ["ini"]}
 type = "git"
 url = "https://github.com/tiptenbrink/confspawn.git"
 reference = "main"
-resolved_reference = "bac6b540884d5bf8646c29dbf8491d2ca8093738"
+resolved_reference = "472deeab71a22978f1f9fd0cd4775706eae5aec1"
 
 [[package]]
 name = "dynaconf"
