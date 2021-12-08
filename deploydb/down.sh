@@ -11,4 +11,4 @@ set -a
 . ./.env.deploy
 
 # -v ensures volumes are removed (but files are persisted)
-docker compose down -v
+docker compose -p "${DB_COMPOSE_PROJECT_NAME}" down -v

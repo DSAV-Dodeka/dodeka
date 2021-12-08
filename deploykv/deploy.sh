@@ -11,27 +11,22 @@ cd "$CUR_DIR" || exit
 set -a
 # Load environment variables from .env.deploy file
 . ./.env.deploy
-# Create the directory that will serve as the source for the container volume
-# -p ensures parent directories are created and there is no error if it already exists
-mkdir -p "${DB_RESOURCES_SOURCE}"
 
 # Run the docker-compose.yml
 # -d for detached/background
-docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
+docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
 
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{.State.Status}}' ~spwn@container_name@~ )" = "running" ];
+if [ "$( docker container inspect -f '{{.State.Status}}' ts-dodeka-kv-1 )" == "running" ];
 then
-    echo "PostgreSQL startup successful."
+    echo "Redis startup successful."
     # Copy deploy to new directory to make it easy to shut down
     # -a preserves file information
-    if [ "$1" = "move" ]; then
-        cp -a "$CUR_DIR" ~/active_deploydb/
-    fi
+    cp -a "$CUR_DIR" ~/active_deploykv/
 else
-    echo "PostgreSQL startup failed."
+    echo "Redis startup failed."
     # If fail, check logs
-    docker container logs ~spwn@container_name@~
+    docker container logs ts-dodeka-kv-1
     # Shut down and remove
     ./down.sh
     # Exit code 1 indicates failure
