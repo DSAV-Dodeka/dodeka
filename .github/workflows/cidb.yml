@@ -63,7 +63,7 @@ jobs:
       with:
         context: ${{ github.workspace }}/build/db/configged
         # Dockerfile stage
-        tags: ghcr.io/dodeka/postgres:latest
+        tags: 'ghcr.io/DSAV-dodeka/postgres:latest'
         cache-from: type=local,src=/tmp/.buildx-cache
         cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
         push: true
