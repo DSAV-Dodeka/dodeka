@@ -9,6 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - name: Update GH CLI
+      run: |
+        gh release --repo cli/cli download --pattern '*amd64.deb' v2.3.0
+        sudo apt install gh*amd64.deb
     - uses: actions/checkout@v2
     - name: Set up Python
       uses: actions/setup-python@v2
