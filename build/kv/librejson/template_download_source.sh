@@ -11,7 +11,7 @@ cp kv/librejson/Dockerfile kv/librejson/*RedisJSON*
 # Build the Dockerfile which will build the librejson.so
 docker build --tag rejsonbuild kv/librejson/*RedisJSON*
 # Remove any previous container
-docker rm rejsonbuilder
+docker rm rejsonbuilder || true
 # Run container so it can be extracted
 docker run --name rejsonbuilder rejsonbuild
 docker cp rejsonbuilder:/build/RedisJSON/target/release/librejson.so kv/librejson.so
