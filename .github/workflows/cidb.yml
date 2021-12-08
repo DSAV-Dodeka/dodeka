@@ -63,7 +63,7 @@ jobs:
       with:
         context: ${{ github.workspace }}/build/db/configged
         # Dockerfile stage
-        tags: ghcr.io/tiptenbrink/postgres:latest
+        tags: ghcr.io/dodeka/postgres:latest
         cache-from: type=local,src=/tmp/.buildx-cache
         cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
         push: true
@@ -75,33 +75,33 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-
-    env:
-      DB_ENV_PASS: ${{ secrets.DB_ENV_PASS }}
-      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: executing remote ssh commands using ssh key
-      uses: appleboy/ssh-action@1a8b3784eaa665f677fa114edd5683bb6a6bfaa8
-      with:
-        host: "dodeka.tipten.nl"
-        username: "dodekatest"
-        key: ${{ secrets.SSH_PRIVATE_KEY_DODEKATEST }}
-        port: ${{ secrets.SSH_DODEKATEST_PORT }}
-        envs: DB_ENV_PASS,GHCR_TOKEN
-        script_stop: true
-        script: |
-          export DEPLOYID="$(date +%s)"
-          gh repo clone DSAV-Dodeka/dodeka ~/deployments/deploy$DEPLOYID
-          gh repo clone DSAV-Dodeka/secrets ~/deployments/secrets$DEPLOYID
-          cd ~/deployments/secrets$DEPLOYID
-          set -a
-          . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
-          echo $TEST_SECRET
-          echo $GHCR_TOKEN | docker login ghcr.io -u tiptenbrink --password-stdin
-          cd ~/deployments/deploy$DEPLOYID/deploy
-          ./deploy.sh
+#  deploy:
+#    needs: build
+#    runs-on: ubuntu-latest
+#
+#    env:
+#      DB_ENV_PASS: ${{ secrets.DB_ENV_PASS }}
+#      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+#
+#    steps:
+#    - uses: actions/checkout@v2
+#    - name: executing remote ssh commands using ssh key
+#      uses: appleboy/ssh-action@1a8b3784eaa665f677fa114edd5683bb6a6bfaa8
+#      with:
+#        host: "dodeka.tipten.nl"
+#        username: "dodekatest"
+#        key: ${{ secrets.SSH_PRIVATE_KEY_DODEKATEST }}
+#        port: ${{ secrets.SSH_DODEKATEST_PORT }}
+#        envs: DB_ENV_PASS,GHCR_TOKEN
+#        script_stop: true
+#        script: |
+#          export DEPLOYID="$(date +%s)"
+#          gh repo clone DSAV-Dodeka/dodeka ~/deployments/deploy$DEPLOYID
+#          gh repo clone DSAV-Dodeka/secrets ~/deployments/secrets$DEPLOYID
+#          cd ~/deployments/secrets$DEPLOYID
+#          set -a
+#          . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
+#          echo $TEST_SECRET
+#          echo $GHCR_TOKEN | docker login ghcr.io -u tiptenbrink --password-stdin
+#          cd ~/deployments/deploy$DEPLOYID/deploy
+#          ./deploy.sh
