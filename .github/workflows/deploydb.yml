@@ -1,6 +1,8 @@
 name: Deploy DB
 
-on: workflow_dispatch
+on:
+  push:
+    branches: [ ci ]
 
 jobs:
  deploy:
@@ -34,4 +36,4 @@ jobs:
          . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
          echo $GHCR_TOKEN | docker login ghcr.io -u $ACTOR --password-stdin
          cd ~/deployments/deploy$DEPLOYID/deploydb
-         ./deploy.sh move
+         ./deploy.sh 'move'

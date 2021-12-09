@@ -1,8 +1,6 @@
 name: CI KV
 
-on:
-  push:
-    branches: [ ci ]
+on: workflow_dispatch
 
 jobs:
   build:
