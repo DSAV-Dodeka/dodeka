@@ -8,5 +8,6 @@ def spawn_build(build_target='configged'):
 
 def spawn_deploy():
     print("Building DB deploy configuration...")
-    spawn_write('./config.toml', './db/deploy', target_dir="../deploydb", join_target=False, source_env='default.db')
+    spawn_write('./config.toml', './db/deploy', target_dir="../use/deploydb", join_target=False,
+                source_env='default.db')
 

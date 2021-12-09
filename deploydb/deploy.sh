@@ -26,7 +26,10 @@ then
     # Copy deploy to new directory to make it easy to shut down
     # -a preserves file information
     if [ "$1" = "move" ]; then
+        rm -rf ~/active_deploydb
+        touch "deployed$DEPLOYID.txt"
         cp -a "$CUR_DIR" ~/active_deploydb/
+        echo "Deployment moved to ~/active_deploy."
     fi
 else
     echo "PostgreSQL startup failed."

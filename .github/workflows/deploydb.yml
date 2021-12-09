@@ -33,5 +33,5 @@ jobs:
          set -a
          . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
          echo $GHCR_TOKEN | docker login ghcr.io -u $ACTOR --password-stdin
-         cd ~/deployments/deploy$DEPLOYID/deploydb
+         cd ~/deployments/deploy$DEPLOYID/use/deploydb
          ./deploy.sh move
