@@ -8,7 +8,7 @@ postgres_conf_dir = "/dodeka_conf"
 init_dir = "/dodeka_init"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/postgres"
-version = "latest"
+version = "dev"
 host_host = "127.0.0.1"
 host_port = "3141"
 container_port = "3141"
@@ -26,7 +26,7 @@ service_name = "kv"
 container_name = "ts-dodeka-kv-1"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/redis"
-version = "latest"
+version = "dev"
 host_host = "127.0.0.1"
 host_port = "6379"
 container_port = "6379"
@@ -34,3 +34,5 @@ container_port = "6379"
 network_name = "dodeka"
 
 [default.dev]
+postgres_version = "latest"
+redis_version = "latest"

@@ -76,10 +76,11 @@ First, build the config from the `/build` directory:
 poetry run python -c "from spawn_kv import spawn_librejson; spawn_librejson('configged')"
 ```
 
-Then, again from the `/build` directory:
+For the next step, you need to have [GitHub CLI](https://github.com/cli/cli) installed. It is used for downloading the librejson source.
+Again from the `/build` directory:
 
 ```shell
-./kv/librejson/configged/download_source.sh
+./kv/librejson/configged/build_librejson.sh
 ```
 
 This script will download the `RedisJSON/RedisJSON` GitHub project, which contains the source. It will untar it and then build a Docker container with Rust installed. The file will then be built from that container, after which it is copied from the container.
