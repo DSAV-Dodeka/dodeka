@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-      branches: [ ci ]
+      branches: [ main ]
 
 jobs:
   config-deploy:
@@ -223,7 +223,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: ${{ github.workspace }}/build/db/configged
-          # Dockerfile tag, TODO load from config in the future
+          # Dockerfile tag
           tags: 'ghcr.io/dsav-dodeka/postgres:latest'
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
