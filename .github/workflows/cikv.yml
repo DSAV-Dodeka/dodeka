@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    # Temporary until GH updates their runners to use the newest version of their own CLI
     - name: Update GH CLI
       run: |
         echo "${{ github.token }}" | gh auth login --with-token
@@ -51,17 +52,20 @@ jobs:
       run: |
         poetry run python -c "from spawn_kv import spawn_librejson; spawn_librejson('configged')"
       working-directory: ${{ github.workspace }}/build
+    # Set env from config.toml
     - name: Set env.REJSON_VERSION
       run: |
         export REJSON_VERSION=$(./config_load.sh 'default.kv' 'redisjson_version')
         echo "REJSON_VERSION=$REJSON_VERSION" >> $GITHUB_ENV
       working-directory: ${{ github.workspace }}/build
-    - name: Load cached Poetry installation
+    # If librejson was previously built and stored in cache, use it
+    - name: Load cached librejson.so
       uses: actions/cache@v2
       with:
-        path: ./kv/librejson.so
-        key: librejson-${{ env.REJSON_VERSION }}
+        path: build/kv/librejson.so
+        key: rejson_module-${{ env.REJSON_VERSION }}
     - name: librejson.so
+      # If cache was not found, rebuild
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'false'
       run: |
         ./kv/librejson/configged/build_librejson.sh
@@ -89,7 +93,7 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         context: ${{ github.workspace }}/build/kv
-        # Dockerfile tag, TODO load from config in the future
+        # Dockerfile tag
         tags: 'ghcr.io/dsav-dodeka/redis:latest'
         cache-from: type=local,src=/tmp/.buildxkv-cache
         cache-to: type=local,dest=/tmp/.buildxkv-cache-new,mode=max
