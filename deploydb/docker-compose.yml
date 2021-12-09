@@ -38,4 +38,4 @@ networks:
   # A different container on this network can access this container by using the container name as the hostname
   # So localhost:3000 is exposed to other containers as <container name>:3000
   default:
-    name: ${DB_NETWORK_NAME}
+    name: ${NETWORK_NAME}

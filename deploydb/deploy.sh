@@ -20,12 +20,14 @@ mkdir -p "${DB_RESOURCES_SOURCE}"
 docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
 
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{.State.Status}}' d-dodeka-db-1 )" == "running" ];
+if [ "$( docker container inspect -f '{{.State.Status}}' d-dodeka-db-1 )" = "running" ];
 then
     echo "PostgreSQL startup successful."
     # Copy deploy to new directory to make it easy to shut down
     # -a preserves file information
-    cp -a "$CUR_DIR" ~/active_deploydb/
+    if [ "$1" = "move" ]; then
+        cp -a "$CUR_DIR" ~/active_deploydb/
+    fi
 else
     echo "PostgreSQL startup failed."
     # If fail, check logs
