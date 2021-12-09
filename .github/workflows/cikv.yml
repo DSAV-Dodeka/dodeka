@@ -1,6 +1,8 @@
 name: CI KV
 
-on: workflow_dispatch
+on:
+  push:
+      branches: [ ci ]
 
 jobs:
   build:
@@ -49,9 +51,20 @@ jobs:
       run: |
         poetry run python -c "from spawn_kv import spawn_librejson; spawn_librejson('configged')"
       working-directory: ${{ github.workspace }}/build
-    - name: librejson.so
+    - name: Set env.REJSON_VERSION
       run: |
-        ./kv/librejson/configged/download_source.sh
+        export REJSON_VERSION=$(./config_load.sh 'default.kv' 'redisjson_version')
+        echo "REJSON_VERSION=$REJSON_VERSION" >> $GITHUB_ENV
+      working-directory: ${{ github.workspace }}/build
+    - name: Load cached Poetry installation
+      uses: actions/cache@v2
+      with:
+        path: ./kv/librejson.so
+        key: librejson-${{ env.REJSON_VERSION }}
+    - name: librejson.so
+      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'false'
+      run: |
+        ./kv/librejson/configged/build_librejson.sh
       working-directory: ${{ github.workspace }}/build
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v1

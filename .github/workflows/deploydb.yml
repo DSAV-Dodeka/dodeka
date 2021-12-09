@@ -1,8 +1,6 @@
 name: Deploy DB
 
-on:
-  push:
-    branches: [ ci ]
+on: workflow_dispatch
 
 jobs:
  deploy:
