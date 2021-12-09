@@ -10,6 +10,8 @@ jobs:
 
    steps:
    - uses: actions/checkout@v2
+     with:
+       ref: ${{ github.head_ref }}
    # Third party GH Action, pinned to commit for security
    - name: Set up Python
      uses: actions/setup-python@v2
@@ -47,4 +49,10 @@ jobs:
      run: |
        poetry run python -c "from spawn_db import spawn_deploy; spawn_deploy()"
        poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
+       poetry run python -c "from spawn_kv import spawn_deploy; spawn_deploy()"
+       poetry run python -c "from spawn_dev import spawn_dev; spawn_dev()"
      working-directory: ${{ github.workspace }}/build
+   - uses: stefanzweifel/git-auto-commit-action@v4
+     with:
+       commit_message: Build template config changes
+       file_pattern: use/

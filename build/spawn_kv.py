@@ -8,4 +8,5 @@ def spawn_librejson(build_target='configged'):
 
 def spawn_deploy():
     print("Building KV deploy configuration...")
-    spawn_write('./config.toml', './kv/deploy', target_dir="../deploykv", join_target=False, source_env='default.kv')
+    spawn_write('./config.toml', './kv/deploy', target_dir="../use/deploykv", join_target=False,
+                source_env='default.kv')

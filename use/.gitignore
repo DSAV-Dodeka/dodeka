@@ -1,0 +1,2 @@
+# Make sure folder is never deleted
+!.gitignore
