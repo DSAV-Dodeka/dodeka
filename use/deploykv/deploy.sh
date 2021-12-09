@@ -1,16 +1,28 @@
 #!/bin/bash
+# First argument is either 'move' (cp to activedeploy) or anything else (no cp)
+# Second argument is path for .env file to load (absolute or relative to this script!)
+
 # $0 is argument 0, which is always the script path
 # % is a type of Parameter Expansion
 # '/*' matches the last '/' and so %/* will remove everything after it
 # This changes the directory to the directory containing the script
-CUR_DIR="${0%/*}"
-cd "$CUR_DIR" || exit
+cd "${0%/*}" || exit
+# pwd is print working directory, -P ensures any links/shortcuts are resolved
+CUR_DIR=$(pwd -P)
 # This ensures all env variables are exported so env variables used in .env.deploy (like $HOME) are
 # properly expanded
 # env files are consumed by e.g. docker compose
 set -a
 # Load environment variables from .env.deploy file
 . ./.env.deploy
+
+# -n means string is not null
+if [ -n "$2" ]; then
+  # ignore warning
+  # shellcheck source=/dev/null
+  # load additional env file
+  . "$2"
+fi
 
 # Run the docker-compose.yml
 # -d for detached/background
