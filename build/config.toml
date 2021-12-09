@@ -21,3 +21,16 @@ db_user = "dodeka"
 
 [default.kv]
 redisjson_version = "v2.0.5"
+project = "ts-dodeka"
+service_name = "kv"
+container_name = "ts-dodeka-kv-1"
+# metaconfig
+image_name = "ghcr.io/dsav-dodeka/redis"
+version = "latest"
+host_host = "127.0.0.1"
+host_port = "6379"
+container_port = "6379"
+# must correspond to other containers
+network_name = "dodeka"
+
+[default.dev]

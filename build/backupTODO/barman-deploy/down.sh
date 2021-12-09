@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # $0 is argument 0, which is always the script path
 # % is a type of Parameter Expansion
 # '/*' matches the last '/' and so %/* will remove everything after it
@@ -8,7 +8,7 @@ cd "${0%/*}" || exit
 # env files are consumed by e.g. docker compose
 set -a
 # Load environment variables from .env.deploy file
-. ./.env.deploy
+. .env.deploy
 
 # -v ensures volumes are removed (but files are persisted)
-docker compose -p "${DB_COMPOSE_PROJECT_NAME}" down -v
+docker compose down -v
