@@ -18,6 +18,8 @@ volume_name = "db-volume"
 network_name = "dodeka"
 db_name = "dodeka"
 db_user = "dodeka"
+# using default
+db_admin_user = "postgres"
 
 [default.kv]
 redisjson_version = "v2.0.5"
@@ -36,3 +38,5 @@ network_name = "dodeka"
 [default.dev]
 postgres_version = "latest"
 redis_version = "latest"
+db_password = "postpost"
+barman_password = "barbar"
