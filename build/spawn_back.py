@@ -6,7 +6,7 @@ def spawn_backend():
     # This one has to go first since target is deleted before write
     spawn_write('./config.toml', './backend', target_dir="../use/backend/dev", join_target=False,
                 source_env='default.dev')
-    spawn_write('./config.toml', './backend/kv', target_dir="../use/backend/db", join_target=False,
-                source_env='default.kv')
-    spawn_write('./config.toml', './backend/kv', target_dir="../use/backend/kv", join_target=False,
+    spawn_write('./config.toml', './backend/db', target_dir="../use/backend/db", join_target=False,
                 source_env='default.db')
+    spawn_write('./config.toml', './backend/kv', target_dir="../use/backend/kv", join_target=False,
+                source_env='default.kv')
