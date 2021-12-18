@@ -19,7 +19,7 @@ network_name = "dodeka"
 db_name = "dodeka"
 db_user = "dodeka"
 # using default
-db_admin_user = "postgres"
+db_name_admin = "postgres"
 
 [default.kv]
 redisjson_version = "v2.0.5"
