@@ -40,3 +40,8 @@ postgres_version = "latest"
 redis_version = "latest"
 db_password = "postpost"
 barman_password = "barbar"
+# temporary copy from above until add feature to indicate which env
+host_host = "127.0.0.1"
+host_port = "3141"
+db_name = "dodeka"
+db_user = "dodeka"
