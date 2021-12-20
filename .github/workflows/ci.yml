@@ -63,12 +63,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    # Temporary until GH updates their runners to use the newest version of their own CLI
-    - name: Update GH CLI
-      run: |
-        echo "${{ github.token }}" | gh auth login --with-token
-        gh release --repo cli/cli download --pattern '*amd64.deb' v2.3.0
-        sudo apt install ./gh*amd64.deb
     - uses: actions/checkout@v2
     - name: Set up Python
       uses: actions/setup-python@v2
@@ -121,8 +115,10 @@ jobs:
         key: rejson_module-${{ env.REJSON_VERSION }}
     - name: librejson.so
       # If cache was not found, rebuild
+      # Requires GH login
       if: steps.cached-librejson.outputs.cache-hit != 'true'
       run: |
+        echo "${{ github.token }}" | gh auth login --with-token
         ./kv/librejson/configged/build_librejson.sh
       working-directory: ${{ github.workspace }}/build
     - name: Login to GitHub Container Registry
