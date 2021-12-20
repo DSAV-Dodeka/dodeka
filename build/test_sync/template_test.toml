@@ -1,0 +1,12 @@
+[setup]
+storage_engine= "LOCAL"
+
+[local_storage]
+path = "./data/backups/"
+
+[postgresql]
+host = "~spwn@host_host@~"
+port = ~spwn@host_port@~
+db = "~spwn@db_name@~"
+user = "~spwn@db_user@~"
+password = "~spwn@db_password@~"

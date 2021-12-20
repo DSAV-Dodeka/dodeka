@@ -7,8 +7,7 @@ authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
 [tool.poetry.dependencies]
 python = "^3.9"
 confspawn = { git = "https://github.com/tiptenbrink/confspawn.git", branch = "main"}
-
-[tool.poetry.dev-dependencies]
+psqlsync = { git = "https://github.com/tiptenbrink/psqlsync.git", branch = "main", extras = ["dirgh"] }
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-      branches: [ ci ]
+      branches: [ main ]
 
 jobs:
   config-deploy:
@@ -51,6 +51,8 @@ jobs:
           poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
           poetry run python -c "from spawn_kv import spawn_deploy; spawn_deploy()"
           poetry run python -c "from spawn_dev import spawn_dev; spawn_dev()"
+          poetry run python -c "from spawn_back import spawn_backend; spawn_backend()"
+          poetry run python -c "from spawn_sync import spawn_test_sync; spawn_test_sync()"
         working-directory: ${{ github.workspace }}/build
       - uses: stefanzweifel/git-auto-commit-action@v4
         with:
@@ -61,12 +63,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    # Temporary until GH updates their runners to use the newest version of their own CLI
-    - name: Update GH CLI
-      run: |
-        echo "${{ github.token }}" | gh auth login --with-token
-        gh release --repo cli/cli download --pattern '*amd64.deb' v2.3.0
-        sudo apt install ./gh*amd64.deb
     - uses: actions/checkout@v2
     - name: Set up Python
       uses: actions/setup-python@v2
@@ -119,8 +115,10 @@ jobs:
         key: rejson_module-${{ env.REJSON_VERSION }}
     - name: librejson.so
       # If cache was not found, rebuild
+      # Requires GH login
       if: steps.cached-librejson.outputs.cache-hit != 'true'
       run: |
+        echo "${{ github.token }}" | gh auth login --with-token
         ./kv/librejson/configged/build_librejson.sh
       working-directory: ${{ github.workspace }}/build
     - name: Login to GitHub Container Registry
@@ -141,13 +139,20 @@ jobs:
         key: ${{ runner.os }}-buildxkv-${{ github.sha }}
         restore-keys: |
           ${{ runner.os }}-buildxkv-
+    # Set env from config.toml
+    - name: Set env.KV_TAG
+      run: |
+        export KV_IMAGE=$(./config_load.sh 'default.kv' 'image_name')
+        export KV_VERSION=$(./config_load.sh 'default.kv' 'version')
+        echo "KV_TAG=$KV_IMAGE:$KV_VERSION" >> $GITHUB_ENV
+      working-directory: ${{ github.workspace }}/build
     # Build and push
     - name: Build and push
       uses: docker/build-push-action@v2
       with:
         context: ${{ github.workspace }}/build/kv
         # Dockerfile tag
-        tags: 'ghcr.io/dsav-dodeka/redis:latest'
+        tags: ${{ env.KV_TAG }}
         cache-from: type=local,src=/tmp/.buildxkv-cache
         cache-to: type=local,dest=/tmp/.buildxkv-cache-new,mode=max
         push: true
@@ -218,13 +223,20 @@ jobs:
           key: ${{ runner.os }}-buildx-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-buildx-
+      # Set env from config.toml
+      - name: Set env.DB_TAG
+        run: |
+          export DB_IMAGE=$(./config_load.sh 'default.db' 'image_name')
+          export DB_VERSION=$(./config_load.sh 'default.db' 'version')
+          echo "DB_TAG=$DB_IMAGE:$DB_VERSION" >> $GITHUB_ENV
+        working-directory: ${{ github.workspace }}/build
       # Build and push
       - name: Build and push
         uses: docker/build-push-action@v2
         with:
           context: ${{ github.workspace }}/build/db/configged
-          # Dockerfile tag, TODO load from config in the future
-          tags: 'ghcr.io/dsav-dodeka/postgres:latest'
+          # Dockerfile tag
+          tags: ${{ env.DB_TAG }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           push: true
