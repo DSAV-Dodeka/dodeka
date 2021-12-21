@@ -156,7 +156,7 @@ jobs:
       run: |
         export KV_IMAGE=$(./config_load.sh 'default.kv' 'image_name')
         echo "KV_TAG=$KV_IMAGE:${{ github.event.release.tag_name }},$KV_IMAGE:latest" >> $GITHUB_ENV
-        working-directory: ${{ github.workspace }}/build
+      working-directory: ${{ github.workspace }}/build
     # Build and push
     - name: Build and push
       uses: docker/build-push-action@v2
@@ -247,7 +247,7 @@ jobs:
         run: |
           export DB_IMAGE=$(./config_load.sh 'default.db' 'image_name')
           echo "DB_TAG=$DB_IMAGE:${{ github.event.release.tag_name }},$DB_IMAGE:latest" >> $GITHUB_ENV
-          working-directory: ${{ github.workspace }}/build
+        working-directory: ${{ github.workspace }}/build
       # Build and push
       - name: Build and push
         uses: docker/build-push-action@v2
