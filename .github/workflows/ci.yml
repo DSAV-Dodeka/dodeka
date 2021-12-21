@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-      branches: [ main ]
+    branches: [ ci ]
+  pull_request:
+  release:
+    types: [ published ]
 
 jobs:
   config-deploy:
@@ -55,6 +58,7 @@ jobs:
           poetry run python -c "from spawn_sync import spawn_test_sync; spawn_test_sync()"
         working-directory: ${{ github.workspace }}/build
       - uses: stefanzweifel/git-auto-commit-action@v4
+        if: github.event_name != 'pull_request'
         with:
           commit_message: Config build (automated)
           file_pattern: use/
@@ -141,10 +145,17 @@ jobs:
           ${{ runner.os }}-buildxkv-
     # Set env from config.toml
     - name: Set env.KV_TAG
+      if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
       run: |
         export KV_IMAGE=$(./config_load.sh 'default.kv' 'image_name')
         export KV_VERSION=$(./config_load.sh 'default.kv' 'version')
         echo "KV_TAG=$KV_IMAGE:$KV_VERSION" >> $GITHUB_ENV
+      working-directory: ${{ github.workspace }}/build
+    - name: Set env.KV_TAG if release
+      if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+      run: |
+        export KV_IMAGE=$(./config_load.sh 'default.kv' 'image_name')
+        echo "KV_TAG=$KV_IMAGE:${{ github.event.release.tag_name }},$KV_IMAGE:latest" >> $GITHUB_ENV
       working-directory: ${{ github.workspace }}/build
     # Build and push
     - name: Build and push
@@ -155,7 +166,7 @@ jobs:
         tags: ${{ env.KV_TAG }}
         cache-from: type=local,src=/tmp/.buildxkv-cache
         cache-to: type=local,dest=/tmp/.buildxkv-cache-new,mode=max
-        push: true
+        push: ${{ github.event_name != 'pull_request' }}
     - # Temp fix
         # https://github.com/docker/build-push-action/issues/252
         # https://github.com/moby/buildkit/issues/1896
@@ -225,10 +236,17 @@ jobs:
             ${{ runner.os }}-buildx-
       # Set env from config.toml
       - name: Set env.DB_TAG
+        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
         run: |
           export DB_IMAGE=$(./config_load.sh 'default.db' 'image_name')
           export DB_VERSION=$(./config_load.sh 'default.db' 'version')
           echo "DB_TAG=$DB_IMAGE:$DB_VERSION" >> $GITHUB_ENV
+        working-directory: ${{ github.workspace }}/build
+      - name: Set env.DB_TAG if release
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+        run: |
+          export DB_IMAGE=$(./config_load.sh 'default.db' 'image_name')
+          echo "DB_TAG=$DB_IMAGE:${{ github.event.release.tag_name }},$DB_IMAGE:latest" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       # Build and push
       - name: Build and push
@@ -239,7 +257,7 @@ jobs:
           tags: ${{ env.DB_TAG }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
       - # Temp fix
         # https://github.com/docker/build-push-action/issues/252
         # https://github.com/moby/buildkit/issues/1896
