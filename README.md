@@ -6,6 +6,7 @@ The most important file is `/build/config.toml`, which contains all practical co
 
 //TODO barman source
 
+
 ## Running
 
 In order to run the scripts, there are a few requirements.
@@ -18,6 +19,7 @@ Then, you need a number of tools installed, which you can install from the links
 * [Docker Compose V2](https://docs.docker.com/compose/cli-command/)
 
 If you're on Windows, installing [Docker Desktop](https://www.docker.com/products/docker-desktop) after you've installed WSL will make these available inside WSL if Docker Desktop is running.
+
 
 ### Dev
 
@@ -39,6 +41,7 @@ You will now have a `dodeka` folder containing all the necessary folders.
 
 In `/dev` you can find `devdeploy.sh` and `down.sh`. By running `./devdeploy.sh` you start both the database and key-value store.
 
+
 #### Syncing the test database
 
 A number of test databases are stored inside the `DSAV-Dodeka/backend` repository. Running the commands above creates an empty database. To populate it with the latest test values, run:
@@ -49,7 +52,15 @@ poetry run python -c "from data.cli import run; run()"
 
 Ensure you are in the main `dodeka` directory, not in a subfolder.
 
+To create a backup, run:
+```shell
+poetry run psqlsync --config data/test.toml --action backup
+```
+
+
+
 ## Building the scripts and containers
+
 * [Poetry](https://python-poetry.org/docs/master/)
     * Once installed, run `poetry update` inside the main directory. This will install the other requirements.
 
@@ -64,9 +75,11 @@ poetry run python -c "from spawn_kv import spawn_deploy; spawn_deploy()"
 poetry run python -c "from spawn_dev import spawn_dev; spawn_dev()"
 ```
 
+
 ### Containers
 
 The containers have dedicated GitHub Actions workflows to build them, so in general you should never have to build them locally.
+
 
 #### db
 
@@ -82,9 +95,11 @@ Then, build the Docker container:
 docker build --tag 'ghcr.io/dsav-dodeka/postgres' db/configged
 ```
 
+
 #### kv
 
 Building the Redis container is, unfortunately, a lot harder as you need to manually load in the librejson.so library, which allows Redis to store JSON files. However, they do not freely publish librejson.so, you need to build it yourself or download it via an Enterprise account. Since the latter is not practical, we build it ourselves from their latest release.
+
 
 ##### Building librejson.so
 
@@ -102,6 +117,7 @@ Again from the `/build` directory:
 ```
 
 This script will download the `RedisJSON/RedisJSON` GitHub project, which contains the source. It will untar it and then build a Docker container with Rust installed. The file will then be built from that container, after which it is copied from the container.
+
 
 ##### Redis container
 

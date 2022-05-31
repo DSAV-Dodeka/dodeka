@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dodeka"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
 
