@@ -21,7 +21,6 @@ jobs:
      with:
        host: "116.203.107.52"
        username: "dodeka_github"
-       password: $${{ secrets.HETZNER_PASSWORD }}
        key: ${{ secrets.SSH_HETZNER_PRIVATE_KEY }}
        port: 22
        envs: DB_ENV_PASS,GHCR_TOKEN,ACTOR
