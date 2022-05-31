@@ -20,7 +20,8 @@ jobs:
      uses: appleboy/ssh-action@1a8b3784eaa665f677fa114edd5683bb6a6bfaa8
      with:
        host: "116.203.107.52"
-       username: "studentenatletiek@av40.nl"
+       username: "dodeka_github"
+       password: $${{ secrets.HETZNER_PASSWORD }}
        key: ${{ secrets.SSH_HETZNER_PRIVATE_KEY }}
        port: 22
        envs: DB_ENV_PASS,GHCR_TOKEN,ACTOR
