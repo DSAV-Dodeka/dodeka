@@ -20,11 +20,9 @@ set -a
 if [ -n "$2" ]; then
   # ignore warning
   # shellcheck source=/dev/null
-  # load additional env file
+  # load additional env file, i.e. for final dev or deploy such as passwords
   . "$2"
 fi
-
-echo "${POSTGRES_PASSWORD}"
 
 # Create the directory that will serve as the source for the container volume
 # -p ensures parent directories are created and there is no error if it already exists

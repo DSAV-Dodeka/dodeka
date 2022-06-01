@@ -3,6 +3,11 @@ services:
     image: "${KV_IMAGE}:${KV_VERSION}"
     ports:
       - "${KV_HOST_HOST}:${KV_HOST_PORT}:${KV_CONTAINER_PORT}"
+    volumes:
+      # <relative path source directory>:<container destination directory>
+      # This means the volume will be accessible from the container in the dest. directory in the container
+      # Used to load in configuration including password
+      - ./conf:/usr/local/etc/redis
 networks:
   default:
     external: true
