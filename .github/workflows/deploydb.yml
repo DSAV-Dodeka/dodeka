@@ -9,7 +9,7 @@ jobs:
    runs-on: ubuntu-latest
 
    env:
-     DB_ENV_PASS: ${{ secrets.DB_ENV_PASS }}
+     DB_ENV_PASS: ${{ secrets.SECRETS_PASSPHRASE }}
      GHCR_TOKEN: ${{ github.token }}
      ACTOR: ${{ github.actor }}
 
@@ -23,7 +23,7 @@ jobs:
        username: "dodeka_github"
        key: ${{ secrets.SSH_HETZNER_PRIVATE_KEY }}
        port: 22
-       envs: DB_ENV_PASS,GHCR_TOKEN,ACTOR
+       envs: SECRETS_PASSPHRASE,GHCR_TOKEN,ACTOR
        script_stop: true
        # This requires poetry, docker, gpg, bash to be installed on remote
        # Also requires GH CLI logged in with an account with repo read access
@@ -33,7 +33,7 @@ jobs:
          gh repo clone DSAV-Dodeka/secrets ~/dbdeployments/secrets$DEPLOYID
          cd ~/dbdeployments/secrets$DEPLOYID
          set -a
-         . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
+         . decrypt.sh secretdb.env.gpg $SECRETS_PASSPHRASE
          echo $GHCR_TOKEN | docker login ghcr.io -u $ACTOR --password-stdin
          cd ~/dbdeployments/deploy$DEPLOYID/use/deploydb
          ./deploy.sh move
