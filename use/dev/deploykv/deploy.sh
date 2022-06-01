@@ -20,13 +20,22 @@ set -a
 if [ -n "$2" ]; then
   # ignore warning
   # shellcheck source=/dev/null
-  # load additional env file
+  # load additional env file, i.e. for final dev or deploy such as passwords
   . "$2"
 fi
+
+# Moves the configuration file in temporarily with password
+# Password must be an env variable set externally
+mkdir ./conf
+cp ./redis_nopass.conf ./conf/redis.conf
+echo "requirepass ${REDIS_PASSWORD}" >> ./conf/redis.conf
 
 # Run the docker-compose.yml
 # -d for detached/background
 docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
+
+# Remove the conf file so password is not easily visible
+rm -r ./conf
 
 # Check if it is actually running by inspecting container state
 if [ "$( docker container inspect -f '{{.State.Status}}' ts-dodeka-kv-1 )" == "running" ];

@@ -7,4 +7,4 @@ set -a
 echo "$CUR_DIR"/dev.env
 # Start database, then key-value store
 ./deploydb/deploy.sh nomove "$CUR_DIR"/dev.env || exit
-./deploykv/deploy.sh nomove
+./deploykv/deploy.sh nomove "$CUR_DIR"/dev.env || exit
