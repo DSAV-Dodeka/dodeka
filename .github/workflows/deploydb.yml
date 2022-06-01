@@ -1,6 +1,5 @@
 name: Deploy DB
 
-
 on:
   push:
     branches: [ ci ]
@@ -30,11 +29,11 @@ jobs:
        # Also requires GH CLI logged in with an account with repo read access
        script: |
          export DEPLOYID="$(date +%s)"
-         gh repo clone DSAV-Dodeka/dodeka ~/deployments/deploy$DEPLOYID
-         gh repo clone DSAV-Dodeka/secrets ~/deployments/secrets$DEPLOYID
-         cd ~/deployments/secrets$DEPLOYID
+         gh repo clone DSAV-Dodeka/dodeka ~/dbdeployments/deploy$DEPLOYID
+         gh repo clone DSAV-Dodeka/secrets ~/dbdeployments/secrets$DEPLOYID
+         cd ~/dbdeployments/secrets$DEPLOYID
          set -a
          . decrypt.sh secretdb.env.gpg $DB_ENV_PASS
          echo $GHCR_TOKEN | docker login ghcr.io -u $ACTOR --password-stdin
-         cd ~/deployments/deploy$DEPLOYID/use/deploydb
+         cd ~/dbdeployments/deploy$DEPLOYID/use/deploydb
          ./deploy.sh move
