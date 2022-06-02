@@ -443,14 +443,14 @@ jobs:
           export SERVER_IMAGE=$(./config_load.sh 'default.server' 'image_name')
           export SERVER_VERSION=$(./config_load.sh 'default.server' 'version')
           echo "SERVER_TAG=$SERVER_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
-          echo "DOCKERFILE=version.Dockerfile >> $GITHUB_ENV
+          echo "DOCKERFILE=version.Dockerfile" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       - name: Set env.SERVER_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
           export SERVER_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
           echo "SERVER_TAG=$SERVER_IMAGE:${{ github.event.release.tag_name }},$SERVER_IMAGE:latest" >> $GITHUB_ENV
-          echo "DOCKERFILE=latest.Dockerfile >> $GITHUB_ENV
+          echo "DOCKERFILE=latest.Dockerfile" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       # Build and push
       - name: Build and push
