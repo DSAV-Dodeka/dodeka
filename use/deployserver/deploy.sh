@@ -20,7 +20,7 @@ set -a
 # -d for detached/background
 docker compose -p "${SERVER_COMPOSE_PROJECT_NAME}" up -d
 
-echo "Waiting 5 seconds before inspecting startup..."
+echo "Waiting 5 seconds before inspecting server startup..."
 sleep 5
 # Check if it is actually running by inspecting container state
 if [ "$( docker container inspect -f '{{.State.Status}}' s-dodeka-server-1 )" = "running" ];

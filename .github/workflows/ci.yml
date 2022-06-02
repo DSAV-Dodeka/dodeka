@@ -418,6 +418,24 @@ jobs:
         run: |
           poetry run python -c "from spawn_server import spawn_build; spawn_build('configged')"
         working-directory: ${{ github.workspace }}/build
+      - name: Cache authpage
+        id: cached-authpage
+        uses: actions/cache@v2
+        with:
+          path: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/src/dodekaserver/resources/static/credentials
+          key: ${{ hashFiles('${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage') }}
+      - uses: actions/setup-node@v2
+        if: steps.cached-authpage.outputs.cache-hit != 'true'
+        with:
+          node-version: '16'
+          cache: 'npm'
+          cache-dependency-path: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage/package-lock.json
+      - name: Build credentials
+        if: steps.cached-authpage.outputs.cache-hit != 'true'
+        run: |
+          npm install
+          npm run build
+        working-directory: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v1
         with:

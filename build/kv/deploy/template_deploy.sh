@@ -34,9 +34,8 @@ echo "requirepass ${REDIS_PASSWORD}" >> ./conf/redis.conf
 # -d for detached/background
 docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
 
-# Remove the conf file so password is not easily visible
-rm -r ./conf
-
+echo "Waiting 1 second before inspecting Redis startup..."
+sleep 1
 # Check if it is actually running by inspecting container state
 if [ "$( docker container inspect -f '{{.State.Status}}' ~spwn@container_name@~ )" == "running" ];
 then
@@ -58,3 +57,6 @@ else
     # Exit code 1 indicates failure
     exit 1
 fi
+
+# Remove the conf file so password is not easily visible
+rm -r ./conf
