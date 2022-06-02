@@ -329,7 +329,7 @@ jobs:
       - name: Cache Docker layers
         uses: actions/cache@v2
         with:
-          path: /tmp/.buildx-cache
+          path: /tmp/.buildxserver-cache
           key: ${{ runner.os }}-buildxserver-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-buildxserver-
