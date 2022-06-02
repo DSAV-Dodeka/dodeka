@@ -422,8 +422,8 @@ jobs:
         id: cached-authpage
         uses: actions/cache@v2
         with:
+          key: authpage-${{ hashFiles('${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage') }}
           path: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/src/dodekaserver/resources/static/credentials
-          key: ${{ hashFiles('${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage') }}
       - uses: actions/setup-node@v2
         if: steps.cached-authpage.outputs.cache-hit != 'true'
         with:
