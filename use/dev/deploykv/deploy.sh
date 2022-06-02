@@ -44,7 +44,10 @@ then
     # Copy deploy to new directory to make it easy to shut down
     # -a preserves file information
     if [ "$1" = "move" ]; then
+        rm -rf ~/active_deploykv
+        touch "deployed$DEPLOYID.txt"
         cp -a "$CUR_DIR" ~/active_deploykv/
+        echo "Deployment moved to ~/active_deploykv"
     fi
 else
     echo "Redis startup failed."

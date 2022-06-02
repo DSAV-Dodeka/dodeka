@@ -14,38 +14,26 @@ CUR_DIR=$(pwd -P)
 # env files are consumed by e.g. docker compose
 set -a
 # Load environment variables from .env.deploy file
-. ./.env.deploy
-
-# -n means string is not null
-if [ -n "$2" ]; then
-  # ignore warning
-  # shellcheck source=/dev/null
-  # load additional env file, i.e. for final dev or deploy such as passwords
-  . "$2"
-fi
-
-# Create the directory that will serve as the source for the container volume
-# -p ensures parent directories are created and there is no error if it already exists
-mkdir -p "${DB_RESOURCES_SOURCE}"
+. ./deploy.env
 
 # Run the docker-compose.yml
 # -d for detached/background
-docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
+docker compose -p "${SERVER_COMPOSE_PROJECT_NAME}" up -d
 
+echo "Waiting 5 seconds before inspecting startup..."
+sleep 5
 # Check if it is actually running by inspecting container state
 if [ "$( docker container inspect -f '{{.State.Status}}' ~spwn@container_name@~ )" = "running" ];
 then
-    echo "PostgreSQL startup successful."
-    # Copy deploy to new directory to make it easy to shut down
-    # -a preserves file information
+    echo "Backend startup successful."
     if [ "$1" = "move" ]; then
-        rm -rf ~/active_deploydb
+        rm -rf ~/active_deployserver
         touch "deployed$DEPLOYID.txt"
-        cp -a "$CUR_DIR" ~/active_deploydb/
-        echo "Deployment moved to ~/active_deploydb"
+        cp -a "$CUR_DIR" ~/active_deployserver/
+        echo "Deployment moved to ~/active_deployserver"
     fi
 else
-    echo "PostgreSQL startup failed."
+    echo "Backend startup failed."
     # If fail, check logs
     docker container logs ~spwn@container_name@~
     # Shut down and remove

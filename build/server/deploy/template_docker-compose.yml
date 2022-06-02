@@ -1,0 +1,24 @@
+services:
+  # Service name, container name will be <project name>-<service name>-1 by default
+  ~spwn@service_name@~:
+    # Docker image that it will set up
+    image: "${SERVER_APP_IMAGE}:${SERVER_VERSION}"
+    # Environment file to load into the container
+    env_file:
+      - deploy.env
+    # Some environment variables depend on deployment variables, so we load those in manually
+    environment:
+      - DB_PASS=${POSTGRES_PASSWORD}
+      - KV_PASS=${REDIS_PASSWORD}
+      - MAIL_PASS=${COMCOM_MAIL_PASS}
+    # This maps ports, so the container port will be available at localhost:<HOST_PORT>
+    ports:
+      - "${SERVER_HOST_HOST}:${SERVER_HOST_PORT}:${SERVER_CONTAINER_PORT}"
+    # Shared memory size, defaults to 64m which can cause problems (apparently)
+    shm_size: 256m
+networks:
+  # Set up a network so that other containers on this network can access each other
+  # A different container on this network can access this container by using the container name as the hostname
+  # So localhost:3000 is exposed to other containers as <container name>:3000
+  default:
+    name: ${NETWORK_NAME}
