@@ -22,12 +22,12 @@ jobs:
         with:
           python-version: '3.9'
           # Cache means install is saved in repo cache
-          # Increment poetry-0 if new install is necessary
+          # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-0
+          key: poetry-1
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -74,12 +74,12 @@ jobs:
       with:
         python-version: '3.9'
     # Cache means install is saved in repo cache
-    # Increment poetry-0 if new install is necessary
+    # Increment poetry-1 if new install is necessary
     - name: Load cached Poetry installation
       uses: actions/cache@v2
       with:
         path: ~/.local 
-        key: poetry-0 
+        key: poetry-1 
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
@@ -186,12 +186,12 @@ jobs:
         with:
           python-version: '3.9'
       # Cache means install is saved in repo cache
-      # Increment poetry-0 if new install is necessary
+      # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-0
+          key: poetry-1
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -277,7 +277,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/checkout@v2
         with:
-          repository: 'DSAV-Dodeka/dodekabackend'
+          repository: 'DSAV-Dodeka/backend'
           token: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
           # Relative to ${{ github.workspace }}
           path: ${{ env.SERVER_REPO_PATH }}
@@ -286,12 +286,12 @@ jobs:
         with:
           python-version: '3.9'
       # Cache means install is saved in repo cache
-      # Increment poetry-0 if new install is necessary
+      # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-0
+          key: poetry-1
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
