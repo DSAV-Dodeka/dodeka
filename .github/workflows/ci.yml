@@ -340,13 +340,13 @@ jobs:
         run: |
           export DEPS_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
           export SERVER_VERSION=$(./config_load.sh 'default.server' 'version')
-          echo "DEPS_TAG=DEPS_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
+          echo "DEPS_TAG=$DEPS_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       - name: Set env.SERVER_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
           export DEPS_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
-          echo "DEPS_TAG=DEPS_IMAGE:${{ github.event.release.tag_name }},DEPS_IMAGE:latest" >> $GITHUB_ENV
+          echo "DEPS_TAG=$DEPS_IMAGE:${{ github.event.release.tag_name }},$DEPS_IMAGE:latest" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       # Build and push
       - name: Build and push
