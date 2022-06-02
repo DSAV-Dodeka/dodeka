@@ -2,7 +2,7 @@ from confspawn.spawn import spawn_write
 
 
 def spawn_build(build_target='configged'):
-    print("Building build configuration...")
+    print("Building DB build configuration...")
     spawn_write('./config.toml', './db', target_dir=build_target, source_env='default.db')
 
 
