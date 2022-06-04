@@ -42,7 +42,7 @@ then
         rm -rf ~/active_deploydb
         touch "deployed$DEPLOYID.txt"
         cp -a "$CUR_DIR" ~/active_deploydb/
-        echo "Deployment moved to ~/active_deploy"
+        echo "Deployment moved to ~/active_deploydb"
     fi
 else
     echo "PostgreSQL startup failed."

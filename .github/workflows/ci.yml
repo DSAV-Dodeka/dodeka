@@ -10,6 +10,7 @@ on:
 jobs:
   config-deploy:
     runs-on: ubuntu-latest
+    if: ${{ false }}
 
     steps:
       - uses: actions/checkout@v2
@@ -21,12 +22,12 @@ jobs:
         with:
           python-version: '3.9'
           # Cache means install is saved in repo cache
-          # Increment poetry-0 if new install is necessary
+          # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-0
+          key: poetry-1
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -54,7 +55,7 @@ jobs:
           poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
           poetry run python -c "from spawn_kv import spawn_deploy; spawn_deploy()"
           poetry run python -c "from spawn_dev import spawn_dev; spawn_dev()"
-          poetry run python -c "from spawn_back import spawn_backend; spawn_backend()"
+          poetry run python -c "from spawn_server import spawn_server; spawn_server()"
           poetry run python -c "from spawn_sync import spawn_test_sync; spawn_test_sync()"
         working-directory: ${{ github.workspace }}/build
       - uses: stefanzweifel/git-auto-commit-action@v4
@@ -65,6 +66,7 @@ jobs:
 
   build-kv:
     runs-on: ubuntu-latest
+    if: ${{ false }}
     
     steps:
     - uses: actions/checkout@v2
@@ -73,12 +75,12 @@ jobs:
       with:
         python-version: '3.9'
     # Cache means install is saved in repo cache
-    # Increment poetry-0 if new install is necessary
+    # Increment poetry-1 if new install is necessary
     - name: Load cached Poetry installation
       uses: actions/cache@v2
       with:
         path: ~/.local 
-        key: poetry-0 
+        key: poetry-1 
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
@@ -177,6 +179,7 @@ jobs:
 
   build-db:
     runs-on: ubuntu-latest
+    if: ${{ false }}
 
     steps:
       - uses: actions/checkout@v2
@@ -185,12 +188,12 @@ jobs:
         with:
           python-version: '3.9'
       # Cache means install is saved in repo cache
-      # Increment poetry-0 if new install is necessary
+      # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-0
+          key: poetry-1
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -265,3 +268,223 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  build-server-deps:
+    runs-on: ubuntu-latest
+    if: ${{ false }}
+    env:
+      # The place the configuration repo will be placed at temporarily
+      SERVER_REPO_PATH: 'dodekabackend'
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
+        with:
+          repository: 'DSAV-Dodeka/backend'
+          ref: 'main'
+          token: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
+          # Relative to ${{ github.workspace }}
+          path: ${{ env.SERVER_REPO_PATH }}
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      # Cache means install is saved in repo cache
+      # Increment poetry-1 if new install is necessary
+      - name: Load cached Poetry installation
+        uses: actions/cache@v2
+        with:
+          path: ~/.local
+          key: poetry-1
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          # .venv is created in project
+          virtualenvs-in-project: true
+          installer-parallel: true
+      # Load .venv directly from cache
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v2
+        with:
+          path: .venv
+          # Key only changes if poetry.lock changes
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+      - name: Install library
+        run: poetry install --no-interaction
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          # We use the repo/action token, which has specified access to the package
+          username: ${{ github.actor}}
+          password: ${{ github.token }}
+      # Set up buildx for later build-push-action
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      # Get cached Docker layers to save build time
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildxdeps-cache
+          key: ${{ runner.os }}-buildxdeps-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildxdeps-
+      # Set env from config.toml
+      - name: Set env.DEPS_TAG
+        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
+        run: |
+          export DEPS_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
+          export SERVER_VERSION=$(./config_load.sh 'default.server' 'version')
+          echo "DEPS_TAG=$DEPS_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
+        working-directory: ${{ github.workspace }}/build
+      - name: Set env.DEPS_TAG if release
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+        run: |
+          export DEPS_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
+          echo "DEPS_TAG=$DEPS_IMAGE:${{ github.event.release.tag_name }},$DEPS_IMAGE:latest" >> $GITHUB_ENV
+        working-directory: ${{ github.workspace }}/build
+      # Build and push
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}
+          file: ${{ github.workspace }}/build/server/server-deps.Dockerfile
+          # Dockerfile tag
+          tags: ${{ env.DEPS_TAG }}
+          cache-from: type=local,src=/tmp/.buildxdeps-cache
+          cache-to: type=local,dest=/tmp/.buildxdeps-cache-new,mode=max
+          push: ${{ github.event_name != 'pull_request' }}
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildxdeps-cache
+          mv /tmp/.buildxdeps-cache-new /tmp/.buildxdeps-cache
+
+  build-server:
+    # needs: build-server-deps
+    runs-on: ubuntu-latest
+    env:
+      # The place the configuration repo will be placed at temporarily
+      SERVER_REPO_PATH: 'dodekabackend'
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
+        with:
+          repository: 'DSAV-Dodeka/backend'
+          ref: 'main'
+          token: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
+          # Relative to ${{ github.workspace }}
+          path: ${{ env.SERVER_REPO_PATH }}
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      # Cache means install is saved in repo cache
+      # Increment poetry-1 if new install is necessary
+      - name: Load cached Poetry installation
+        uses: actions/cache@v2
+        with:
+          path: ~/.local
+          key: poetry-1
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          # .venv is created in project
+          virtualenvs-in-project: true
+          installer-parallel: true
+      # Load .venv directly from cache
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v2
+        with:
+          path: .venv
+          # Key only changes if poetry.lock changes
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+      - name: Install library
+        run: poetry install --no-interaction
+      - name: Build config with correct version
+        run: |
+          poetry run python -c "from spawn_server import spawn_build; spawn_build('configged')"
+        working-directory: ${{ github.workspace }}/build
+      - name: Cache authpage
+        id: cached-authpage
+        uses: actions/cache@v2
+        with:
+          key: authpage-${{ hashFiles('${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage') }}
+          path: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/src/dodekaserver/resources/static/credentials
+      - uses: actions/setup-node@v2
+        if: steps.cached-authpage.outputs.cache-hit != 'true'
+        with:
+          node-version: '16'
+          cache: 'npm'
+          cache-dependency-path: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage/package-lock.json
+      - name: Build credentials
+        if: steps.cached-authpage.outputs.cache-hit != 'true'
+        run: |
+          npm install
+          npm run build
+        working-directory: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          # We use the repo/action token, which has specified access to the package
+          username: ${{ github.actor}}
+          password: ${{ github.token }}
+      # Set up buildx for later build-push-action
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      # Get cached Docker layers to save build time
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildxserver-cache
+          key: ${{ runner.os }}-buildxserver-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildxserver-
+      # Set env from config.toml
+      - name: Set env.SERVER_TAG
+        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
+        run: |
+          export SERVER_IMAGE=$(./config_load.sh 'default.server' 'image_name')
+          export SERVER_VERSION=$(./config_load.sh 'default.server' 'version')
+          echo "SERVER_TAG=$SERVER_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
+          echo "DOCKERFILE=version.Dockerfile" >> $GITHUB_ENV
+        working-directory: ${{ github.workspace }}/build
+      - name: Set env.SERVER_TAG if release
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+        run: |
+          export SERVER_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
+          echo "SERVER_TAG=$SERVER_IMAGE:${{ github.event.release.tag_name }},$SERVER_IMAGE:latest" >> $GITHUB_ENV
+          echo "DOCKERFILE=latest.Dockerfile" >> $GITHUB_ENV
+        working-directory: ${{ github.workspace }}/build
+      # Build and push
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}
+          file: ${{ github.workspace }}/build/server/configged/${{ env.DOCKERFILE }}
+          # Dockerfile tag
+          tags: ${{ env.SERVER_TAG }}
+          cache-from: type=local,src=/tmp/.buildxserver-cache
+          cache-to: type=local,dest=/tmp/.buildxserver-cache-new,mode=max
+          push: ${{ github.event_name != 'pull_request' }}
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildxserver-cache
+          mv /tmp/.buildxserver-cache-new /tmp/.buildxserver-cache 

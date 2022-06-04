@@ -1,4 +1,4 @@
-name: Deploy DB
+name: Deploy server
 
 on: workflow_dispatch
 
@@ -7,7 +7,7 @@ jobs:
    runs-on: ubuntu-latest
 
    env:
-     SECRETS_PASSPHRASE: ${{ secrets.SECRETS_PASSPHRASE }}
+     DB_ENV_PASS: ${{ secrets.SECRETS_PASSPHRASE }}
      GHCR_TOKEN: ${{ github.token }}
      ACTOR: ${{ github.actor }}
 
@@ -26,12 +26,14 @@ jobs:
        # This requires poetry, docker, gpg, bash to be installed on remote
        # Also requires GH CLI logged in with an account with repo read access
        script: |
-         export DEPLOYID="$(date +%s)"
-         gh repo clone DSAV-Dodeka/dodeka ~/dbdeployments/deploy$DEPLOYID
-         gh repo clone DSAV-Dodeka/secrets ~/dbdeployments/secrets$DEPLOYID
-         cd ~/dbdeployments/secrets$DEPLOYID
-         set -a
-         . decrypt.sh secretdb.env.gpg $SECRETS_PASSPHRASE || exit 1
          echo $GHCR_TOKEN | docker login ghcr.io -u $ACTOR --password-stdin
-         cd ~/dbdeployments/deploy$DEPLOYID/use/deploydb
-         ./deploy.sh move
+         export DEPLOYID="$(date +%s)"
+         gh repo clone DSAV-Dodeka/dodeka ~/serverdeployments/deploy$DEPLOYID
+         gh repo clone DSAV-Dodeka/secrets ~/serverdeployments/secrets$DEPLOYID
+         cd ~/serverdeployments/secrets$DEPLOYID
+         set -a
+         . decrypt.sh secretdb.env.gpg $SECRETS_PASSPHRASE
+         . decrypt.sh secretserver.env.gpg $SECRETS_PASSPHRASE
+         cd ~/serverdeployments/deploy$DEPLOYID/use
+         ./deploykv/deploy.sh move
+         ./deployserver/deploy.sh move
