@@ -14,7 +14,7 @@ CUR_DIR=$(pwd -P)
 # env files are consumed by e.g. docker compose
 set -a
 # Load environment variables from .env.deploy file
-. ./.env.deploy
+. ./deploy.env
 
 # -n means string is not null
 if [ -n "$2" ]; then
