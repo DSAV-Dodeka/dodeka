@@ -7,7 +7,7 @@ cd "${0%/*}" || exit
 # This ensures all env variables are exported so env variables used in .env.db (like $HOME) are properly expanded when the
 # env files are consumed by e.g. docker compose
 set -a
-# Load environment variables from .env.deploy file
+# Load environment variables from deploy.env file
 . .env.deploy
 
 # -v ensures volumes are removed (but files are persisted)
