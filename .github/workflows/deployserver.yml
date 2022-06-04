@@ -7,7 +7,7 @@ jobs:
    runs-on: ubuntu-latest
 
    env:
-     DB_ENV_PASS: ${{ secrets.SECRETS_PASSPHRASE }}
+     SECRETS_PASSPHRASE: ${{ secrets.SECRETS_PASSPHRASE }}
      GHCR_TOKEN: ${{ github.token }}
      ACTOR: ${{ github.actor }}
 

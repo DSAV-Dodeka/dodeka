@@ -9,11 +9,11 @@
 cd "${0%/*}" || exit
 # pwd is print working directory, -P ensures any links/shortcuts are resolved
 CUR_DIR=$(pwd -P)
-# This ensures all env variables are exported so env variables used in .env.deploy (like $HOME) are
+# This ensures all env variables are exported so env variables used in deploy.env (like $HOME) are
 # properly expanded
 # env files are consumed by e.g. docker compose
 set -a
-# Load environment variables from .env.deploy file
+# Load environment variables from deploy.env file
 . ./deploy.env
 
 # -n means string is not null
@@ -26,7 +26,7 @@ fi
 
 # Run the docker-compose.yml
 # -d for detached/background
-docker compose -p "${SERVER_COMPOSE_PROJECT_NAME}" up -d
+docker compose pull && docker compose -p "${SERVER_COMPOSE_PROJECT_NAME}" up -d
 
 echo "Waiting 5 seconds before inspecting server startup..."
 sleep 5

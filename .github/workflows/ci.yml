@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ ci ]
   pull_request:
   release:
     types: [ published ]
@@ -413,6 +413,7 @@ jobs:
       - name: Build config with correct version
         run: |
           poetry run python -c "from spawn_server import spawn_build; spawn_build('configged')"
+          mv ${{ github.workspace }}/build/server/configged/entrypoint.sh ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/entrypoint.sh
         working-directory: ${{ github.workspace }}/build
       - name: Cache authpage
         id: cached-authpage

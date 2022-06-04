@@ -11,7 +11,7 @@ services:
     command: -c config_file=${DB_CONF_FILE}
     # Environment file to load into the container
     env_file:
-      - .env.deploy
+      - deploy.env
     # Some environment variables depend on deployment variables, so we load those in manually
     environment:
       - PGDATA=${DB_RESOURCES_TARGET}
