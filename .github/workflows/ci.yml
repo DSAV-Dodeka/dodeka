@@ -10,7 +10,6 @@ on:
 jobs:
   config-deploy:
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
       - uses: actions/checkout@v2
@@ -27,7 +26,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-1
+          key: poetry-2
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -66,7 +65,6 @@ jobs:
 
   build-kv:
     runs-on: ubuntu-latest
-    if: ${{ false }}
     
     steps:
     - uses: actions/checkout@v2
@@ -80,7 +78,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: ~/.local 
-        key: poetry-1 
+        key: poetry-2
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
@@ -179,7 +177,6 @@ jobs:
 
   build-db:
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
       - uses: actions/checkout@v2
@@ -193,7 +190,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-1
+          key: poetry-2
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -271,7 +268,6 @@ jobs:
 
   build-server-deps:
     runs-on: ubuntu-latest
-    if: ${{ false }}
     env:
       # The place the configuration repo will be placed at temporarily
       SERVER_REPO_PATH: 'dodekabackend'
@@ -295,7 +291,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-1
+          key: poetry-2
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -368,7 +364,7 @@ jobs:
           mv /tmp/.buildxdeps-cache-new /tmp/.buildxdeps-cache
 
   build-server:
-    # needs: build-server-deps
+    needs: build-server-deps
     runs-on: ubuntu-latest
     env:
       # The place the configuration repo will be placed at temporarily
@@ -393,7 +389,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.local
-          key: poetry-1
+          key: poetry-2
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -466,7 +462,7 @@ jobs:
       - name: Set env.SERVER_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
-          export SERVER_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
+          export SERVER_IMAGE=$(./config_load.sh 'default.server' 'image_name')
           echo "SERVER_TAG=$SERVER_IMAGE:${{ github.event.release.tag_name }},$SERVER_IMAGE:latest" >> $GITHUB_ENV
           echo "DOCKERFILE=latest.Dockerfile" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build

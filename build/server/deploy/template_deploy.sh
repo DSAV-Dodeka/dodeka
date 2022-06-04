@@ -16,6 +16,14 @@ set -a
 # Load environment variables from .env.deploy file
 . ./deploy.env
 
+# -n means string is not null
+if [ -n "$2" ]; then
+  # ignore warning
+  # shellcheck source=/dev/null
+  # load additional env file, i.e. for final dev or deploy such as passwords
+  . "$2"
+fi
+
 # Run the docker-compose.yml
 # -d for detached/background
 docker compose -p "${SERVER_COMPOSE_PROJECT_NAME}" up -d
