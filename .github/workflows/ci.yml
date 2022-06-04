@@ -364,7 +364,7 @@ jobs:
           mv /tmp/.buildxdeps-cache-new /tmp/.buildxdeps-cache
 
   build-server:
-    # needs: build-server-deps
+    needs: build-server-deps
     runs-on: ubuntu-latest
     env:
       # The place the configuration repo will be placed at temporarily
