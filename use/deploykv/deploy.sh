@@ -26,7 +26,7 @@ fi
 
 # Moves the configuration file in temporarily with password
 # Password must be an env variable set externally
-mkdir ./conf
+mkdir -p ./conf
 cp ./redis_nopass.conf ./conf/redis.conf
 echo "requirepass ${REDIS_PASSWORD}" >> ./conf/redis.conf
 
