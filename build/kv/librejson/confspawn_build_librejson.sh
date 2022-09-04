@@ -2,7 +2,7 @@
 # Exit when a command fails
 set -e
 # Download release archive
-gh release --repo RedisJSON/RedisJSON download ~spwn@redisjson_version@~ --archive tar.gz --dir kv/librejson
+gh release --repo RedisJSON/RedisJSON download {{ kv.redisjson_version }} --archive tar.gz --dir kv/librejson
 tar -xf kv/librejson/*RedisJSON*.tar.gz -C kv/librejson
 # Remove archive so only dir will be copied
 rm kv/librejson/*RedisJSON*.tar.gz

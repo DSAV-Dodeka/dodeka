@@ -68,7 +68,7 @@ poetry run psqlsync --config data/test.toml --action backup
 ### Scripts
 
 
-Building the deploy scripts is easy, look for the `build_*.sh` files inside `/build` and run the `poetry` commands inside them _from within the `/build` directory_.
+Building the deployment scripts is easy, look for the `build_*.sh` files inside `/build` and run the `poetry` commands inside them _from within the `/build` directory_.
 
 ```shell
 poetry run python -c "from spawn_db import spawn_deploy; spawn_deploy()"
