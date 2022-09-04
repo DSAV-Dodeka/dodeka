@@ -37,7 +37,7 @@ docker compose pull && docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
 echo "Waiting 1 second before inspecting Redis startup..."
 sleep 1
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{.State.Status}}' ~spwn@container_name@~ )" == "running" ];
+if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' ~spwn@container_name@~ )" == "running" ];
 then
     echo "Redis startup successful."
     # Copy deploy to new directory to make it easy to shut down

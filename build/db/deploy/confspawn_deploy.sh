@@ -33,7 +33,7 @@ mkdir -p "${DB_RESOURCES_SOURCE}"
 docker compose pull && docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
 
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{.State.Status}}' {{ db.container_name }} )" = "running" ];
+if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ db.container_name }} )" = "running" ];
 then
     echo "PostgreSQL startup successful."
     # Copy deploy to new directory to make it easy to shut down

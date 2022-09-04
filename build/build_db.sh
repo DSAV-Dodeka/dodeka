@@ -6,4 +6,4 @@ poetry run confspawn -c config.toml -s ./db -t ./db/configged
 # metaconfig
 # db/configged should correspond to the directory of the built config
 # docker build --tag 'ghcr.io/dsav-dodeka/postgres' db/configged
-poetry run confspawn -c config.toml -s ./db/deploy -t ../use/deploy
+poetry run confspawn -c config.toml -s ./db/deploy -t ../use/deploydb

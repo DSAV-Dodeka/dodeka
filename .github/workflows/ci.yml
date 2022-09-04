@@ -50,8 +50,8 @@ jobs:
       # Build config using tiptenbrink/confspawn
       - name: Config
         run: |
-          poetry run python -c "from spawn_db import spawn_deploy; spawn_deploy()"
-          poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
+          poetry run confspawn -c config.toml -s ./db/deploy -t ../use/deploydb
+          poetry run confspawn -c config.toml -s ./db -t ./db/configged
           poetry run python -c "from spawn_kv import spawn_deploy; spawn_deploy()"
           poetry run python -c "from spawn_dev import spawn_dev; spawn_dev()"
           poetry run python -c "from spawn_server import spawn_server; spawn_server()"
