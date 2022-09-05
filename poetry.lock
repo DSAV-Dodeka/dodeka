@@ -58,7 +58,7 @@ pycparser = "*"
 
 [[package]]
 name = "confspawn"
-version = "0.2.3"
+version = "0.2.4"
 description = "Easily build configuration files from templates."
 category = "main"
 optional = false
@@ -272,7 +272,7 @@ sortedcontainers = "*"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "c82c0622fc477568709f7d6b8b79b4464753ee02ab1c85a4f4ad605ccb1ce0d2"
+content-hash = "77dbbb305c276b30c29a209e43a6bd447b149ca295cc7df89a48f4707ed96d2f"
 
 [metadata.files]
 anyio = [
@@ -358,8 +358,8 @@ cffi = [
     {file = "cffi-1.15.1.tar.gz", hash = "sha256:d400bfb9a37b1351253cb402671cea7e89bdecc294e8016a707f6d1d8ac934f9"},
 ]
 confspawn = [
-    {file = "confspawn-0.2.3-py3-none-any.whl", hash = "sha256:44e2d12a1c80e6e87a6274939ffa2819a1f2cd11bc8e6ffc4ba57b592444c473"},
-    {file = "confspawn-0.2.3.tar.gz", hash = "sha256:ccc6b76e3fed8177c859c66eae47a956d10171f97c40bd0b78d4d6dd6940e426"},
+    {file = "confspawn-0.2.4-py3-none-any.whl", hash = "sha256:3322f056c2ee33263b341d62db8dd3210ac9ba427c0c491cff9aa7edc2e1e401"},
+    {file = "confspawn-0.2.4.tar.gz", hash = "sha256:320e015ac3e62fd4e0c3bae2f5d07512721cf02f68a9857da09b4f5c31131734"},
 ]
 dirgh = []
 h11 = [

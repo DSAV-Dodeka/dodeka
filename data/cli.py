@@ -11,5 +11,4 @@ def run():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.info("Starting Dodeka test database update")
-    remote_run("DSAV-Dodeka", "backend", "test_dumps", "dodeka", "data/test.toml", "data/backups/download",
-               verbose=False)
+    remote_run("DSAV-Dodeka", "backend", "test_dumps", "dodeka", "data/test.toml", "data/backups/list", verbose=False)

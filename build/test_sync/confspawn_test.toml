@@ -1,0 +1,12 @@
+[setup]
+storage_engine= "LOCAL"
+
+[local_storage]
+path = "./data/backups/"
+
+[postgresql]
+host = "{{ db.host_host }}"
+port = "{{ db.host_port }}"
+db = "{{ db.db_name }}"
+user = "{{ db.db_user }}"
+password = "{{ dev.db_password }}"

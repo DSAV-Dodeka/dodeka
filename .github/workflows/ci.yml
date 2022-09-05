@@ -19,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.10'
           # Cache means install is saved in repo cache
           # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
@@ -52,10 +52,12 @@ jobs:
         run: |
           poetry run confspawn -c config.toml -s ./db/deploy -t ../use/deploydb
           poetry run confspawn -c config.toml -s ./db -t ./db/configged
-          poetry run python -c "from spawn_kv import spawn_deploy; spawn_deploy()"
-          poetry run python -c "from spawn_dev import spawn_dev; spawn_dev()"
-          poetry run python -c "from spawn_server import spawn_server; spawn_server()"
-          poetry run python -c "from spawn_sync import spawn_test_sync; spawn_test_sync()"
+          poetry run confspawn -c config.toml -s ./kv/deploy -t ../use/deploykv
+          poetry run confspawn -c config.toml -s ./dev -t ../use/dev
+          poetry run confspawn -c config.toml -s ./db/deploy -t ../use/dev/deploydb
+          poetry run confspawn -c config.toml -s ./kv/deploy -t ../use/dev/deploykv
+          poetry run confspawn -c config.toml -s ./server/deploy -t ../use/deployserver
+          poetry run confspawn -c config.toml -s ./test_sync -t ../data -r
         working-directory: ${{ github.workspace }}/build
       - uses: stefanzweifel/git-auto-commit-action@v4
         if: github.event_name != 'pull_request'
@@ -71,7 +73,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v2
       with:
-        python-version: '3.9'
+        python-version: '3.10'
     # Cache means install is saved in repo cache
     # Increment poetry-1 if new install is necessary
     - name: Load cached Poetry installation
@@ -102,12 +104,12 @@ jobs:
     # Build config using tiptenbrink/confspawn
     - name: Config
       run: |
-        poetry run python -c "from spawn_kv import spawn_librejson; spawn_librejson('configged')"
+        poetry run confspawn -c config.toml -s ./kv/librejson -t ./kv/librejson/configged
       working-directory: ${{ github.workspace }}/build
     # Set env from config.toml
     - name: Set env.REJSON_VERSION
       run: |
-        export REJSON_VERSION=$(./config_load.sh 'default.kv' 'redisjson_version')
+        export REJSON_VERSION=$(poetry run confenv -c config.toml -v kv.redisjson_version)
         echo "REJSON_VERSION=$REJSON_VERSION" >> $GITHUB_ENV
       working-directory: ${{ github.workspace }}/build
     # If librejson was previously built and stored in cache, use it
@@ -147,14 +149,14 @@ jobs:
     - name: Set env.KV_TAG
       if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
       run: |
-        export KV_IMAGE=$(./config_load.sh 'default.kv' 'image_name')
-        export KV_VERSION=$(./config_load.sh 'default.kv' 'version')
+        export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
+        export KV_VERSION=$(poetry run confenv -c config.toml -v kv.version)
         echo "KV_TAG=$KV_IMAGE:$KV_VERSION" >> $GITHUB_ENV
       working-directory: ${{ github.workspace }}/build
     - name: Set env.KV_TAG if release
       if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
       run: |
-        export KV_IMAGE=$(./config_load.sh 'default.kv' 'image_name')
+        export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
         echo "KV_TAG=$KV_IMAGE:${{ github.event.release.tag_name }},$KV_IMAGE:latest" >> $GITHUB_ENV
       working-directory: ${{ github.workspace }}/build
     # Build and push
@@ -183,7 +185,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.10'
       # Cache means install is saved in repo cache
       # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
@@ -214,7 +216,7 @@ jobs:
       # Build config using tiptenbrink/confspawn
       - name: Config
         run: |
-          poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
+          poetry run confspawn -c config.toml -s ./db -t ./db/configged
         working-directory: ${{ github.workspace }}/build
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v1
@@ -238,14 +240,14 @@ jobs:
       - name: Set env.DB_TAG
         if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
         run: |
-          export DB_IMAGE=$(./config_load.sh 'default.db' 'image_name')
-          export DB_VERSION=$(./config_load.sh 'default.db' 'version')
+          export DB_IMAGE=$(poetry run confenv -c config.toml -v db.image_name)
+          export DB_VERSION=$(poetry run confenv -c config.toml -v db.version)
           echo "DB_TAG=$DB_IMAGE:$DB_VERSION" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       - name: Set env.DB_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
-          export DB_IMAGE=$(./config_load.sh 'default.db' 'image_name')
+          export DB_IMAGE=$(poetry run confenv -c config.toml -v db.image_name)
           echo "DB_TAG=$DB_IMAGE:${{ github.event.release.tag_name }},$DB_IMAGE:latest" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       # Build and push
@@ -284,7 +286,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.10'
       # Cache means install is saved in repo cache
       # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
@@ -334,14 +336,14 @@ jobs:
       - name: Set env.DEPS_TAG
         if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
         run: |
-          export DEPS_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
-          export SERVER_VERSION=$(./config_load.sh 'default.server' 'version')
+          export DEPS_IMAGE=$(poetry run confenv -c config.toml -v server.deps_image_name)
+          export SERVER_VERSION=$(poetry run confenv -c config.toml -v server.version)
           echo "DEPS_TAG=$DEPS_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       - name: Set env.DEPS_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
-          export DEPS_IMAGE=$(./config_load.sh 'default.server' 'deps_image_name')
+          export DEPS_IMAGE=$(poetry run confenv -c config.toml -v server.deps_image_name)
           echo "DEPS_TAG=$DEPS_IMAGE:${{ github.event.release.tag_name }},$DEPS_IMAGE:latest" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       # Build and push
@@ -382,7 +384,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.10'
       # Cache means install is saved in repo cache
       # Increment poetry-1 if new install is necessary
       - name: Load cached Poetry installation
@@ -412,7 +414,7 @@ jobs:
         run: poetry install --no-interaction
       - name: Build config with correct version
         run: |
-          poetry run python -c "from spawn_server import spawn_build; spawn_build('configged')"
+          poetry run confspawn -c config.toml -s ./server/deploy -t ./server/configged
           mv ${{ github.workspace }}/build/server/configged/entrypoint.sh ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/entrypoint.sh
         working-directory: ${{ github.workspace }}/build
       - name: Cache authpage
@@ -455,15 +457,15 @@ jobs:
       - name: Set env.SERVER_TAG
         if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
         run: |
-          export SERVER_IMAGE=$(./config_load.sh 'default.server' 'image_name')
-          export SERVER_VERSION=$(./config_load.sh 'default.server' 'version')
+          export SERVER_IMAGE=$(poetry run confenv -c config.toml -v server.image_name)
+          export SERVER_VERSION=$(poetry run confenv -c config.toml -v server.version)
           echo "SERVER_TAG=$SERVER_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
           echo "DOCKERFILE=version.Dockerfile" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build
       - name: Set env.SERVER_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
-          export SERVER_IMAGE=$(./config_load.sh 'default.server' 'image_name')
+          export SERVER_IMAGE=$(poetry run confenv -c config.toml -v server.image_name)
           echo "SERVER_TAG=$SERVER_IMAGE:${{ github.event.release.tag_name }},$SERVER_IMAGE:latest" >> $GITHUB_ENV
           echo "DOCKERFILE=latest.Dockerfile" >> $GITHUB_ENV
         working-directory: ${{ github.workspace }}/build

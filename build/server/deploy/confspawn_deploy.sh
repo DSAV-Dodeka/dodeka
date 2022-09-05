@@ -24,39 +24,28 @@ if [ -n "$2" ]; then
   . "$2"
 fi
 
-# Moves the configuration file in temporarily with password
-# Password must be an env variable set externally
-mkdir -p ./conf
-cp ./redis_nopass.conf ./conf/redis.conf
-echo "requirepass ${REDIS_PASSWORD}" >> ./conf/redis.conf
-
 # Run the docker-compose.yml
 # -d for detached/background
-docker compose pull && docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
+docker compose pull && docker compose -p "${SERVER_COMPOSE_PROJECT_NAME}" up -d
 
-echo "Waiting 1 second before inspecting Redis startup..."
-sleep 1
+echo "Waiting 5 seconds before inspecting server startup..."
+sleep 5
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' ~spwn@container_name@~ )" == "running" ];
+if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ server.container_name }} )" = "running" ];
 then
-    echo "Redis startup successful."
-    # Copy deploy to new directory to make it easy to shut down
-    # -a preserves file information
+    echo "Backend startup successful."
     if [ "$1" = "move" ]; then
-        rm -rf ~/active_deploykv
+        rm -rf ~/active_deployserver
         touch "deployed$DEPLOYID.txt"
-        cp -a "$CUR_DIR" ~/active_deploykv/
-        echo "Deployment moved to ~/active_deploykv"
+        cp -a "$CUR_DIR" ~/active_deployserver/
+        echo "Deployment moved to ~/active_deployserver"
     fi
 else
-    echo "Redis startup failed."
+    echo "Backend startup failed."
     # If fail, check logs
-    docker container logs ~spwn@container_name@~
+    docker container logs {{ server.container_name }}
     # Shut down and remove
     ./down.sh
     # Exit code 1 indicates failure
     exit 1
 fi
-
-# Remove the conf file so password is not easily visible
-rm -r ./conf
