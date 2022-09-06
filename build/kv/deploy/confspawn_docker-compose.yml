@@ -1,5 +1,5 @@
 services:
-  ~spwn@service_name@~:
+  {{ kv.service_name }}:
     image: "${KV_IMAGE}:${KV_VERSION}"
     ports:
       - "${KV_HOST_HOST}:${KV_HOST_PORT}:${KV_CONTAINER_PORT}"

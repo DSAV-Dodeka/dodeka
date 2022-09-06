@@ -5,8 +5,8 @@ description = ""
 authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.9"
-confspawn = { git = "https://github.com/tiptenbrink/confspawn.git", branch = "main"}
+python = "^3.10"
+confspawn = "^0.2.5"
 psqlsync = { git = "https://github.com/tiptenbrink/psqlsync.git", branch = "main", extras = ["dirgh"] }
 
 [build-system]

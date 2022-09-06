@@ -37,7 +37,8 @@ docker compose pull && docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
 echo "Waiting 1 second before inspecting Redis startup..."
 sleep 1
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{.State.Status}}' ~spwn@container_name@~ )" == "running" ];
+# {{ '{{' }} is for jinja2 escaping
+if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ kv.container_name }} )" == "running" ];
 then
     echo "Redis startup successful."
     # Copy deploy to new directory to make it easy to shut down
@@ -51,7 +52,7 @@ then
 else
     echo "Redis startup failed."
     # If fail, check logs
-    docker container logs ~spwn@container_name@~
+    docker container logs {{ kv.container_name }}
     # Shut down and remove
     ./down.sh
     # Exit code 1 indicates failure

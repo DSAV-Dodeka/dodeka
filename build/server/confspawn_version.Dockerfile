@@ -1,5 +1,5 @@
 # confspawn is only run during actual deployment to account for different image version
-FROM ~spwn@deps_image_name@~:latest AS install
+FROM {{ server.deps_image_name }}:{{ server.version }} AS install
 COPY ./src ./src
 RUN poetry install
 

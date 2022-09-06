@@ -3,4 +3,4 @@
 # It creates the users necessary for Barman (backup manager)
 # Barman only needs to be superuser for the initialization of the backup process, afterwards it does not have to be
 # This connects to the Postgres DB and sets an SQL variable (barmanpwd) and then executes an SQL script
-psql -U "${POSTGRES_USER}" --set "barmanpwd=${BARMAN_PASSWORD}" -c '\i ~spwn@init_dir@~/barman.sql'
+psql -U "${POSTGRES_USER}" --set "barmanpwd=${BARMAN_PASSWORD}" -c '\i {{ db.init_dir }}/barman.sql'

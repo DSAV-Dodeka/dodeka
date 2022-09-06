@@ -6,7 +6,7 @@ path = "./data/backups/"
 
 [postgresql]
 host = "127.0.0.1"
-port = 3141
+port = "3141"
 db = "dodeka"
 user = "dodeka"
 password = "postpost"

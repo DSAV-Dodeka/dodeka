@@ -33,6 +33,7 @@ mkdir -p "${DB_RESOURCES_SOURCE}"
 docker compose pull && docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
 
 # Check if it is actually running by inspecting container state
+# {{ is for jinja2 escaping
 if [ "$( docker container inspect -f '{{.State.Status}}' d-dodeka-db-1 )" = "running" ];
 then
     echo "PostgreSQL startup successful."

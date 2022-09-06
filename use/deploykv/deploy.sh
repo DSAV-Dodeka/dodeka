@@ -37,6 +37,7 @@ docker compose pull && docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
 echo "Waiting 1 second before inspecting Redis startup..."
 sleep 1
 # Check if it is actually running by inspecting container state
+# {{ is for jinja2 escaping
 if [ "$( docker container inspect -f '{{.State.Status}}' ts-dodeka-kv-1 )" == "running" ];
 then
     echo "Redis startup successful."

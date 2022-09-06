@@ -31,7 +31,7 @@ docker compose pull && docker compose -p "${SERVER_COMPOSE_PROJECT_NAME}" up -d
 echo "Waiting 5 seconds before inspecting server startup..."
 sleep 5
 # Check if it is actually running by inspecting container state
-if [ "$( docker container inspect -f '{{.State.Status}}' ~spwn@container_name@~ )" = "running" ];
+if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ server.container_name }} )" = "running" ];
 then
     echo "Backend startup successful."
     if [ "$1" = "move" ]; then
@@ -43,7 +43,7 @@ then
 else
     echo "Backend startup failed."
     # If fail, check logs
-    docker container logs ~spwn@container_name@~
+    docker container logs {{ server.container_name }}
     # Shut down and remove
     ./down.sh
     # Exit code 1 indicates failure
