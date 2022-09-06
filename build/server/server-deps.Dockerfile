@@ -1,4 +1,4 @@
-FROM python:3.9-slim-bullseye AS poetry
+FROM python:3.10-slim-bullseye AS poetry
 RUN apt-get update
 RUN apt-get install curl -y
 RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | POETRY_HOME=/etc/poetry python3 -
