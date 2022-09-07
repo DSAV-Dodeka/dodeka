@@ -414,7 +414,7 @@ jobs:
         run: poetry install --no-interaction
       - name: Build config with correct version
         run: |
-          poetry run confspawn -c config.toml -s ./server/deploy -t ./server/configged
+          poetry run confspawn -c config.toml -s ./server -t ./server/configged
           mv ${{ github.workspace }}/build/server/configged/entrypoint.sh ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/entrypoint.sh
         working-directory: ${{ github.workspace }}/build
       - name: Cache authpage
