@@ -1,6 +1,7 @@
 FROM python:3.10-slim-bullseye AS poetry
 RUN apt-get update
 RUN apt-get install curl -y
+RUN apt-get install gcc -y
 RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | POETRY_HOME=/etc/poetry python3 -
 ENV PATH="/etc/poetry/bin:${PATH}"
 
