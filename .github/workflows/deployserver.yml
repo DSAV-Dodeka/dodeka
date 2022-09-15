@@ -25,6 +25,8 @@ jobs:
        script_stop: true
        # This requires poetry, docker, gpg, bash to be installed on remote
        # Also requires GH CLI logged in with an account with repo read access
+       # The decrypt.sh loads the POSTGRES_PASSWORD, REDIS_PASSWORD and COMCOM_MAIL_PASS
+       # as environment variables, which are then used in the docker compose file.
        script: |
          echo $GHCR_TOKEN | docker login ghcr.io -u $ACTOR --password-stdin
          export DEPLOYID="$(date +%s)"
