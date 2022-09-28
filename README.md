@@ -2,7 +2,7 @@
 
 Everything is deployed from this repository. It also contains the "source" for the database (PostgreSQL) and key-value store (Redis).
 
-The most important file is `/build/config.toml`, which contains all practical configuration. In the `build`-folder you can find the source for all deploy scripts. Using the `confspawn` tool worden the actual scripts are built from these templates. The results you can find i `dev`, `deploydb`, etc. in the root directory.
+The most important file is `/build/config.toml`, which contains all practical configuration. In the `build`-folder you can find the source for all deploy scripts. Using the `confspawn` tool the actual scripts are built from these templates. The results you can find in the various folders in the `use` directory.
 
 //TODO barman source
 
@@ -17,7 +17,6 @@ First of all, you need to have a Unix-like command line with a bash-compatible s
 Then, you need a number of tools installed, which you can install from the links below if you're not on Windows:
 
 * [Docker Engine](https://docs.docker.com/engine/install/)
-* [Docker Compose V2](https://docs.docker.com/compose/cli-command/)
 
 If you're on Windows, installing [Docker Desktop](https://www.docker.com/products/docker-desktop) after you've installed WSL will make these available inside WSL if Docker Desktop is running.
 
