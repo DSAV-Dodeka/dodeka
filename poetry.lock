@@ -39,7 +39,7 @@ tests_no_zope = ["cloudpickle", "coverage[toml] (>=5.0.2)", "hypothesis", "mypy 
 
 [[package]]
 name = "certifi"
-version = "2022.9.14"
+version = "2022.9.24"
 description = "Python package for providing Mozilla's CA Bundle."
 category = "main"
 optional = false
@@ -58,7 +58,7 @@ pycparser = "*"
 
 [[package]]
 name = "confspawn"
-version = "0.2.5"
+version = "0.3.0"
 description = "Easily build configuration files from templates."
 category = "main"
 optional = false
@@ -272,7 +272,7 @@ sortedcontainers = "*"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "5dd6194fdad3f0aca648955afe5ee30edd8f016af2639f416a6f57ff8810c24d"
+content-hash = "1ff11f660b3d78e6d8124888775e089546dfc79ebbb76f36a6863ec9b438418f"
 
 [metadata.files]
 anyio = [
@@ -288,8 +288,8 @@ attrs = [
     {file = "attrs-22.1.0.tar.gz", hash = "sha256:29adc2665447e5191d0e7c568fde78b21f9672d344281d0c6e1ab085429b22b6"},
 ]
 certifi = [
-    {file = "certifi-2022.9.14-py3-none-any.whl", hash = "sha256:e232343de1ab72c2aa521b625c80f699e356830fd0e2c620b465b304b17b0516"},
-    {file = "certifi-2022.9.14.tar.gz", hash = "sha256:36973885b9542e6bd01dea287b2b4b3b21236307c56324fcc3f1160f2d655ed5"},
+    {file = "certifi-2022.9.24-py3-none-any.whl", hash = "sha256:90c1a32f1d68f940488354e36370f6cca89f0f106db09518524c88d6ed83f382"},
+    {file = "certifi-2022.9.24.tar.gz", hash = "sha256:0d9c601124e5a6ba9712dbc60d9c53c21e34f5f641fe83002317394311bdce14"},
 ]
 cffi = [
     {file = "cffi-1.15.1-cp27-cp27m-macosx_10_9_x86_64.whl", hash = "sha256:a66d3508133af6e8548451b25058d5812812ec3798c886bf38ed24a98216fab2"},
@@ -358,8 +358,8 @@ cffi = [
     {file = "cffi-1.15.1.tar.gz", hash = "sha256:d400bfb9a37b1351253cb402671cea7e89bdecc294e8016a707f6d1d8ac934f9"},
 ]
 confspawn = [
-    {file = "confspawn-0.2.5-py3-none-any.whl", hash = "sha256:9ea9f3d5bf1f87ccc873777db31b41aedcfb134b588e833bdfba3f13c146b883"},
-    {file = "confspawn-0.2.5.tar.gz", hash = "sha256:a3e9b12ecbdfba3fb6df7d38fe5a1d53e81562aa927e683920a9570a0f4d04fd"},
+    {file = "confspawn-0.3.0-py3-none-any.whl", hash = "sha256:0e1e4ff56587ca3ed04ffb806cf743d60bfd132b8962c7d29dd2baf369cd4653"},
+    {file = "confspawn-0.3.0.tar.gz", hash = "sha256:ee6fc76fa31bc0fe1c9bc99c3a81fa390b6777174b66f109f6fc85d8c7468684"},
 ]
 dirgh = []
 h11 = [
