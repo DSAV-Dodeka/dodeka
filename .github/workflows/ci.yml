@@ -9,6 +9,7 @@ on:
 
 jobs:
   config-deploy:
+    if: ${{ false }}
     runs-on: ubuntu-latest
 
     steps:
@@ -155,7 +156,7 @@ jobs:
   build-db:
     uses: DSAV-Dodeka/dodeka/.github/workflows/def.yml@ci
     with:
-      env: 'test'
+      env: 'staging'
       
 
   build-server-deps:
