@@ -7,8 +7,6 @@
 # '/*' matches the last '/' and so %/* will remove everything after it
 # This changes the directory to the directory containing the script
 cd "${0%/*}" || exit
-# pwd is print working directory, -P ensures any links/shortcuts are resolved
-CUR_DIR=$(pwd -P)
 # This ensures all env variables are exported so env variables used in deploy.env (like $HOME) are
 # properly expanded
 # env files are consumed by e.g. docker compose
@@ -17,11 +15,11 @@ set -a
 . ./deploy.env
 
 # -n means string is not null
-if [ -n "$2" ]; then
+if [ -n "$1" ]; then
   # ignore warning
   # shellcheck source=/dev/null
   # load additional env file, i.e. for final dev or deploy such as passwords
-  . "$2"
+  . "$1"
 fi
 
 # Create the directory that will serve as the source for the container volume
@@ -37,14 +35,6 @@ docker compose pull && docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
 if [ "$( docker container inspect -f '{{.State.Status}}' d-dodeka-db-1 )" = "running" ];
 then
     echo "PostgreSQL startup successful."
-    # Copy deploy to new directory to make it easy to shut down
-    # -a preserves file information
-    if [ "$1" = "move" ]; then
-        rm -rf ~/active_deploydb
-        touch "deployed$DEPLOYID.txt"
-        cp -a "$CUR_DIR" ~/active_deploydb/
-        echo "Deployment moved to ~/active_deploydb"
-    fi
 else
     echo "PostgreSQL startup failed."
     # If fail, check logs

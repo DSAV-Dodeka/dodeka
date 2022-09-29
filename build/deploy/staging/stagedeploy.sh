@@ -4,4 +4,4 @@ CUR_DIR=$(pwd -P)
 set -a
 
 # Start database
-./db/deploy.sh nomove "$CUR_DIR"/staging.env || exit
+./db/deploy.sh "$CUR_DIR"/staging.env || exit

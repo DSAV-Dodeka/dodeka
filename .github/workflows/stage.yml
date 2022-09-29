@@ -1,4 +1,4 @@
-name: Deploy DB
+name: Stage DB
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
      ACTOR: ${{ github.actor }}
 
    steps:
-   - uses: actions/checkout@v2
+   - uses: actions/checkout@v3
    # Third party GH Action, pinned to commit for security
    - name: executing remote ssh commands using ssh key
      uses: appleboy/ssh-action@1a8b3784eaa665f677fa114edd5683bb6a6bfaa8
