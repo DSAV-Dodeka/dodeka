@@ -22,6 +22,7 @@ jobs:
       # Build config using tiptenbrink/confspawn
       - name: Config
         run: |
+          poetry run confspawn -c config.toml -s ./build/container/kv -t ./context
           poetry run confspawn -c config.toml -s ./build/container/librejson -t ./contextlibrejson
       # Set env from config.toml
       - name: Set env.REJSON_VERSION
