@@ -42,13 +42,11 @@ jobs:
           export DB_IMAGE=$(poetry run confenv -c config.toml -v db.image_name -e ${{ inputs.env }})
           export DB_VERSION=$(poetry run confenv -c config.toml -v confspawn_env.version -e ${{ inputs.env }})
           echo "DB_TAG=$DB_IMAGE:$DB_VERSION" >> $GITHUB_ENV
-        working-directory: ${{ github.workspace }}/build
       - name: Set env.DB_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
           export DB_IMAGE=$(poetry run confenv -c config.toml -v db.image_name)
           echo "DB_TAG=$DB_IMAGE:${{ github.event.release.tag_name }},$DB_IMAGE:latest" >> $GITHUB_ENV
-        working-directory: ${{ github.workspace }}/build
       # Build and push
       - name: Build and push
         uses: docker/build-push-action@v2
