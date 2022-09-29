@@ -1,0 +1,16 @@
+allowed_envs = ["production"]
+
+api_root = "https://api.dsavdodeka.nl"
+issuer = "https://api.dsavdodeka.nl"
+frontend_client_id = "dodekaweb_client"
+backend_client_id = "dodekabackend_client"
+
+valid_redirects = ["https://dsavdodeka.nl/auth/callback"]
+
+credentials_url = "https://api.dsavdodeka.nl/credentials/"
+
+signup_url = "https://www.av40.nl/index.php?page=Inschrijfformulier&sid=1"
+
+onboard_email = "comcom@dsavdodeka.nl"
+smtp_server = "mail.dsavdodeka.nl"
+smtp_port = 465

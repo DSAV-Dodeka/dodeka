@@ -24,8 +24,7 @@ jobs:
       - run: poetry install
       - name: Config
         run: |
-          poetry run confspawn -c config.toml -s ./db -t ./db/configged -e ${{ inputs.env }}
-        working-directory: ${{ github.workspace }}/build
+          poetry run confspawn -c config.toml -s ./build/container/db -t ./context -e ${{ inputs.env }}
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
         with:
@@ -54,7 +53,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v2
         with:
-          context: ${{ github.workspace }}/build/db/configged
+          context: ${{ github.workspace }}/context
           # Dockerfile tag
           tags: ${{ env.DB_TAG }}
           cache-from: type=gha
