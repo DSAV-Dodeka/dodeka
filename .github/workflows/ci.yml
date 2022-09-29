@@ -153,6 +153,27 @@ jobs:
           rm -rf /tmp/.buildxkv-cache
           mv /tmp/.buildxkv-cache-new /tmp/.buildxkv-cache
 
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - run: pipx install poetry==1.2.1
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'poetry'
+      - run: poetry install
+      # Build config using tiptenbrink/confspawn
+      - name: Config
+        run: |
+          poetry run confrecipe -r build/deploy/staging/staging.toml -e staging
+      - uses: stefanzweifel/git-auto-commit-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          commit_message: Config build (automated)
+          file_pattern: use/
+
   build-db:
     uses: DSAV-Dodeka/dodeka/.github/workflows/def.yml@ci
     with:
