@@ -7,8 +7,6 @@
 # '/*' matches the last '/' and so %/* will remove everything after it
 # This changes the directory to the directory containing the script
 cd "${0%/*}" || exit
-# pwd is print working directory, -P ensures any links/shortcuts are resolved
-CUR_DIR=$(pwd -P)
 # This ensures all env variables are exported so env variables used in deploy.env (like $HOME) are
 # properly expanded
 # env files are consumed by e.g. docker compose
@@ -17,11 +15,11 @@ set -a
 . ./deploy.env
 
 # -n means string is not null
-if [ -n "$2" ]; then
+if [ -n "$1" ]; then
   # ignore warning
   # shellcheck source=/dev/null
   # load additional env file, i.e. for final dev or deploy such as passwords
-  . "$2"
+  . "$1"
 fi
 
 # Run the docker-compose.yml
@@ -34,12 +32,6 @@ sleep 5
 if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ server.container_name }} )" = "running" ];
 then
     echo "Backend startup successful."
-    if [ "$1" = "move" ]; then
-        rm -rf ~/active_deployserver
-        touch "deployed$DEPLOYID.txt"
-        cp -a "$CUR_DIR" ~/active_deployserver/
-        echo "Deployment moved to ~/active_deployserver"
-    fi
 else
     echo "Backend startup failed."
     # If fail, check logs

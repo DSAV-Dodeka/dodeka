@@ -12,6 +12,8 @@ RUN poetry install --only main --no-root
 COPY ./src ./src
 RUN poetry install --only-root
 RUN rm ./src/apiserver/resources/static/.gitignore
+COPY ./define.toml ./src/apiserver/resources/define.toml
+COPY ./env.toml ./src/apiserver/resources/env.toml
 RUN poetry build
 
 FROM python:3.10-slim-bullseye AS runtime

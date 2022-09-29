@@ -65,6 +65,7 @@ credentials_url = "https://api.tiptenbrink.nl/credentials/"
 [confspawn_env.staging]
 name = "staging"
 version = "staging"
+allowed_envs = "\"staging\""
 api_root = "https://apidemo.tiptenbrink.nl/"
 valid_redirects = "\"https://demo.tiptenbrink.nl/auth/callback\""
 credentials_url = "https://apidemo.tiptenbrink.nl/credentials/"

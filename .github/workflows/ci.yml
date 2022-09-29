@@ -40,118 +40,7 @@ jobs:
           commit_message: Config build (automated)
           file_pattern: use/
 
-  build-kv:
-    runs-on: ubuntu-latest
-    if: ${{ false }}
-    
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.10'
-    # Cache means install is saved in repo cache
-    # Increment poetry-1 if new install is necessary
-    - name: Load cached Poetry installation
-      uses: actions/cache@v2
-      with:
-        path: ~/.local 
-        key: poetry-2
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        virtualenvs-create: true
-        # .venv is created in project
-        virtualenvs-in-project: true
-        installer-parallel: true
-    # Load .venv directly from cache
-    - name: Load cached venv
-      id: cached-poetry-dependencies
-      uses: actions/cache@v2
-      with:
-        path: .venv
-        # Key only changes if poetry.lock changes
-        key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
-    - name: Install dependencies
-      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-      run: poetry install --no-interaction --no-root
-    - name: Install library
-      run: poetry install --no-interaction
-    # Build config using tiptenbrink/confspawn
-    - name: Config
-      run: |
-        poetry run confspawn -c config.toml -s ./kv/librejson -t ./kv/librejson/configged
-      working-directory: ${{ github.workspace }}/build
-    # Set env from config.toml
-    - name: Set env.REJSON_VERSION
-      run: |
-        export REJSON_VERSION=$(poetry run confenv -c config.toml -v kv.redisjson_version)
-        echo "REJSON_VERSION=$REJSON_VERSION" >> $GITHUB_ENV
-      working-directory: ${{ github.workspace }}/build
-    # If librejson was previously built and stored in cache, use it
-    - name: Load cached librejson.so
-      id: cached-librejson
-      uses: actions/cache@v2
-      with:
-        path: build/kv/librejson.so
-        key: rejson_module-${{ env.REJSON_VERSION }}
-    - name: librejson.so
-      # If cache was not found, rebuild
-      # Requires GH login
-      if: steps.cached-librejson.outputs.cache-hit != 'true'
-      run: |
-        echo "${{ github.token }}" | gh auth login --with-token
-        ./kv/librejson/configged/build_librejson.sh
-      working-directory: ${{ github.workspace }}/build
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v1
-      with:
-        registry: ghcr.io
-        # We use the repo/action token, which has specified access to the package
-        username: ${{ github.actor}}
-        password: ${{ github.token }}
-    # Set up buildx for later build-push-action
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v1
-    # Get cached Docker layers to save build time
-    - name: Cache Docker layers
-      uses: actions/cache@v2
-      with:
-        path: /tmp/.buildxkv-cache
-        key: ${{ runner.os }}-buildxkv-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildxkv-
-    # Set env from config.toml
-    - name: Set env.KV_TAG
-      if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
-      run: |
-        export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
-        export KV_VERSION=$(poetry run confenv -c config.toml -v kv.version)
-        echo "KV_TAG=$KV_IMAGE:$KV_VERSION" >> $GITHUB_ENV
-      working-directory: ${{ github.workspace }}/build
-    - name: Set env.KV_TAG if release
-      if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
-      run: |
-        export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
-        echo "KV_TAG=$KV_IMAGE:${{ github.event.release.tag_name }},$KV_IMAGE:latest" >> $GITHUB_ENV
-      working-directory: ${{ github.workspace }}/build
-    # Build and push
-    - name: Build and push
-      uses: docker/build-push-action@v2
-      with:
-        context: ${{ github.workspace }}/build/kv
-        # Dockerfile tag
-        tags: ${{ env.KV_TAG }}
-        cache-from: type=local,src=/tmp/.buildxkv-cache
-        cache-to: type=local,dest=/tmp/.buildxkv-cache-new,mode=max
-        push: ${{ github.event_name != 'pull_request' }}
-    - # Temp fix
-        # https://github.com/docker/build-push-action/issues/252
-        # https://github.com/moby/buildkit/issues/1896
-        name: Move cache
-        run: |
-          rm -rf /tmp/.buildxkv-cache
-          mv /tmp/.buildxkv-cache-new /tmp/.buildxkv-cache
+
 
   build-deploy:
     runs-on: ubuntu-latest
@@ -186,4 +75,9 @@ jobs:
       env: 'staging'
     secrets:
       GH_DODEKACOMCOM_TOKEN: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
+
+  build_kv:
+    uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@ci
+    with:
+      env: 'staging'
       

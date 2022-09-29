@@ -5,3 +5,5 @@ set -a
 
 # Start database
 ./db/deploy.sh "$CUR_DIR"/staging.env || exit
+./kv/deploy.sh "$CUR_DIR"/staging.env || exit
+./server/deploy.sh "$CUR_DIR"/staging.env || exit

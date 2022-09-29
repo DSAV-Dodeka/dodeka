@@ -6,4 +6,6 @@ cd "${0%/*}" || exit
 set -a
 # Load environment variables from dev.env
 . ./staging.env
+./server/down.sh
+./kv/down.sh
 ./db/down.sh
