@@ -6,6 +6,9 @@ on:
         env:
           required: true
           type: string
+    secrets:
+      GH_DODEKACOMCOM_TOKEN:
+        required: true
 
 jobs:
   build_server:

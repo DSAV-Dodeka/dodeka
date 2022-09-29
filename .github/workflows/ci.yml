@@ -184,4 +184,6 @@ jobs:
     uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@ci
     with:
       env: 'staging'
+    secrets:
+      envPAT: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
       
