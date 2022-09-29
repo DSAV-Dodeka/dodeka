@@ -33,8 +33,8 @@ jobs:
          echo $GHCR_TOKEN | docker login ghcr.io -u $ACTOR --password-stdin
          export DEPLOYID="$(date +%s)"
          gh repo clone DSAV-Dodeka/dodeka ~/stagings/staging$DEPLOYID
-         gh repo clone DSAV-Dodeka/secrets ~/stagings/staging$DEPLOYID
-         cd ~/stagings/staging$DEPLOYID
+         gh repo clone DSAV-Dodeka/secrets ~/stagings/secrets$DEPLOYID
+         cd ~/stagings/secrets$DEPLOYID
          set -a
          . decrypt.sh secretdb.env.gpg $SECRETS_PASSPHRASE || exit 1
          cd ~/stagings/staging$DEPLOYID/use/staging
