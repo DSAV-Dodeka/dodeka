@@ -1,4 +1,4 @@
-APISERVER_ENV="production"
+APISERVER_ENV= {{ confspawn_env.name }}
 
 DB_USER= {{ db.db_name }}
 DB_HOST={{ db.db_user }}

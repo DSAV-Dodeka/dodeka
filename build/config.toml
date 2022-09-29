@@ -12,7 +12,6 @@ postgres_conf_dir = "/dodeka_conf"
 init_dir = "/dodeka_init"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/postgres"
-version = "dev"
 host_host = "127.0.0.1"
 host_port = "3141"
 container_port = "3141"
@@ -32,17 +31,9 @@ service_name = "kv"
 container_name = "ts-dodeka-kv-1"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/redis"
-version = "dev"
 host_host = "127.0.0.1"
 host_port = "6379"
 container_port = "6379"
-
-[dev]
-postgres_version = "latest"
-redis_version = "latest"
-db_password = "postpost"
-barman_password = "barbar"
-redis_password = "redisredis"
 
 [server]
 project = "s-dodeka"
@@ -52,7 +43,25 @@ container_name = "s-dodeka-server-1"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/server"
 deps_image_name = "ghcr.io/dsav-dodeka/server-deps"
-version = "dev"
 host_host = "127.0.0.1"
 host_port = "4241"
 container_port = "4241"
+
+[confspawn_env.production]
+name = "production"
+version = "latest"
+
+[confspawn_env.staging]
+name = "staging"
+version = "staging"
+
+[confspawn_env.test]
+name = "test"
+version = "test"
+
+[confspawn_env.local]
+name = "local"
+version = "local"
+db_password = "postpost"
+barman_password = "barbar"
+redis_password = "redisredis"
