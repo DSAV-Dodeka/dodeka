@@ -174,8 +174,14 @@ jobs:
           commit_message: Config build (automated)
           file_pattern: use/
 
-  build_staging:
-    uses: DSAV-Dodeka/dodeka/.github/workflows/def.yml@ci
+  build_db:
+    if: ${{ false }}
+    uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@ci
+    with:
+      env: 'staging'
+
+  build_server:
+    uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@ci
     with:
       env: 'staging'
       
