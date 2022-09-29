@@ -47,15 +47,27 @@ deps_image_name = "ghcr.io/dsav-dodeka/server-deps"
 host_host = "127.0.0.1"
 host_port = "4241"
 container_port = "4241"
+issuer = "https://api.dsavdodeka.nl"
+frontend_client_id = "dodekaweb_client"
+backend_client_id = "dodekabackend_client"
+signup_url = "https://www.av40.nl/index.php?page=Inschrijfformulier&sid=1"
+onboard_email = "comcom@dsavdodeka.nl"
+smtp_server = "mail.dsavdodeka.nl"
+smtp_port = 465
 
 [confspawn_env.production]
 name = "production"
 version = "latest"
+api_root = "https://api.dsavdodeka.nl/"
+valid_redirects = "\"https://dsavdodeka.nl/auth/callback\""
+credentials_url = "https://api.tiptenbrink.nl/credentials/"
 
 [confspawn_env.staging]
 name = "staging"
 version = "staging"
-resources_source = "/postgres_host/db_staging"
+api_root = "https://apidemo.tiptenbrink.nl/"
+valid_redirects = "\"https://demo.tiptenbrink.nl/auth/callback\""
+credentials_url = "https://apidemo.tiptenbrink.nl/credentials/"
 
 [confspawn_env.test]
 name = "test"
@@ -67,3 +79,7 @@ version = "local"
 db_password = "postpost"
 barman_password = "barbar"
 redis_password = "redisredis"
+allowed_envs = "\"envless\", \"local\", \"test\""
+api_root = "http://localhost:4243"
+valid_redirects = "\"http://localhost:3000/auth/callback\""
+credentials_url = "http://localhost:4243/credentials/"

@@ -8,7 +8,89 @@ on:
           type: string
 
 jobs:
+  build_server:
+    runs-on: ubuntu-latest
+    env:
+      # The place the configuration repo will be placed at temporarily
+      SERVER_REPO_PATH: 'dodekabackend'
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+        with:
+          repository: 'DSAV-Dodeka/backend'
+          ref: 'main'
+          token: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
+          # Relative to ${{ github.workspace }}
+          path: ${{ env.SERVER_REPO_PATH }}
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'poetry'
+      - run: poetry install
+      - name: Config
+        run: |
+          poetry run confspawn -c config.toml -s ./build/container/server -t ./context -e ${{ inputs.env }}
+      - name: Move source
+        run: |
+          mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/poetry.lock ${{ github.workspace }}/context
+          mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/pyproject.toml ${{ github.workspace }}/context
+          mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/src ${{ github.workspace }}/context/src
+          mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage ${{ github.workspace }}/context/authpage
+      - name: Cache authpage
+        id: cached-authpage
+        uses: actions/cache@v3
+        with:
+          key: authpage-${{ hashFiles('${{ github.workspace }}/context/authpage') }}
+          path: ${{ github.workspace }}/context/src/apiserver/resources/static/credentials
+      - uses: actions/setup-node@v2
+        if: steps.cached-authpage.outputs.cache-hit != 'true'
+        with:
+          node-version: '16'
+          cache: 'npm'
+          cache-dependency-path: ${{ github.workspace }}/context/authpage/package-lock.json
+      - name: Build credentials
+        if: steps.cached-authpage.outputs.cache-hit != 'true'
+        run: |
+          npm install
+          npm run build
+        working-directory: ${{ github.workspace }}/context/authpage
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          # We use the repo/action token, which has specified access to the package
+          username: ${{ github.actor}}
+          password: ${{ github.token }}
+      # Set up buildx for later build-push-action
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      # Set env from config.toml
+      - name: Set env.SERVER_TAG
+        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
+        run: |
+          export SERVER_IMAGE=$(poetry run confenv -c config.toml -v server.image_name)
+          export SERVER_VERSION=$(poetry run confenv -c config.toml -v server.version)
+          echo "SERVER_TAG=$SERVER_IMAGE:$SERVER_VERSION" >> $GITHUB_ENV
+      - name: Set env.SERVER_TAG if release
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+        run: |
+          export SERVER_IMAGE=$(poetry run confenv -c config.toml -v server.image_name)
+          echo "SERVER_TAG=$SERVER_IMAGE:${{ github.event.release.tag_name }},$SERVER_IMAGE:latest" >> $GITHUB_ENV
+      # Build and push
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: ${{ github.workspace }}/context
+          # Dockerfile tag
+          file: ${{ github.workspace }}/context/server.Dockerfile
+          tags: ${{ env.SERVER_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha, mode=max
+          push: ${{ github.event_name != 'pull_request' }}
+
   build_db:
+    if: ${{ false }}
     runs-on: ubuntu-latest
 
     steps:
