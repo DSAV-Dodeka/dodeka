@@ -26,6 +26,7 @@ jobs:
           token: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
           # Relative to ${{ github.workspace }}
           path: ${{ env.SERVER_REPO_PATH }}
+      - run: pipx install poetry==1.2.1
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
