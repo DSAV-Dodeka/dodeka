@@ -1,0 +1,9 @@
+config = "config.toml"
+
+[[sources]]
+source = "build/deploy/staging"
+target = "use/staging"
+
+[[sources]]
+source = "build/deploy/db"
+target = "use/staging/db"
