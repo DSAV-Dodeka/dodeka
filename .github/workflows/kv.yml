@@ -10,13 +10,9 @@ on:
 jobs:
   build-kv:
     runs-on: ubuntu-latest
-    if: ${{ false }}
 
     steps:
-      - uses: actions/checkout@v2
       - uses: actions/checkout@v3
-        with:
-          ref: ${{ github.head_ref }}
       - run: pipx install poetry==1.2.1
       - uses: actions/setup-python@v4
         with:
