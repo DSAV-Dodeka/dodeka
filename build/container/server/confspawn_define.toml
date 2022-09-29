@@ -1,13 +1,13 @@
-allowed_envs = [{{ conf_env.allowed_envs }}]
+allowed_envs = [{{ confspawn_env.allowed_envs }}]
 
-api_root = "{{ conf_env.credentials_url }}"
+api_root = "{{ confspawn_env.credentials_url }}"
 issuer = "{{ server.issuer }}"
 frontend_client_id = "{{ server.frontend_client_id }}"
 backend_client_id = "{{ server.backend_client_id }}"
 
-valid_redirects = [{{ conf_env.valid_redirects }}]
+valid_redirects = [{{ confspawn_env.valid_redirects }}]
 
-credentials_url = "{{ conf_env.credentials_url }}"
+credentials_url = "{{ confspawn_env.credentials_url }}"
 
 signup_url = "{{ server.signup_url }}"
 
