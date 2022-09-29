@@ -185,5 +185,5 @@ jobs:
     with:
       env: 'staging'
     secrets:
-      envPAT: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
+      GH_DODEKACOMCOM_TOKEN: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
       
