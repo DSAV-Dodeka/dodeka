@@ -61,16 +61,16 @@ version = "latest"
 # Only the credentials url is with trailing slash, the rest should all be without
 api_root = "https://api.dsavdodeka.nl"
 valid_redirects = "\"https://dsavdodeka.nl/auth/callback\""
-credentials_url = "https://api.tiptenbrink.nl/credentials/"
+credentials_url = "https://api.dsavdodeka.nl/credentials/"
 pages_url = "https://dsavdodeka.nl"
 
 [confspawn_env.staging]
 name = "staging"
 version = "staging"
 allowed_envs = "\"staging\""
-api_root = "https://apidemo.tiptenbrink.nl"
+api_root = "https://apidemo.tipten.nl"
 valid_redirects = "\"https://demo.tiptenbrink.nl/auth/callback\""
-credentials_url = "https://apidemo.tiptenbrink.nl/credentials/"
+credentials_url = "https://apidemo.tipten.nl/credentials/"
 pages_url = "https://demo.tiptenbrink.nl"
 
 [confspawn_env.test]
