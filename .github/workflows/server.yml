@@ -39,6 +39,7 @@ jobs:
       # First the lock file and project declaration are moved
       # Then the source is moved
       # Then the context for building authpage is prepared
+      # dotglob is enabled to also allow the '.*' files to be moved
       # Finally configuration files for building authpage is moved (TEMP until confspawn option)
       - name: Move source
         run: |
@@ -46,7 +47,8 @@ jobs:
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/pyproject.toml ${{ github.workspace }}/context
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/src ${{ github.workspace }}/context/src
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage ${{ github.workspace }}/context/authpage
-          ./build/scripts/move_auth_envs.sh
+          shopt -s dotglob
+          mv ${{ github.workspace }}/contextauthpage/* ${{ github.workspace }}/context/authpage
       - name: Cache authpage
         id: cached-authpage
         uses: actions/cache@v3
