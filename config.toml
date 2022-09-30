@@ -77,13 +77,13 @@ pages_url = "https://demo.tiptenbrink.nl"
 name = "test"
 version = "test"
 
-[confspawn_env.local]
-name = "local"
-version = "local"
+[confspawn_env.localdev]
+name = "localdev"
+version = "localdev"
 db_password = "postpost"
 barman_password = "barbar"
 redis_password = "redisredis"
-allowed_envs = "\"envless\", \"local\", \"test\""
+allowed_envs = "\"envless\", \"localdev\", \"test\""
 api_root = "http://localhost:4243"
 valid_redirects = "\"http://localhost:3000/auth/callback\""
 credentials_url = "http://localhost:4243/credentials/"
