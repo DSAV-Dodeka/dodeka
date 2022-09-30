@@ -35,12 +35,18 @@ jobs:
       - name: Config
         run: |
           poetry run confspawn -c config.toml -s ./build/container/server -t ./context -e ${{ inputs.env }}
+          poetry run confspawn -c config.toml -s ./build/container/authpage -t ./contextauthpage -e ${{ inputs.env }}
+      # First the lock file and project declaration are moved
+      # Then the source is moved
+      # Then the context for building authpage is prepared
+      # Finally configuration files for building authpage is moved
       - name: Move source
         run: |
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/poetry.lock ${{ github.workspace }}/context
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/pyproject.toml ${{ github.workspace }}/context
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/src ${{ github.workspace }}/context/src
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage ${{ github.workspace }}/context/authpage
+          mv ${{ github.workspace }}/contextauthpage/* ${{ github.workspace }}/context/authpage
       - name: Cache authpage
         id: cached-authpage
         uses: actions/cache@v3
@@ -57,7 +63,7 @@ jobs:
         if: steps.cached-authpage.outputs.cache-hit != 'true'
         run: |
           npm install
-          npm run build
+          npm run build --mode ${{ inputs.env }}
         working-directory: ${{ github.workspace }}/context/authpage
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
