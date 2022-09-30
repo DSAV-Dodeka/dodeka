@@ -53,7 +53,7 @@ jobs:
         id: cached-authpage
         uses: actions/cache@v3
         with:
-          key: authpage-${{ hashFiles('${{ github.workspace }}/context/authpage') }}
+          key: authpage-${{ hashFiles(format('{0}/context/authpage', github.workspace)) }}
           path: ${{ github.workspace }}/context/src/apiserver/resources/static/credentials
       - uses: actions/setup-node@v2
         if: steps.cached-authpage.outputs.cache-hit != 'true'
