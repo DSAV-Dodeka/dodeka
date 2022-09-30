@@ -69,9 +69,9 @@ name = "staging"
 version = "staging"
 allowed_envs = "\"staging\""
 api_root = "https://apidemo.tipten.nl"
-valid_redirects = "\"https://demo.tiptenbrink.nl/auth/callback\""
+valid_redirects = "\"https://demo.tipten.nl/auth/callback\""
 credentials_url = "https://apidemo.tipten.nl/credentials/"
-pages_url = "https://demo.tiptenbrink.nl"
+pages_url = "https://demo.tipten.nl"
 
 [confspawn_env.test]
 name = "test"
