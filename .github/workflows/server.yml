@@ -46,7 +46,7 @@ jobs:
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/pyproject.toml ${{ github.workspace }}/context
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/src ${{ github.workspace }}/context/src
           mv ${{ github.workspace }}/${{ env.SERVER_REPO_PATH }}/authpage ${{ github.workspace }}/context/authpage
-          mv ${{ github.workspace }}/contextauthpage/* ${{ github.workspace }}/context/authpage
+          mv "${{ github.workspace }}/contextauthpage/"* ${{ github.workspace }}/context/authpage
       - name: Cache authpage
         id: cached-authpage
         uses: actions/cache@v3
