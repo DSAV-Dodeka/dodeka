@@ -1,16 +1,16 @@
-allowed_envs = ["production"]
+allowed_envs = [{{ confspawn_env.allowed_envs }}]
 
-api_root = "https://api.dsavdodeka.nl"
-issuer = "https://api.dsavdodeka.nl"
-frontend_client_id = "dodekaweb_client"
-backend_client_id = "dodekabackend_client"
+api_root = "{{ confspawn_env.api_root }}"
+issuer = "{{ server.issuer }}"
+frontend_client_id = "{{ server.frontend_client_id }}"
+backend_client_id = "{{ server.backend_client_id }}"
 
-valid_redirects = ["https://dsavdodeka.nl/auth/callback"]
+valid_redirects = [{{ confspawn_env.valid_redirects }}]
 
-credentials_url = "https://api.dsavdodeka.nl/credentials/"
+credentials_url = "{{ confspawn_env.credentials_url }}"
 
-signup_url = "https://www.av40.nl/index.php?page=Inschrijfformulier&sid=1"
+signup_url = "{{ server.signup_url }}"
 
-onboard_email = "comcom@dsavdodeka.nl"
-smtp_server = "mail.dsavdodeka.nl"
-smtp_port = 465
+onboard_email = "{{ server.onboard_email }}"
+smtp_server = "{{ server.smtp_server }}"
+smtp_port = {{ server.smtp_port }}

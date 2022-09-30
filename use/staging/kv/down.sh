@@ -10,5 +10,5 @@ set -a
 # Load environment variables from deploy.env file
 . ./deploy.env
 
-# Volumes are not removed as they are persisted
-docker compose -p "${DB_COMPOSE_PROJECT_NAME}" down
+# Removes volumes
+docker compose -p "${KV_COMPOSE_PROJECT_NAME}" down -v

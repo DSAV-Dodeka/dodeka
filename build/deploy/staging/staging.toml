@@ -7,3 +7,11 @@ target = "use/staging"
 [[sources]]
 source = "build/deploy/db"
 target = "use/staging/db"
+
+[[sources]]
+source = "build/deploy/kv"
+target = "use/staging/kv"
+
+[[sources]]
+source = "build/deploy/server"
+target = "use/staging/server"

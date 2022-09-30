@@ -11,6 +11,7 @@ services:
       - DB_PASS=${POSTGRES_PASSWORD}
       - KV_PASS=${REDIS_PASSWORD}
       - MAIL_PASS=${COMCOM_MAIL_PASS}
+      - KEY_PASS=${KEY_PASSWORD}
     # This maps ports, so the container port will be available at localhost:<HOST_PORT>
     ports:
       - "${SERVER_HOST_HOST}:${SERVER_HOST_PORT}:${SERVER_CONTAINER_PORT}"

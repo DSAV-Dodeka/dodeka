@@ -3,8 +3,6 @@ name: Stage DB
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ ci ]
 
 jobs:
  deploy:
@@ -21,10 +19,10 @@ jobs:
    - name: executing remote ssh commands using ssh key
      uses: appleboy/ssh-action@1a8b3784eaa665f677fa114edd5683bb6a6bfaa8
      with:
-       host: "116.203.107.52"
-       username: "backend"
+       host: "dodeka.tipten.nl"
+       username: "dodekatest"
        key: ${{ secrets.SSH_HETZNER_PRIVATE_KEY }}
-       port: 22
+       port: ${{ secrets.SSH_DODEKATEST_PORT }}
        envs: SECRETS_PASSPHRASE,GHCR_TOKEN,ACTOR
        script_stop: true
        # This requires poetry, docker, gpg, bash to be installed on remote

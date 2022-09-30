@@ -1,10 +1,10 @@
-APISERVER_ENV= {{ confspawn_env.name }}
+APISERVER_ENV="{{ confspawn_env.name }}"
 
-DB_USER= {{ db.db_name }}
-DB_HOST={{ db.db_user }}
-DB_PORT={{ db.container_port }}
-DB_NAME={{ db.db_name }}
-DB_NAME_ADMIN={{ db.db_name_admin }}
+DB_USER="{{ db.db_user }}"
+DB_HOST="{{ db.container_name }}"
+DB_PORT="{{ db.container_port }}"
+DB_NAME="{{ db.db_name }}"
+DB_NAME_ADMIN="{{ db.db_name_admin }}"
 
-KV_HOST={{ kv.container_name }}
-KV_PORT={{ kv.container_port }}
+KV_HOST="{{ kv.container_name }}"
+KV_PORT="{{ kv.container_port }}"

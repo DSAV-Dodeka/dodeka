@@ -1,6 +1,6 @@
 #!/bin/bash
-# First argument is either 'move' (cp to activedeploy) or anything else (no cp)
-# Second argument is path for .env file to load (absolute or relative to this script!)
+# First argument is path for .env file to load (absolute or relative to this script!)
+# If second argument is 'rv', it will remove the volume (so it starts from a clean slate)
 
 # $0 is argument 0, which is always the script path
 # % is a type of Parameter Expansion
@@ -20,6 +20,10 @@ if [ -n "$1" ]; then
   # shellcheck source=/dev/null
   # load additional env file, i.e. for final dev or deploy such as passwords
   . "$1"
+fi
+
+if [ "$1" = "rv" ]; then
+   docker volume rm '{{ db.volume_name }}-{{ confspawn_env.name }}'
 fi
 
 # Create the directory that will serve as the source for the container volume

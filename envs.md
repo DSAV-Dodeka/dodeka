@@ -3,7 +3,7 @@ This repository builds Docker containers (the `build/container` directory) and b
 * 'production' mode
 * 'staging' mode
 * 'test' mode
-* 'local' mode
+* 'localdev' mode
 
 The DB and KV are designed to vary very little depending on their mode, accepting simple configuration options and allowing to be wrapped by simple scripts to handle different modes.
 
