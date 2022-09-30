@@ -28,11 +28,7 @@ volumes:
   {{ db.volume_name }}:
     # A local directory
     driver: local
-    driver_opts:
-      o: bind
-      type: none
-      # The directory in the host directory that will be loaded as the source for the volume
-      device: ${DB_RESOURCES_SOURCE}
+    name: {{ db.volume_name }}-{{ confspawn_env.name }}
 networks:
   # Set up a network so that other containers on this network can access each other
   # A different container on this network can access this container by using the container name as the hostname

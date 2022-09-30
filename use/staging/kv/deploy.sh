@@ -1,6 +1,5 @@
 #!/bin/bash
-# First argument is either 'move' (cp to activedeploy) or anything else (no cp)
-# Second argument is path for .env file to load (absolute or relative to this script!)
+# First argument is path for .env file to load (absolute or relative to this script!)
 
 # $0 is argument 0, which is always the script path
 # % is a type of Parameter Expansion

@@ -7,7 +7,7 @@ services:
     volumes:
       # <volume name in volumes below>:<container destination directory>
       # This means the volume will be accessible from the container in the dest. directory in the container
-      - db-volume:${DB_RESOURCES_TARGET}
+      - d-dodeka-db-volume:${DB_RESOURCES_TARGET}
     command: -c config_file=${DB_CONF_FILE}
     # Environment file to load into the container
     env_file:
@@ -25,14 +25,10 @@ services:
     shm_size: 256m
 volumes:
   # This name should correspond to the volume mentioned in volumes above
-  db-volume:
+  d-dodeka-db-volume:
     # A local directory
     driver: local
-    driver_opts:
-      o: bind
-      type: none
-      # The directory in the host directory that will be loaded as the source for the volume
-      device: ${DB_RESOURCES_SOURCE}
+    name: d-dodeka-db-volume-staging
 networks:
   # Set up a network so that other containers on this network can access each other
   # A different container on this network can access this container by using the container name as the hostname

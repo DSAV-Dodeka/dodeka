@@ -17,7 +17,7 @@ host_port = "3141"
 container_port = "3141"
 resources_source = "/postgres_host/db"
 resources_target = "/dodeka-db"
-volume_name = "db-volume"
+volume_name = "d-dodeka-db-volume"
 db_name = "dodeka"
 db_user = "dodeka"
 # using default
@@ -84,3 +84,7 @@ allowed_envs = "\"envless\", \"local\", \"test\""
 api_root = "http://localhost:4243"
 valid_redirects = "\"http://localhost:3000/auth/callback\""
 credentials_url = "http://localhost:4243/credentials/"
+
+[confspawn_env.less]
+name = "less"
+version = "less"
