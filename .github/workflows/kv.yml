@@ -1,4 +1,4 @@
-name: DB Build
+name: KV Build
 
 on:
   workflow_call:
