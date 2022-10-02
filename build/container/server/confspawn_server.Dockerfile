@@ -23,5 +23,5 @@ RUN python3 -m venv $SERVER_ENV
 WORKDIR $SERVER_ENV
 COPY --from=poetry-install $INSTALL_ENV/dist/apiserver-*.whl $SERVER_ENV/
 RUN $SERVER_ENV/bin/pip install apiserver-*
-COPY confspawn_entrypoint.sh .
+COPY entrypoint.sh .
 ENTRYPOINT ["./entrypoint.sh"]
