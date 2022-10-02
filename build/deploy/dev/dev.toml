@@ -4,17 +4,17 @@
 config = "config.toml"
 
 [[sources]]
-source = "build/deploy/staging"
-target = "use/staging"
+source = "build/deploy/dev"
+target = "use/dev"
 
 [[sources]]
 source = "build/deploy/db"
-target = "use/staging/db"
+target = "use/dev/db"
 
 [[sources]]
 source = "build/deploy/kv"
-target = "use/staging/kv"
+target = "use/dev/kv"
 
 [[sources]]
 source = "build/deploy/server"
-target = "use/staging/server"
+target = "use/dev/server"

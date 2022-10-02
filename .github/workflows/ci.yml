@@ -9,7 +9,6 @@ on:
 
 jobs:
   config-deploy:
-    if: ${{ false }}
     runs-on: ubuntu-latest
 
     steps:
@@ -25,38 +24,9 @@ jobs:
       # Build config using tiptenbrink/confspawn
       - name: Config
         run: |
-          poetry run confspawn -c config.toml -s ./db/deploy -t ../use/deploydb
-          poetry run confspawn -c config.toml -s ./db -t ./db/configged
-          poetry run confspawn -c config.toml -s ./kv/deploy -t ../use/deploykv
-          poetry run confspawn -c config.toml -s ./dev -t ../use/dev
-          poetry run confspawn -c config.toml -s ./db/deploy -t ../use/dev/deploydb
-          poetry run confspawn -c config.toml -s ./kv/deploy -t ../use/dev/deploykv
-          poetry run confspawn -c config.toml -s ./server/deploy -t ../use/deployserver
-          poetry run confspawn -c config.toml -s ./test_sync -t ../data -r
-        working-directory: ${{ github.workspace }}/build
-      - uses: stefanzweifel/git-auto-commit-action@v4
-        if: github.event_name != 'pull_request'
-        with:
-          commit_message: Config build (automated)
-          file_pattern: use/
-
-
-
-  build-deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-      - run: pipx install poetry==1.2.1
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          cache: 'poetry'
-      - run: poetry install
-      # Build config using tiptenbrink/confspawn
-      - name: Config
-        run: |
           poetry run confrecipe -r build/deploy/staging/staging.toml -e staging
+          poetry run confrecipe -r build/deploy/dev/dev.toml -e localdev
+        working-directory: ${{ github.workspace }}/build
       - uses: stefanzweifel/git-auto-commit-action@v4
         if: github.event_name != 'pull_request'
         with:

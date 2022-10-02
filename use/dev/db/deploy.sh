@@ -23,7 +23,7 @@ if [ -n "$1" ]; then
 fi
 
 if [ "$1" = "rv" ]; then
-   docker volume rm '{{ db.volume_name }}-{{ confspawn_env.name }}' || exit
+   docker volume rm 'd-dodeka-db-volume-localdev' || exit
 fi
 
 # Create the directory that will serve as the source for the container volume
@@ -35,14 +35,14 @@ mkdir -p "${DB_RESOURCES_SOURCE}"
 docker compose pull && docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
 
 # Check if it is actually running by inspecting container state
-# {{ '{{' }} is for jinja2 escaping
-if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ db.container_name }} )" = "running" ];
+# {{ is for jinja2 escaping
+if [ "$( docker container inspect -f '{{.State.Status}}' d-dodeka-db-1 )" = "running" ];
 then
     echo "PostgreSQL startup successful."
 else
     echo "PostgreSQL startup failed."
     # If fail, check logs
-    docker container logs {{ db.container_name }}
+    docker container logs d-dodeka-db-1
     # Shut down and remove
     ./down.sh
     # Exit code 1 indicates failure

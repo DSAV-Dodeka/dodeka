@@ -23,7 +23,7 @@ if [ -n "$1" ]; then
 fi
 
 if [ "$1" = "rv" ]; then
-   docker volume rm 'd-dodeka-db-volume-staging'
+   docker volume rm 'd-dodeka-db-volume-staging' || exit
 fi
 
 # Create the directory that will serve as the source for the container volume

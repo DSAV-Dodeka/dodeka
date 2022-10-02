@@ -1,6 +1,5 @@
 #!/bin/bash
 # First argument is path for .env file to load (absolute or relative to this script!)
-# If second argument is 'rv', it will remove the volume (so it starts from a clean slate)
 
 # $0 is argument 0, which is always the script path
 # % is a type of Parameter Expansion
@@ -22,29 +21,32 @@ if [ -n "$1" ]; then
   . "$1"
 fi
 
-if [ "$1" = "rv" ]; then
-   docker volume rm '{{ db.volume_name }}-{{ confspawn_env.name }}' || exit
-fi
-
-# Create the directory that will serve as the source for the container volume
-# -p ensures parent directories are created and there is no error if it already exists
-mkdir -p "${DB_RESOURCES_SOURCE}"
+# Moves the configuration file in temporarily with password
+# Password must be an env variable set externally
+mkdir -p ./conf
+cp ./redis_nopass.conf ./conf/redis.conf
+echo "requirepass ${REDIS_PASSWORD}" >> ./conf/redis.conf
 
 # Run the docker-compose.yml
 # -d for detached/background
-docker compose pull && docker compose -p "${DB_COMPOSE_PROJECT_NAME}" up -d
+docker compose pull && docker compose -p "${KV_COMPOSE_PROJECT_NAME}" up -d
 
+echo "Waiting 1 second before inspecting Redis startup..."
+sleep 1
 # Check if it is actually running by inspecting container state
-# {{ '{{' }} is for jinja2 escaping
-if [ "$( docker container inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ db.container_name }} )" = "running" ];
+# {{ is for jinja2 escaping
+if [ "$( docker container inspect -f '{{.State.Status}}' ts-dodeka-kv-1 )" == "running" ];
 then
-    echo "PostgreSQL startup successful."
+    echo "Redis startup successful."
 else
-    echo "PostgreSQL startup failed."
+    echo "Redis startup failed."
     # If fail, check logs
-    docker container logs {{ db.container_name }}
+    docker container logs ts-dodeka-kv-1
     # Shut down and remove
     ./down.sh
     # Exit code 1 indicates failure
     exit 1
 fi
+
+# Remove the conf file so password is not easily visible
+rm -r ./conf
