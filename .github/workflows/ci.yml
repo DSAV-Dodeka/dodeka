@@ -39,7 +39,7 @@ jobs:
       env: 'staging'
 
   build_server:
-    if: ${{ false }}
+    # if: ${{ false }}
     uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@ci
     with:
       env: 'staging'
