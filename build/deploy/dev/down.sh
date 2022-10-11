@@ -6,5 +6,5 @@ cd "${0%/*}" || exit
 set -a
 # Load environment variables from dev.env
 . ./dev.env
-./deploykv/down.sh
-./deploydb/down.sh
+./kv/down.sh
+./db/down.sh
