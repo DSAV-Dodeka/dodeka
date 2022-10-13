@@ -2,11 +2,7 @@
 
 Everything is deployed from this repository. It also contains the "source" for the database (PostgreSQL) and key-value store (Redis).
 
-The most important file is `/build/config.toml`, which contains all practical configuration. In the `build`-folder you can find the source for all deploy scripts. Using the `confspawn` tool the actual scripts are built from these templates. The results you can find in the various folders in the `use` directory.
-
-//TODO barman source
-
-
+The most important file is `config.toml`, which contains all practical configuration. In the `build`-folder you can find the source for all deploy scripts (`build/deploy`) and container build files (`build/container`). Using the `confspawn` tool the actual scripts are built from these templates. The results you can find in the various folders in the `use` directory.
 
 ## Running
 
@@ -19,7 +15,6 @@ Then, you need a number of tools installed, which you can install from the links
 * [Docker Engine](https://docs.docker.com/engine/install/)
 
 If you're on Windows, installing [Docker Desktop](https://www.docker.com/products/docker-desktop) after you've installed WSL will make these available inside WSL if Docker Desktop is running.
-
 
 ### Dev
 
@@ -42,6 +37,17 @@ You will now have a `dodeka` folder containing all the necessary folders.
 In `/dev` you can find `devdeploy.sh` and `down.sh`. By running `./devdeploy.sh` you start both the database and key-value store.
 
 
+### Staging and production
+
+For a complete setup including backend, first ensure the containers are built using GitHub Actions for the environment you want to deploy. Then, SSH into the cloud server you want to deploy it to. First, ensure Python, Docker (including Compose), gpg, GitHub CLI and bash are installed on the target server. Next, log into GitHub CLI with an account with access to this repository and the `dodekasecrets` repository.
+
+To deploy, simply clone this repository and enter the main directory. Make sure you have updated the repository recently with the newest deploy script versions. Then, run `./deploy.sh production` for production. If you replace "production" with "staging", by default it will reset the database, so be careful! To deploy the staging version without reset, run `./deploy.sh staging update`.
+
+It will ask you for the passphrase of `dodekasecrets`. Paste it in and press enter, the rest will then happen automatically!
+
+That's it!
+
+
 #### Syncing the test database
 
 A number of test databases are stored inside the `DSAV-Dodeka/backend` repository. Running the commands above creates an empty database. To populate it with the latest test values, run:
@@ -50,6 +56,14 @@ A number of test databases are stored inside the `DSAV-Dodeka/backend` repositor
 poetry run python -c "from data.cli import run; run()"
 ```
 
+You will probably need to set the GHMOTEQLYNC_DODEKA_GH_TOKEN as an environment variable for access. The safest way to set this is to add it to a file like `sync.env`:
+
+```shell
+export GHMOTEQLYNC_DODEKA_GH_TOKEN="GitHub Personal Access Token"
+```
+
+Here you should replace "GitHub Personal Access Token" with the value of your token, which will need `repo` scope. You can then run `. sync.env` before running the script to sync the database.
+
 Ensure you are in the main `dodeka` directory, not in a subfolder.
 
 To create a backup, run:
@@ -57,72 +71,15 @@ To create a backup, run:
 poetry run psqlsync --config data/test.toml --action backup
 ```
 
-
-
 ## Building the scripts and containers
 
 * [Poetry](https://python-poetry.org/docs/master/)
     * Once installed, run `poetry update` inside the main directory. This will install the other requirements.
 
-### Scripts
+### Deploy scripts
 
-
-Building the deployment scripts is easy, look for the `build_*.sh` files inside `/build` and run the `poetry` commands inside them _from within the `/build` directory_.
-
-```shell
-poetry run python -c "from spawn_db import spawn_deploy; spawn_deploy()"
-poetry run python -c "from spawn_kv import spawn_deploy; spawn_deploy()"
-poetry run python -c "from spawn_dev import spawn_dev; spawn_dev()"
-```
-
+Building the deployment scripts is easy, simply run `build_deploy.sh` in the main directory.
 
 ### Containers
 
-The containers have dedicated GitHub Actions workflows to build them, so in general you should never have to build them locally.
-
-
-#### db
-
-The database is easy to build. Ensure the build config is generated (again, run from inside the `/build` folder):
-
-```shell
-poetry run python -c "from spawn_db import spawn_build; spawn_build('configged')"
-```
-
-Then, build the Docker container:
-
-```shell
-docker build --tag 'ghcr.io/dsav-dodeka/postgres' db/configged
-```
-
-
-#### kv
-
-Building the Redis container is, unfortunately, a lot harder as you need to manually load in the librejson.so library, which allows Redis to store JSON files. However, they do not freely publish librejson.so, you need to build it yourself or download it via an Enterprise account. Since the latter is not practical, we build it ourselves from their latest release.
-
-
-##### Building librejson.so
-
-First, build the config from the `/build` directory:
-
-```shell
-poetry run python -c "from spawn_kv import spawn_librejson; spawn_librejson('configged')"
-```
-
-For the next step, you need to have [GitHub CLI](https://github.com/cli/cli) installed. It is used for downloading the librejson source.
-Again from the `/build` directory:
-
-```shell
-./kv/librejson/configged/build_librejson.sh
-```
-
-This script will download the `RedisJSON/RedisJSON` GitHub project, which contains the source. It will untar it and then build a Docker container with Rust installed. The file will then be built from that container, after which it is copied from the container.
-
-
-##### Redis container
-
-Once you have the `librejson.so` in your `/build/kv` directory, building the Redis container is  easy:
-
-```shell
-docker build --tag 'ghcr.io/dsav-dodeka/redis' kv
-```
+The containers have dedicated GitHub Actions workflows to build them, so in general you should never have to build them locally. Take a look at the workflows to see how they are built.
