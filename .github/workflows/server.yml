@@ -1,6 +1,5 @@
 name: Server Build
 
-
 on:
   workflow_call:
     inputs:
@@ -59,7 +58,7 @@ jobs:
       - uses: actions/setup-node@v2
         if: steps.cached-authpage.outputs.cache-hit != 'true'
         with:
-          node-version: '16'
+          node-version: '18'
           cache: 'npm'
           cache-dependency-path: ${{ github.workspace }}/context/authpage/package-lock.json
       - name: Build credentials
