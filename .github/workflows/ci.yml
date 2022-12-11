@@ -35,13 +35,13 @@ jobs:
 
   build_db:
     # if: ${{ false }}
-    uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@ci
+    uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@main
     with:
       env: 'staging'
 
   build_server:
     # if: ${{ false }}
-    uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@ci
+    uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@main
     with:
       env: 'staging'
     secrets:
@@ -49,7 +49,7 @@ jobs:
 
   build_kv:
     # if: ${{ false }}
-    uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@ci
+    uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@main
     with:
       env: 'staging'
       
