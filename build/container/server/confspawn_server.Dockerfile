@@ -1,6 +1,6 @@
 FROM python:3.10-slim-bullseye AS poetry
 RUN python3 -m venv /opt/poetry
-RUN /opt/poetry/bin/pip install poetry==1.2.1
+RUN /opt/poetry/bin/pip install poetry==1.3.0
 
 FROM python:3.10-slim-bullseye AS poetry-install
 COPY --from=poetry /opt/poetry /opt/poetry
