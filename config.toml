@@ -52,7 +52,6 @@ frontend_client_id = "dodekaweb_client"
 backend_client_id = "dodekabackend_client"
 signup_url = "https://www.av40.nl/index.php?page=Inschrijfformulier&sid=1"
 onboard_email = "comcom@dsavdodeka.nl"
-smtp_server = "mail.dsavdodeka.nl"
 smtp_port = 587
 
 [confspawn_env.production]
@@ -64,6 +63,7 @@ api_root = "https://api.dsavdodeka.nl"
 valid_redirects = "\"https://dsavdodeka.nl/auth/callback\""
 credentials_url = "https://api.dsavdodeka.nl/credentials/"
 pages_url = "https://dsavdodeka.nl"
+smtp_server = "host.docker.internal"
 
 [confspawn_env.staging]
 name = "staging"
@@ -73,6 +73,7 @@ api_root = "https://apidemo.tipten.nl"
 valid_redirects = "\"https://demo.tipten.nl/auth/callback\""
 credentials_url = "https://apidemo.tipten.nl/credentials/"
 pages_url = "https://demo.tipten.nl"
+smtp_server = "mail.dsavdodeka.nl"
 
 [confspawn_env.test]
 name = "test"
@@ -88,6 +89,7 @@ allowed_envs = "\"envless\", \"localdev\", \"test\""
 api_root = "http://localhost:4243"
 valid_redirects = "\"http://localhost:3000/auth/callback\""
 credentials_url = "http://localhost:4243/credentials/"
+smtp_server = "mail.dsavdodeka.nl"
 
 [confspawn_env.less]
 name = "less"

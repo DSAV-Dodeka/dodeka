@@ -12,5 +12,5 @@ credentials_url = "{{ confspawn_env.credentials_url }}"
 signup_url = "{{ server.signup_url }}"
 
 onboard_email = "{{ server.onboard_email }}"
-smtp_server = "{{ server.smtp_server }}"
+smtp_server = "{{ confspawn_env.smtp_server }}"
 smtp_port = {{ server.smtp_port }}

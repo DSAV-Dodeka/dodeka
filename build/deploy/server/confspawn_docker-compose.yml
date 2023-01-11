@@ -18,6 +18,9 @@ services:
       - "${SERVER_HOST_HOST}:${SERVER_HOST_PORT}:${SERVER_CONTAINER_PORT}"
     # Shared memory size, defaults to 64m which can cause problems (apparently)
     shm_size: 256m
+    extra_hosts:
+          - "host.docker.internal:host-gateway"
+
 networks:
   # Set up a network so that other containers on this network can access each other
   # A different container on this network can access this container by using the container name as the hostname
