@@ -3,7 +3,7 @@ cd "${0%/*}" || exit
 CUR_DIR=$(pwd -P)
 set -a
 
-echo "Running staging deploy script with argument $1"
+echo "Running production deploy script with argument $1"
 
 if [ "$1" = "recreate" ]
 then
