@@ -36,6 +36,7 @@ jobs:
     # if: ${{ false }}
     strategy:
       matrix:
+        max-parallel: 1
         target: ['staging', 'production']
     uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@main
     with:
@@ -45,6 +46,7 @@ jobs:
     # if: ${{ false }}
     strategy:
       matrix:
+        max-parallel: 1
         target: [ 'staging', 'production' ]
     uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@main
     with:
@@ -56,6 +58,7 @@ jobs:
     # if: ${{ false }}
     strategy:
       matrix:
+        max-parallel: 1
         target: [ 'staging', 'production' ]
     uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@main
     with:
