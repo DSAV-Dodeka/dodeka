@@ -55,7 +55,7 @@ jobs:
         with:
           key: authpage-${{ hashFiles(format('{0}/context/authpage', github.workspace)) }}
           path: ${{ github.workspace }}/context/src/apiserver/resources/static/credentials
-      - uses: actions/setup-node@v2
+      - uses: actions/setup-node@v3
         if: steps.cached-authpage.outputs.cache-hit != 'true'
         with:
           node-version: '18'
@@ -91,7 +91,7 @@ jobs:
           echo "SERVER_TAG=$SERVER_IMAGE:${{ github.event.release.tag_name }},$SERVER_IMAGE:latest" >> $GITHUB_ENV
       # Build and push
       - name: Build and push
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v3
         with:
           context: ${{ github.workspace }}/context
           # Dockerfile tag

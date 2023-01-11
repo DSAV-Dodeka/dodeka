@@ -46,7 +46,7 @@ jobs:
           echo "DB_TAG=$DB_IMAGE:${{ github.event.release.tag_name }},$DB_IMAGE:latest" >> $GITHUB_ENV
       # Build and push
       - name: Build and push
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v3
         with:
           context: ${{ github.workspace }}/context
           # Dockerfile tag

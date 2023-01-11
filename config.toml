@@ -58,6 +58,7 @@ smtp_port = 465
 [confspawn_env.production]
 name = "production"
 version = "latest"
+allowed_envs = "\"production\""
 # Only the credentials url is with trailing slash, the rest should all be without
 api_root = "https://api.dsavdodeka.nl"
 valid_redirects = "\"https://dsavdodeka.nl/auth/callback\""
