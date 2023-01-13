@@ -1,0 +1,15 @@
+# We use a Docker image with postgres installed, be sure to use a different entrypoint so it doesn't start a server
+FROM postgres:14-bullseye
+# We install barman, cron and nano (the latter for convenience)
+RUN apt-get update
+RUN apt-get install barman cron nano -y
+RUN mkdir {{ db.barman_backup_dir }}
+RUN chown barman:barman {{ db.barman_backup_dir }}
+# The barman configuration
+ADD server.conf /etc/barman.d/{{ db.barman_server_name }}.conf
+RUN chown barman:barman /etc/barman.d/{{ db.barman_server_name }}.conf
+# Barman startup
+ADD barman_entrypoint.sh /var/lib/barman/barman_entrypoint.sh
+RUN chown -R barman:barman /var/lib/barman
+ENTRYPOINT ["/bin/bash", "/var/lib/barman/barman_entrypoint.sh"]
+CMD ["/bin/bash"]
