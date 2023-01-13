@@ -22,7 +22,7 @@ if [ -n "$1" ]; then
   . "$1"
 fi
 
-if [ "$1" = "rv" ]; then
+if [ "$2" = "rv" ]; then
    docker volume rm 'd-dodeka-db-volume-staging' || exit
 fi
 
