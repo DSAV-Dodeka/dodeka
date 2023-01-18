@@ -12,4 +12,3 @@ RUN chown barman:barman /etc/barman.d/{{ db.barman_server_name }}.conf
 ADD barman_entrypoint.sh /var/lib/barman/barman_entrypoint.sh
 RUN chown -R barman:barman /var/lib/barman
 ENTRYPOINT ["/bin/bash", "/var/lib/barman/barman_entrypoint.sh"]
-CMD ["/bin/bash"]

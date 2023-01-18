@@ -25,4 +25,4 @@ cronjob="0 4 * * * $croncmd"
 barman backup --wait {{ db.barman_server_name }}
 barman check {{ db.barman_server_name }}
 
-/bin/bash
+while true; do sleep 2; done
