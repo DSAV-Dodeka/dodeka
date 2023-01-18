@@ -20,6 +20,7 @@ fi
 
 if [ "$1" = "rv" ]; then
    docker volume rm 'b-dodeka-backup-volume-staging' || exit
+   docker volume rm 'b-dodeka-backup-volume-recover-staging' || exit
 fi
 
 # Run the docker-compose.yml

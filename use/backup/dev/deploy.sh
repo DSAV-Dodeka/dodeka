@@ -20,6 +20,7 @@ fi
 
 if [ "$1" = "rv" ]; then
    docker volume rm 'b-dodeka-backup-volume-localdev' || exit
+   docker volume rm 'b-dodeka-backup-volume-recover-localdev' || exit
 fi
 
 # Run the docker-compose.yml

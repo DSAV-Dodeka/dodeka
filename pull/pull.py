@@ -29,7 +29,7 @@ def move(time: str, env_str: str):
 
 def move_backup(time: str, env_str: str):
     # Move deploy target to env folder for history
-    print("Moving deployment scripts...")
+    print("Moving backup deploy script...")
     use_src_path = Path(f"./use/backup/{env_str}")
     deploy_target_path = Path(f"./deployments/{env_str}/backupdeploy{time}")
     deploy_target_path.parent.mkdir(parents=True, exist_ok=True)

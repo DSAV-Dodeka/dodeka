@@ -20,6 +20,7 @@ fi
 
 if [ "$1" = "rv" ]; then
    docker volume rm '{{ backup.volume_name }}-{{ confspawn_env.name }}' || exit
+   docker volume rm '{{ backup.recover_volume }}-{{ confspawn_env.name }}' || exit
 fi
 
 # Run the docker-compose.yml

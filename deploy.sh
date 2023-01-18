@@ -8,6 +8,13 @@
 # - modern python3 must be available
 # First argument is the environment mode ('staging', 'production', 'test')
 # Second argument is passed to the deployment script
+
+if [ $# -eq 0 ]; then
+    # >&2 is output to stderr
+    >&2 echo "No arguments provided"
+    exit 1
+fi
+
 ENV_STR="$1"
 DEPLOY_ARG="$2"
 echo "Setting up deployment in $ENV_STR mode..."
