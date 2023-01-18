@@ -126,6 +126,8 @@ rm -rf /var/lib/docker/volumes/d-dodeka-db-volume-production/_data
 cp -R /var/lib/docker/volumes/b-dodeka-backup-volume-recover-production/_data /var/lib/docker/volumes/d-dodeka-db-volume-production/
 ```
 
+Then restart everything. Note that there might be issues if there weren't enough transactions. 
+
 ## Building the scripts and containers
 
 * [Poetry](https://python-poetry.org/docs/master/)
