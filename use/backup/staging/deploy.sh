@@ -26,10 +26,6 @@ if [ "$2" = "rv" ]; then
    docker volume rm 'd-dodeka-db-volume-staging' || exit
 fi
 
-# Create the directory that will serve as the source for the container volume
-# -p ensures parent directories are created and there is no error if it already exists
-mkdir -p "${BACKUP_RESOURCES_SOURCE}"
-
 # Run the docker-compose.yml
 # -d for detached/background
 docker compose pull && docker compose -p "${BACKUP_COMPOSE_PROJECT_NAME}" up -d
