@@ -34,7 +34,7 @@ mkdir -p "${BACKUP_RESOURCES_SOURCE}"
 # -d for detached/background
 docker compose pull && docker compose -p "${BACKUP_COMPOSE_PROJECT_NAME}" up -d
 
-echo "Waiting 5 seconds before inspecting server startup..."
+echo "Waiting 35 seconds before inspecting server startup..."
 sleep 35
 
 # Check if it is actually running by inspecting container state
