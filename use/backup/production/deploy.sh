@@ -13,17 +13,13 @@ cd "${0%/*}" || exit
 set -a
 # Load environment variables from deploy.env file
 . ./deploy.env
-
 # -n means string is not null
-if [ -n "$1" ]; then
-  # ignore warning
-  # shellcheck source=/dev/null
-  # load additional env file, i.e. for final dev or deploy such as passwords
-  . "$1"
+if [ -n "$OVERRIDE_BARMAN_PASSWORD" ]; then
+  BARMAN_PASSWORD="$OVERRIDE_BARMAN_PASSWORD"
 fi
 
-if [ "$2" = "rv" ]; then
-   docker volume rm 'd-dodeka-db-volume-production' || exit
+if [ "$1" = "rv" ]; then
+   docker volume rm 'b-dodeka-backup-volume-production' || exit
 fi
 
 # Run the docker-compose.yml
