@@ -1,0 +1,18 @@
+# confspawn recipe file
+
+config = "config.toml"
+
+[[sources]]
+source = "build/deploy/backup"
+target = "use/backup/dev"
+env = "localdev"
+
+[[sources]]
+source = "build/deploy/backup"
+target = "use/backup/staging"
+env = "staging"
+
+[[sources]]
+source = "build/deploy/backup"
+target = "use/backup/production"
+env = "production"

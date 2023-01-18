@@ -1,4 +1,4 @@
-name: DB Build
+name: Backup Build
 
 on:
   workflow_call:
@@ -8,7 +8,7 @@ on:
           type: string
 
 jobs:
-  build_db:
+  build_backup:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +21,7 @@ jobs:
       - run: poetry install
       - name: Config
         run: |
-          poetry run confspawn -c config.toml -s ./build/container/db -t ./context -e ${{ inputs.env }}
+          poetry run confspawn -c config.toml -s ./build/container/backup -t ./context -e ${{ inputs.env }}
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
         with:
@@ -33,24 +33,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       # Set env from config.toml
-      - name: Set env.DB_TAG
+      - name: Set env.BACKUP_TAG
         if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
         run: |
-          export DB_IMAGE=$(poetry run confenv -c config.toml -v db.image_name -e ${{ inputs.env }})
-          export DB_VERSION=$(poetry run confenv -c config.toml -v confspawn_env.version -e ${{ inputs.env }})
-          echo "DB_TAG=$DB_IMAGE:$DB_VERSION" >> $GITHUB_ENV
-      - name: Set env.DB_TAG if release
+          export BACKUP_IMAGE=$(poetry run confenv -c config.toml -v backup.image_name -e ${{ inputs.env }})
+          export BACKUP_VERSION=$(poetry run confenv -c config.toml -v confspawn_env.version -e ${{ inputs.env }})
+          echo "BACKUP_TAG=$BACKUP_IMAGE:$BACKUP_VERSION" >> $GITHUB_ENV
+      - name: Set env.BACKUP_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
-          export DB_IMAGE=$(poetry run confenv -c config.toml -v db.image_name)
-          echo "DB_TAG=$DB_IMAGE:${{ github.event.release.tag_name }},$DB_IMAGE:latest" >> $GITHUB_ENV
+          export BACKUP_IMAGE=$(poetry run confenv -c config.toml -v backup.image_name)
+          echo "BACKUP_TAG=$BACKUP_IMAGE:${{ github.event.release.tag_name }},$BACKUP_IMAGE:latest" >> $GITHUB_ENV
       # Build and push
       - name: Build and push
         uses: docker/build-push-action@v3
         with:
           context: ${{ github.workspace }}/context
           # Dockerfile tag
-          tags: ${{ env.DB_TAG }}
+          tags: ${{ env.BACKUP_TAG }}
           cache-from: type=gha
           cache-to: type=gha, mode=max
           push: ${{ github.event_name != 'pull_request' }}

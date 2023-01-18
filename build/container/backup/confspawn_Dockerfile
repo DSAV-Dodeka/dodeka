@@ -3,8 +3,8 @@ FROM postgres:14-bullseye
 # We install barman, cron and nano (the latter for convenience)
 RUN apt-get update
 RUN apt-get install barman cron nano -y
-RUN mkdir {{ db.barman_backup_dir }}
-RUN chown barman:barman {{ db.barman_backup_dir }}
+RUN mkdir {{ backup.resources_target }}
+RUN chown barman:barman {{ backup.resources_target }}
 # The barman configuration
 ADD server.conf /etc/barman.d/{{ db.barman_server_name }}.conf
 RUN chown barman:barman /etc/barman.d/{{ db.barman_server_name }}.conf
