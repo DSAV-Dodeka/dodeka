@@ -8,6 +8,7 @@ services:
       # <volume name in volumes below>:<container destination directory>
       # This means the volume will be accessible from the container in the dest. directory in the container
       - b-dodeka-backup-volume:${BACKUP_RESOURCES_TARGET}
+      - b-dodeka-backup-volume-recover:${BACKUP_RECOVER_TARGET}
     # Environment file to load into the container
     env_file:
       - deploy.env
@@ -23,6 +24,10 @@ volumes:
     # A local directory
     driver: local
     name: b-dodeka-backup-volume-production
+  b-dodeka-backup-volume-recover:
+    # A local directory
+    driver: local
+    name: b-dodeka-backup-volume-recover-production
 networks:
   # Set up a network so that other containers on this network can access each other
   # A different container on this network can access this container by using the container name as the hostname

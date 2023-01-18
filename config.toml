@@ -11,6 +11,8 @@ image_name = "ghcr.io/dsav-dodeka/barman"
 resources_target = "/dodeka_barman"
 resources_source = "/barman_host/backup"
 volume_name = "b-dodeka-backup-volume"
+recover_volume = "b-dodeka-backup-volume-recover"
+recover_target = "/dodeka_recover"
 
 
 [db]
