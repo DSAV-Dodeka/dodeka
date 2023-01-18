@@ -35,7 +35,7 @@ jobs:
           file_pattern: use/
 
   build_db:
-    if: ${{ false }}
+    # if: ${{ false }}
     strategy:
       matrix:
         target: ['production', 'staging']
@@ -44,7 +44,7 @@ jobs:
       env: ${{ matrix.target }}
 
   build_server:
-    if: ${{ false }}
+    # if: ${{ false }}
     strategy:
       matrix:
         target: [ 'production', 'staging' ]
@@ -55,7 +55,7 @@ jobs:
       GH_DODEKACOMCOM_TOKEN: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
 
   build_kv:
-    if: ${{ false }}
+    # if: ${{ false }}
     strategy:
       matrix:
         target: [ 'production', 'staging' ]
@@ -64,7 +64,7 @@ jobs:
       env: ${{ matrix.target }}
 
   build_backup:
-    if: ${{ false }}
+    # if: ${{ false }}
     strategy:
       matrix:
         target: [ 'staging', 'localdev', 'production' ]
