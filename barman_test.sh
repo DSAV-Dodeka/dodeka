@@ -1,1 +1,0 @@
-poetry run confspawn -c config.toml -s ./build/barman/ -t ./barman
