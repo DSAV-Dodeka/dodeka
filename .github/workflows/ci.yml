@@ -35,19 +35,19 @@ jobs:
           file_pattern: use/
 
   build_db:
-    if: ${{ false }}
+    # if: ${{ false }}
     strategy:
       matrix:
-        target: ['localdev', 'staging']
+        target: ['localdev', 'production']
     uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@main
     with:
       env: ${{ matrix.target }}
 
   build_server:
-    if: ${{ false }}
+    # if: ${{ false }}
     strategy:
       matrix:
-        target: [ 'staging' ]
+        target: [ 'localdev', 'production']
     uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@main
     with:
       env: ${{ matrix.target }}
@@ -55,10 +55,10 @@ jobs:
       GH_DODEKACOMCOM_TOKEN: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
 
   build_kv:
-    if: ${{ false }}
+    # if: ${{ false }}
     strategy:
       matrix:
-        target: [ 'localdev', 'staging' ]
+        target: [ 'localdev', 'production' ]
     uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@main
     with:
       env: ${{ matrix.target }}
