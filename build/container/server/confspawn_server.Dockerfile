@@ -1,8 +1,8 @@
-FROM python:3.10-slim-bullseye AS poetry
+FROM python:3.11-slim-bullseye AS poetry
 RUN python3 -m venv /opt/poetry
 RUN /opt/poetry/bin/pip install poetry==1.3.0
 
-FROM python:3.10-slim-bullseye AS poetry-install
+FROM python:3.11-slim-bullseye AS poetry-install
 COPY --from=poetry /opt/poetry /opt/poetry
 ENV PATH="/opt/poetry/bin:${PATH}"
 WORKDIR /dodeka/server
@@ -16,7 +16,7 @@ COPY ./define.toml ./src/apiserver/resources/define.toml
 COPY ./env.toml ./src/apiserver/resources/env.toml
 RUN poetry build
 
-FROM python:3.10-slim-bullseye AS runtime
+FROM python:3.11-slim-bullseye AS runtime
 ARG SERVER_ENV=/dodeka/server
 ARG INSTALL_ENV=/dodeka/server
 RUN python3 -m venv $SERVER_ENV

@@ -1,5 +1,4 @@
 #!/bin/bash
-echo $PGPASSWORD
 psql -c 'SELECT version()' -U barman -h {{ db.container_name }} -p 3141 postgres || exit
 service cron start
 # It creates a slot, this might already exist but that isn't a problem
