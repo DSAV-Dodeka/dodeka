@@ -20,6 +20,11 @@ services:
     shm_size: 256m
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Prevent too large core dumps
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
 
 networks:
   # Set up a network so that other containers on this network can access each other
