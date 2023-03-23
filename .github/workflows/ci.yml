@@ -38,7 +38,7 @@ jobs:
     # if: ${{ false }}
     strategy:
       matrix:
-        target: ['localdev']
+        target: ['localdev', 'staging']
     uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@main
     with:
       env: ${{ matrix.target }}
@@ -47,7 +47,7 @@ jobs:
     # if: ${{ false }}
     strategy:
       matrix:
-        target: [ 'localdev']
+        target: [ 'localdev', 'staging']
     uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@main
     with:
       env: ${{ matrix.target }}
@@ -58,7 +58,7 @@ jobs:
     # if: ${{ false }}
     strategy:
       matrix:
-        target: [ 'localdev' ]
+        target: [ 'localdev', 'staging' ]
     uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@main
     with:
       env: ${{ matrix.target }}
