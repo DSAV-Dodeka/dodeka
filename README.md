@@ -47,6 +47,9 @@ It will ask you for the passphrase of `dodekasecrets`. Paste it in and press ent
 
 That's it!
 
+#### How to shutdown
+
+After running deploy, it will create a new directory in `deployments/active<environment>` and move the scripts of the right environment's `use` folder. This will contain all scripts for the deployment, so you can also run `./down.sh` from there. In case there is a crash in one of the containers, do this so the startup will be clean.
 
 #### Syncing the test database
 
