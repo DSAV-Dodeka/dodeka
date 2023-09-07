@@ -36,7 +36,7 @@ db_name_admin = "postgres"
 image_desc = "Image for D.S.A.V. Dodeka PostgreSQL instance."
 
 [kv]
-redisjson_version = "v2.2.0"
+redisjson_version = "v2.6.6"
 project = "ts-dodeka"
 service_name = "kv"
 # must match <project>-<service_name>-1

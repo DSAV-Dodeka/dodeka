@@ -1,4 +1,4 @@
-FROM postgres:14-bullseye
+FROM postgres:15-bookworm
 ADD postgresql.conf {{ db.postgres_conf_dir }}/postgresql.conf
 ADD pg_hba.conf {{ db.postgres_conf_dir }}/pg_hba.conf
 ADD barman.sh docker-entrypoint-initdb.d/barman.sh
