@@ -7,7 +7,7 @@ authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.10, <3.12"
-confspawn = "^0.4.1"
+confspawn = "^0.5.0"
 psqlsync = { version = "^0.2.1", extras = ["dirgh"] }
 
 [build-system]
