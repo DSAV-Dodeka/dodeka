@@ -1,0 +1,47 @@
+[main]
+docker_net_name = "dodeka_repl"
+
+[db]
+project = "d-dodeka_repl"
+service_name = "db"
+# must match <project>-<service_name>-1
+container_name = "d-dodeka_repl-db-1"
+barman_server_name = "d-dodeka_repl-db-1"
+postgres_conf_dir = "/dodeka_conf"
+init_dir = "/dodeka_init"
+# metaconfig
+image_name = "ghcr.io/dsav-dodeka/postgres"
+host_host = "127.0.0.1"
+host_port = "3142"
+container_port = "3141"
+resources_target = "/dodeka-db"
+volume_name = "d-dodeka_repl-db-volume"
+db_name = "dodeka"
+db_user = "dodeka"
+# using default
+db_name_admin = "postgres"
+image_desc = "Image for D.S.A.V. Dodeka PostgreSQL instance."
+
+
+[confspawn_env.production]
+name = "production"
+version = "latest"
+
+[confspawn_env.staging]
+name = "staging"
+version = "staging"
+
+[confspawn_env.test]
+name = "test"
+version = "test"
+
+[confspawn_env.localdev]
+name = "localdev"
+version = "localdev"
+db_password = "postpost"
+barman_password = "barbar"
+redis_password = "redisredis"
+
+[confspawn_env.less]
+name = "less"
+version = "less"
