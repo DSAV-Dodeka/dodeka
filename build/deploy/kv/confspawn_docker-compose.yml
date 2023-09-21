@@ -8,6 +8,7 @@ services:
       # This means the volume will be accessible from the container in the dest. directory in the container
       # Used to load in configuration including password
       - ./conf:/usr/local/etc/redis
+    restart: {{ confspawn_env.restart }}
 networks:
   default:
     external: true
