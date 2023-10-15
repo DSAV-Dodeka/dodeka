@@ -36,6 +36,18 @@ You will now have a `dodeka` folder containing all the necessary folders.
 
 In `/dev` you can find `devdeploy.sh` and `down.sh`. By running `./devdeploy.sh` you start both the database and key-value store.
 
+If you're deploying from WSL, run `devedeploy.sh port` instead. This is because if your container is running inside WSL, for it to be accessible from outside WSL, the host needs to be 0.0.0.0 instead of localhost.
+
+#### Troubleshooting
+
+The following error can occasionally occur:
+
+```
+cp: cannot create regular file './conf/redis.conf': Permission denied
+./kv/deploy.sh: line 28: ./conf/redis.conf: Permission denied
+```
+
+If this happens, simply delete the `conf` directory in `use/dev/kv` and retry.
 
 ### Staging and production
 
