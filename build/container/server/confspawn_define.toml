@@ -4,13 +4,8 @@ api_root = "{{ confspawn_env.api_root }}"
 issuer = "{{ server.issuer }}"
 frontend_client_id = "{{ server.frontend_client_id }}"
 backend_client_id = "{{ server.backend_client_id }}"
-
 valid_redirects = [{{ confspawn_env.valid_redirects }}]
 
 credentials_url = "{{ confspawn_env.credentials_url }}"
-
 signup_url = "{{ server.signup_url }}"
-
 onboard_email = "{{ server.onboard_email }}"
-smtp_server = "{{ confspawn_env.smtp_server }}"
-smtp_port = {{ server.smtp_port }}

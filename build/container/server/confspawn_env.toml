@@ -8,3 +8,6 @@ DB_NAME_ADMIN="{{ db.db_name_admin }}"
 
 KV_HOST="{{ kv.container_name }}"
 KV_PORT="{{ kv.container_port }}"
+
+SMTP_SERVER ="{{ confspawn_env.smtp_server }}"
+SMTP_PORT ="{{ server.smtp_port }}"
