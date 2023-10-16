@@ -27,7 +27,6 @@ jobs:
           poetry run confrecipe -r build/deploy/staging/staging.toml -e staging
           poetry run confrecipe -r build/deploy/dev/dev.toml -e localdev
           poetry run confrecipe -r build/deploy/production/production.toml -e production
-          poetry run confrecipe -r build/deploy/backup/backup.toml
       - uses: stefanzweifel/git-auto-commit-action@v4
         if: github.event_name != 'pull_request'
         with:
@@ -62,13 +61,3 @@ jobs:
     uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@main
     with:
       env: ${{ matrix.target }}
-
-  build_backup:
-    if: ${{ false }}
-    strategy:
-      matrix:
-        target: [ 'localdev', 'staging' ]
-    uses: DSAV-Dodeka/dodeka/.github/workflows/backup.yml@main
-    with:
-      env: ${{ matrix.target }}
-      

@@ -98,66 +98,6 @@ From your own computer, you can then use ssh copy to transfer the file.
 scp backend@<ip address>:/home/backend/dodeka/data/backups/backup-20230430-154532-dodeka.dump.gz <destination>
 ```
 
-
-
-
-## Backup recovery using barman
-
-Enter the barman container using i.e.:
-
-```shell
-docker exec -it b-dodeka-backup-1 /bin/bash
-```
-
-You can check the latest backup with this command:
-
-```shell
-barman show-backup d-dodeka-db-1 latest
-```
-
-Here it will display something like:
-
-```
-Backup 20230118T124531:
-  Server Name            : d-dodeka-db-1
- 
-  ...
-
-  Base backup information:
-    ...
-    Begin time           : 2023-01-18 12:45:31.095524+00:00
-    End time             : 2023-01-18 12:45:31.341450+00:00
-    ...
-
-  ...
-
-  Catalog information:
-    ...
-    Previous Backup      : 20230118T120301
-    ...
-
-```
-
-Be sure to find a backup made before something went wrong!
-
-For the target time you can use some time after the end time until the next backup (best to just use end time) and for the Backup ID use the ID displayed after 'Backup' in the first line.
-
-```shell
-barman recover --target-time "<End time>" d-dodeka-db-1 <Backup ID> /dodeka_recover
-barman recover --target-time "2023-01-18 12:45:31.341450+00:00" d-dodeka-db-1 20230118T124531 /dodeka_recover
-```
-
-Be sure to turn the database off!
-
-Then switch to the root user. BE CAREFUL IN THIS STEP.
-
-```shell
-rm -rf /var/lib/docker/volumes/d-dodeka-db-volume-production/_data
-cp -R /var/lib/docker/volumes/b-dodeka-backup-volume-recover-production/_data /var/lib/docker/volumes/d-dodeka-db-volume-production/
-```
-
-Then restart everything. Note that there might be issues if there weren't enough transactions. 
-
 ## Building the scripts and containers
 
 * [Poetry](https://python-poetry.org/docs/master/)
