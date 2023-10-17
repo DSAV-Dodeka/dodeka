@@ -91,7 +91,7 @@ restart = "always"
 [confspawn_env.test]
 name = "test"
 version = "test"
-restart = "\"no\""
+restart = "no"
 
 [confspawn_env.localdev]
 name = "localdev"
@@ -104,7 +104,7 @@ api_root = "http://localhost:4243"
 valid_redirects = "\"http://localhost:3000/auth/callback\""
 credentials_url = "http://localhost:4243/credentials/"
 smtp_server = "mail.dsavdodeka.nl"
-restart = "\"no\""
+restart = "no"
 
 [confspawn_env.less]
 name = "less"

@@ -2,12 +2,12 @@ First, prepare the new image with the new version of Postgres. Then, get both co
 
 For this, deploy using `use/repl`, ensuring that all the settings are what you want the new database to have. The password can be set at every start, so that doesn't matter. Later, we will change the volume name before running it the normal way.
 
-Next log into the old database, e.g. using `docker exec -it d-dodeka-db-1 /bin/bash`. Here 'd-dodeka-db-1' is the container name of the old database.
+Next log into the old database, e.g. using `docker exec -it -w /dodeka-db d-dodeka-db-1 /bin/bash`. Here 'd-dodeka-db-1' is the container name of the old database and '-w /dodeka-db' means we enter the main DB directory.
 
 Then, use `pg_dumpall`, where '3141' is the local port it's running on and 'dodeka' is the main db user:
 
 ```shell
-pg_dumpall -p 3141 -U dodeka > upgrade_dump.sql
+pg_dumpall -p 3141 -U dodeka > ./upgrade_dump.sql
 ```
 
 Ensure that after this dump is made, no more changes are made to the db, as these will be lost. Best is to shut off any external access (e.g. by shutting down the webserver for a short moment).
@@ -40,3 +40,26 @@ docker volume rm d-dodeka_repl-db-volume-localdev
 ```
 
 Now, ensure your old deployment uses the new image and restart it. Everything should work then.
+
+### Recap
+
+```shell
+# Update dodeka repo on server
+
+# Deploy repl database
+cd use/repl
+./repldeploy.sh
+
+# Turn off database access (shut down apiserver)
+
+# Enter database
+docker exec -it d-dodeka-db-1 /bin/bash
+
+# Dump all
+pg_dumpall -p 3141 -U dodeka > upgrade_dump.sql
+
+# Copy from old database to repl database
+docker cp d-dodeka-db-1:/dodeka-db/upgrade_dump.sql d-dodeka_repl-db-1:/dodeka-db/upgrade_dump.sql
+
+#
+```

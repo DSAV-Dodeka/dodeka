@@ -26,10 +26,12 @@ image_desc = "Image for D.S.A.V. Dodeka PostgreSQL instance."
 [confspawn_env.production]
 name = "production"
 version = "v2.0.0"
+restart = "no"
 
 [confspawn_env.staging]
 name = "staging"
 version = "staging"
+restart = "no"
 
 [confspawn_env.test]
 name = "test"
@@ -41,6 +43,7 @@ version = "localdev"
 db_password = "postpost"
 barman_password = "barbar"
 redis_password = "redisredis"
+restart = "no"
 
 [confspawn_env.less]
 name = "less"
