@@ -27,6 +27,7 @@ def move(time: str, env_str: str):
     secr_target_path = target_path.joinpath("secrets")
     shutil.copytree(secr_src_path, secr_target_path)
 
+
 def move_backup(time: str, env_str: str):
     # Move deploy target to env folder for history
     print("Moving backup deploy script...")

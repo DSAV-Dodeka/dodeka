@@ -68,7 +68,7 @@ After running deploy, it will create a new directory in `deployments/active<envi
 A number of test databases are stored inside the `DSAV-Dodeka/backend` repository. Running the commands above creates an empty database. To populate it with the latest test values, run:
 
 ```shell
-poetry run python -c "from data.cli import run; run()"
+poetry run python -c "from use.data_sync.cli import run; run()"
 ```
 
 You will probably need to set the GHMOTEQLYNC_DODEKA_GH_TOKEN as an environment variable for access. The safest way to set this is to add it to a file like `sync.env`:

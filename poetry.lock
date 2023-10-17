@@ -131,17 +131,17 @@ tomli = ">=2.0.1,<3.0.0"
 
 [[package]]
 name = "dirgh"
-version = "0.2.1"
+version = "0.3.0"
 description = "With dirgh you can easily download a directory from GitHub programmatically from Python or using the CLI."
 optional = false
 python-versions = ">=3.9,<4.0"
 files = [
-    {file = "dirgh-0.2.1-py3-none-any.whl", hash = "sha256:f1899ba496b34a819ffd9ceeb541d61e1b37060d21a8389d65443a83fe3d8038"},
-    {file = "dirgh-0.2.1.tar.gz", hash = "sha256:6c511344ad814a7e6fa65cd569c4b26747bdf4c9ca1ef791cdc793e4305e82ad"},
+    {file = "dirgh-0.3.0-py3-none-any.whl", hash = "sha256:12d4a1f43a64fba1e85414446c4872d618fc636f7e204848119a0597d63ea125"},
+    {file = "dirgh-0.3.0.tar.gz", hash = "sha256:f43ff207a69a6774b0102ee13df117238f0c55c27b27a81f7ead4366f1fbe4b4"},
 ]
 
 [package.dependencies]
-httpx = ">=0.23.0,<0.25.0"
+httpx = ">=0.23.0,<0.26.0"
 trio = ">=0.20.0,<0.23.0"
 
 [[package]]
@@ -171,13 +171,13 @@ files = [
 
 [[package]]
 name = "httpcore"
-version = "0.17.3"
+version = "0.18.0"
 description = "A minimal low-level HTTP client."
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "httpcore-0.17.3-py3-none-any.whl", hash = "sha256:c2789b767ddddfa2a5782e3199b2b7f6894540b17b16ec26b2c4d8e103510b87"},
-    {file = "httpcore-0.17.3.tar.gz", hash = "sha256:a6f30213335e34c1ade7be6ec7c47f19f50c56db36abef1a9dfa3815b1cb3888"},
+    {file = "httpcore-0.18.0-py3-none-any.whl", hash = "sha256:adc5398ee0a476567bf87467063ee63584a8bce86078bf748e48754f60202ced"},
+    {file = "httpcore-0.18.0.tar.gz", hash = "sha256:13b5e5cd1dca1a6636a6aaea212b19f4f85cd88c366a2b82304181b769aab3c9"},
 ]
 
 [package.dependencies]
@@ -192,18 +192,18 @@ socks = ["socksio (==1.*)"]
 
 [[package]]
 name = "httpx"
-version = "0.24.1"
+version = "0.25.0"
 description = "The next generation HTTP client."
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "httpx-0.24.1-py3-none-any.whl", hash = "sha256:06781eb9ac53cde990577af654bd990a4949de37a28bdb4a230d434f3a30b9bd"},
-    {file = "httpx-0.24.1.tar.gz", hash = "sha256:5853a43053df830c20f8110c5e69fe44d035d850b2dfe795e196f00fdb774bdd"},
+    {file = "httpx-0.25.0-py3-none-any.whl", hash = "sha256:181ea7f8ba3a82578be86ef4171554dd45fec26a02556a744db029a0a27b7100"},
+    {file = "httpx-0.25.0.tar.gz", hash = "sha256:47ecda285389cb32bb2691cc6e069e3ab0205956f681c5b2ad2325719751d875"},
 ]
 
 [package.dependencies]
 certifi = "*"
-httpcore = ">=0.15.0,<0.18.0"
+httpcore = ">=0.18.0,<0.19.0"
 idna = "*"
 sniffio = "*"
 
@@ -268,6 +268,16 @@ files = [
     {file = "MarkupSafe-2.1.3-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:5bbe06f8eeafd38e5d0a4894ffec89378b6c6a625ff57e3028921f8ff59318ac"},
     {file = "MarkupSafe-2.1.3-cp311-cp311-win32.whl", hash = "sha256:dd15ff04ffd7e05ffcb7fe79f1b98041b8ea30ae9234aed2a9168b5797c3effb"},
     {file = "MarkupSafe-2.1.3-cp311-cp311-win_amd64.whl", hash = "sha256:134da1eca9ec0ae528110ccc9e48041e0828d79f24121a1a146161103c76e686"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:f698de3fd0c4e6972b92290a45bd9b1536bffe8c6759c62471efaa8acb4c37bc"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:aa57bd9cf8ae831a362185ee444e15a93ecb2e344c8e52e4d721ea3ab6ef1823"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ffcc3f7c66b5f5b7931a5aa68fc9cecc51e685ef90282f4a82f0f5e9b704ad11"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:47d4f1c5f80fc62fdd7777d0d40a2e9dda0a05883ab11374334f6c4de38adffd"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:1f67c7038d560d92149c060157d623c542173016c4babc0c1913cca0564b9939"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:9aad3c1755095ce347e26488214ef77e0485a3c34a50c5a5e2471dff60b9dd9c"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-musllinux_1_1_i686.whl", hash = "sha256:14ff806850827afd6b07a5f32bd917fb7f45b046ba40c57abdb636674a8b559c"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:8f9293864fe09b8149f0cc42ce56e3f0e54de883a9de90cd427f191c346eb2e1"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-win32.whl", hash = "sha256:715d3562f79d540f251b99ebd6d8baa547118974341db04f5ad06d5ea3eb8007"},
+    {file = "MarkupSafe-2.1.3-cp312-cp312-win_amd64.whl", hash = "sha256:1b8dd8c3fd14349433c79fa8abeb573a55fc0fdd769133baac1f5e07abf54aeb"},
     {file = "MarkupSafe-2.1.3-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:8e254ae696c88d98da6555f5ace2279cf7cd5b3f52be2b5cf97feafe883b58d2"},
     {file = "MarkupSafe-2.1.3-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:cb0932dc158471523c9637e807d9bfb93e06a95cbf010f1a38b98623b929ef2b"},
     {file = "MarkupSafe-2.1.3-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9402b03f1a1b4dc4c19845e5c749e3ab82d5078d16a2a4c2cd2df62d57bb0707"},
@@ -316,23 +326,23 @@ attrs = ">=19.2.0"
 
 [[package]]
 name = "psqlsync"
-version = "0.2.2"
+version = "0.2.3"
 description = "Tool to create basic PostgreSQL backups and restore them from local files."
 optional = false
 python-versions = ">=3.9,<4.0"
 files = [
-    {file = "psqlsync-0.2.2-py3-none-any.whl", hash = "sha256:ed8bc5db5edab4a9e05dfa9c7ed664014175f1285414e9481b826d0af106703e"},
-    {file = "psqlsync-0.2.2.tar.gz", hash = "sha256:eed392a469bb52795360bc300b5d969fa11904afb0d762de05ba6488c0a773db"},
+    {file = "psqlsync-0.2.3-py3-none-any.whl", hash = "sha256:fb7be6b9bb8120f727ce9c84e98992ea4c345112b863cb0a4912e5d47f9d489c"},
+    {file = "psqlsync-0.2.3.tar.gz", hash = "sha256:a76dcfe7c43fe8ab15822e983059643259339cc4dc8ab91036891015b4122e88"},
 ]
 
 [package.dependencies]
-dirgh = {version = ">=0.2.0,<0.3.0", optional = true, markers = "extra == \"dirgh\""}
+dirgh = {version = ">=0.2.0", optional = true, markers = "extra == \"dirgh\""}
 psycopg2-binary = ">=2.9.2,<3.0.0"
 tomli = ">=2.0.1,<3.0.0"
 trio = {version = ">=0.20.0,<0.23.0", optional = true, markers = "extra == \"dirgh\""}
 
 [package.extras]
-dirgh = ["dirgh (>=0.2.0,<0.3.0)", "trio (>=0.20.0,<0.23.0)"]
+dirgh = ["dirgh (>=0.2.0)", "trio (>=0.20.0,<0.23.0)"]
 
 [[package]]
 name = "psycopg2-binary"
@@ -479,4 +489,4 @@ sortedcontainers = "*"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10, <3.12"
-content-hash = "1b2c2fd6adb6740d71ad2adbef9eb65b94748cceeced7e03805e1c986ad8f355"
+content-hash = "d9d891e6b8252678001e9ca19b60bfdae4c35c87fbe3ca25b4245b25867ccf34"

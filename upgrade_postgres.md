@@ -19,13 +19,21 @@ If you leave the container, you can use `docker cp`, for example like this:
 docker cp d-dodeka-db-1:/dodeka-db/upgrade_dump.sql ./upgrade_dump.sql
 ```
 
-Here we again assume the old container is named 'd-dodeka-db-1', the dump file path is '/dodeka-db/upgrade_dump.sql' inside the container and you want to copy it to your local folder. Now, we copy it to the new container:
+Here we again assume the old container is named 'd-dodeka-db-1', the dump file path is '/dodeka-db/upgrade_dump.sql' inside the container and you want to copy it to your local folder. Now, we copy it to the new container (immediately deleting the file locally):
 
 ```shell
-docker cp ./upgrade_dump.sql d-dodeka_repl-db-1:/dodeka-db/upgrade_dump.sql
+docker cp ./upgrade_dump.sql d-dodeka_repl-db-1:/dodeka-db/upgrade_dump.sql && rm ./upgrade_dump.sql
 ```
 
-Notice the other container's name is 'd-dodeka_repl-db-1'.
+Notice the other container's name is 'd-dodeka_repl-db-1'. We must now again enter the new database and restore the data.
+
+We do this using the following command (once we have entered with `docker exec -it -w /dodeka-db d-dodeka_repl-db-1 /bin/bash`):
+
+```shell
+psql -p 3141 -U dodeka -d postgres -f ./upgrade_dump.sql
+```
+
+Note that this will also restore the passwords as previously set, so login to check if everything is there with the previous password.
 
 Finally, we need to replace the old container's Docker volume by the new one. There are no great solutions for this, but what you can do is run this:
 
@@ -53,13 +61,18 @@ cd use/repl
 # Turn off database access (shut down apiserver)
 
 # Enter database
-docker exec -it d-dodeka-db-1 /bin/bash
+docker exec -it -w /dodeka-db d-dodeka-db-1 /bin/bash
 
 # Dump all
 pg_dumpall -p 3141 -U dodeka > upgrade_dump.sql
 
-# Copy from old database to repl database
-docker cp d-dodeka-db-1:/dodeka-db/upgrade_dump.sql d-dodeka_repl-db-1:/dodeka-db/upgrade_dump.sql
+# Copy from old database to local
+docker cp d-dodeka-db-1:/dodeka-db/upgrade_dump.sql ./upgrade_dump.sql
+# Copy from local to repl database
+docker cp ./upgrade_dump.sql d-dodeka_repl-db-1:/dodeka-db/upgrade_dump.sql && rm ./upgrade_dump.sql
 
-#
+# Enter repl database
+docker exec -it -w /dodeka-db d-dodeka_repl-db-1 /bin/bash
+# Restore database
+psql -p 3141 -U dodeka -d postgres -f ./upgrade_dump.sql
 ```

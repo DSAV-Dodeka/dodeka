@@ -23,7 +23,7 @@ services:
       - "${DB_HOST_HOST}:${DB_HOST_PORT}:${DB_CONTAINER_PORT}"
     # Shared memory size, defaults to 64m which can cause problems (apparently)
     shm_size: 256m
-    restart: no
+    restart: "no"
 volumes:
   # This name should correspond to the volume mentioned in volumes above
   d-dodeka-db-volume:
