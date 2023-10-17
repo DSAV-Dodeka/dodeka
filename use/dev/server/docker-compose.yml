@@ -21,7 +21,7 @@ services:
     # This important for being able to send email
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    restart: "no"
+    restart: no
     # Prevent too large core dumps
     ulimits:
       core:
