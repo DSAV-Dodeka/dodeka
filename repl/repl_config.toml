@@ -25,7 +25,7 @@ image_desc = "Image for D.S.A.V. Dodeka PostgreSQL instance."
 
 [confspawn_env.production]
 name = "production"
-version = "latest"
+version = "v2.0.0"
 
 [confspawn_env.staging]
 name = "staging"
