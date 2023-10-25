@@ -55,13 +55,13 @@ jobs:
         uses: docker/setup-buildx-action@v2
       # Set env from config.toml
       - name: Set env.KV_TAG
-        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
+        if: ${{ inputs.env != 'production' || github.event_name != 'release' || github.event.action != 'published' }}
         run: |
           export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
           export KV_VERSION=$(poetry run confenv -c config.toml -v confspawn_env.version -e ${{ inputs.env }})
           echo "KV_TAG=$KV_IMAGE:$KV_VERSION" >> $GITHUB_ENV
       - name: Set env.KV_TAG if release
-        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' && inputs.env == 'production' }}
         run: |
           export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
           echo "KV_TAG=$KV_IMAGE:${{ github.event.release.tag_name }},$KV_IMAGE:latest" >> $GITHUB_ENV
