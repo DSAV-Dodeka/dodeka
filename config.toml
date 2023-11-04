@@ -76,6 +76,7 @@ credentials_url = "https://api.dsavdodeka.nl/credentials/"
 pages_url = "https://dsavdodeka.nl"
 smtp_server = "host.docker.internal"
 restart = "always"
+mail_enabled = true
 
 [confspawn_env.staging]
 name = "staging"
@@ -87,11 +88,13 @@ credentials_url = "https://apidemo.tipten.nl/credentials/"
 pages_url = "https://demo.tipten.nl"
 smtp_server = "mail.dsavdodeka.nl"
 restart = "always"
+mail_enabled = true
 
 [confspawn_env.test]
 name = "test"
 version = "test"
 restart = "\"no\""
+mail_enabled = false
 
 [confspawn_env.localdev]
 name = "localdev"
@@ -105,7 +108,9 @@ valid_redirects = "\"http://localhost:3000/auth/callback\""
 credentials_url = "http://localhost:4243/credentials/"
 smtp_server = "mail.dsavdodeka.nl"
 restart = "\"no\""
+mail_enabled = false
 
 [confspawn_env.less]
 name = "less"
 version = "less"
+mail_enabled = false
