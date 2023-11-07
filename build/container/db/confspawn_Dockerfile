@@ -2,3 +2,4 @@ FROM postgres:16-bookworm
 ADD postgresql.conf {{ db.postgres_conf_dir }}/postgresql.conf
 ADD pg_hba.conf {{ db.postgres_conf_dir }}/pg_hba.conf
 LABEL org.opencontainers.image.description="{{ db.image_desc }}"
+CMD ["postgres", "-c", "config_file={{ db.postgres_conf_dir }}/postgresql.conf"]
