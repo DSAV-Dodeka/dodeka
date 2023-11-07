@@ -42,7 +42,7 @@ name = "localdev"
 version = "localdev"
 db_password = "postpost"
 barman_password = "barbar"
-redis_password = "redisredis"
+kv_password = "redisredis"
 restart = "\"no\""
 
 [confspawn_env.less]
