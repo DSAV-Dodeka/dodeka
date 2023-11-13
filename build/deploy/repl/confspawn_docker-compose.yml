@@ -9,21 +9,24 @@ services:
       # This means the volume will be accessible from the container in the dest. directory in the container
       - {{ db.volume_name }}:${DB_RESOURCES_TARGET}
     command: -c config_file=${DB_CONF_FILE}
-    # Environment file to load into the container
-    env_file:
-      - deploy.env
     # Some environment variables depend on deployment variables, so we load those in manually
     environment:
       - PGDATA=${DB_RESOURCES_TARGET}
       - POSTGRES_PASSWORD
       - POSTGRES_USER
-      - BARMAN_PASSWORD
     # This maps ports, so the container port will be available at localhost:<HOST_PORT>
     ports:
-      - "${DB_HOST_HOST}:${DB_HOST_PORT}:${DB_CONTAINER_PORT}"
+      - "${DB_HOST_HOST}:${DB_HOST_PORT}:{{ db.container_port }}"
     # Shared memory size, defaults to 64m which can cause problems (apparently)
     shm_size: 256m
     restart: {{ confspawn_env.restart }}
+#    healthcheck:
+#        test: "pg_isready -p {{ db.container_port }}"
+#        interval: 30s
+#        retries: 5
+#        start_period: 10s
+#        start_interval: 2s
+#        timeout: 10s
 volumes:
   # This name should correspond to the volume mentioned in volumes above
   {{ db.volume_name }}:

@@ -1,25 +1,11 @@
 [main]
 docker_net_name = "dodeka"
-
-[backup]
-project = "b-dodeka"
-service_name = "backup"
-# must match <project>-<service_name>-1
-container_name = "b-dodeka-backup-1"
-# metaconfig
-image_name = "ghcr.io/dsav-dodeka/barman"
-resources_target = "/dodeka_barman"
-volume_name = "b-dodeka-backup-volume"
-recover_volume = "b-dodeka-backup-volume-recover"
-recover_target = "/dodeka_recover"
-
+project = "dodeka"
 
 [db]
-project = "d-dodeka"
 service_name = "db"
 # must match <project>-<service_name>-1
-container_name = "d-dodeka-db-1"
-barman_server_name = "d-dodeka-db-1"
+container_name = "dodeka-db-1"
 postgres_conf_dir = "/dodeka_conf"
 init_dir = "/dodeka_init"
 # metaconfig
@@ -28,7 +14,7 @@ host_host = "127.0.0.1"
 host_port = "3141"
 container_port = "3141"
 resources_target = "/dodeka-db"
-volume_name = "d-dodeka-db-volume"
+volume_name = "dodeka-db-volume"
 db_name = "dodeka"
 db_user = "dodeka"
 # using default
@@ -37,10 +23,9 @@ image_desc = "Image for D.S.A.V. Dodeka PostgreSQL instance."
 
 [kv]
 redisjson_version = "v2.6.6"
-project = "ts-dodeka"
 service_name = "kv"
 # must match <project>-<service_name>-1
-container_name = "ts-dodeka-kv-1"
+container_name = "dodeka-kv-1"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/redis"
 host_host = "127.0.0.1"
@@ -48,10 +33,10 @@ host_port = "6379"
 container_port = "6379"
 
 [server]
-project = "s-dodeka"
+project = "dodeka"
 service_name = "server"
 # must match <project>-<service_name>-1
-container_name = "s-dodeka-server-1"
+container_name = "dodeka-server-1"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/server"
 deps_image_name = "ghcr.io/dsav-dodeka/server-deps"
@@ -100,7 +85,6 @@ mail_enabled = false
 name = "localdev"
 version = "localdev"
 db_password = "postpost"
-barman_password = "barbar"
 kv_password = "redisredis"
 allowed_envs = "\"envless\", \"localdev\", \"test\""
 api_root = "http://localhost:4243"

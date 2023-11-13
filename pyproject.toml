@@ -7,7 +7,7 @@ authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.10, <3.12"
-confspawn = "^0.5.0"
+confspawn = "^0.6.0"
 psqlsync = { version = "^0.2.3", extras = ["dirgh"] }
 dirgh = "^0.3.1"
 alembic = "^1.12.0"
@@ -15,3 +15,27 @@ alembic = "^1.12.0"
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poe.tasks.updev]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev.env --profile data up -d"
+
+[tool.poe.tasks.downdev]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev.env --profile data down"
+
+[tool.poe.tasks.updevp]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev_port.env --profile data up -d"
+
+[tool.poe.tasks.downdevp]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev_port.env --profile data down"
+
+[tool.poe.tasks.upall]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev.env --profile all up -d"
+
+[tool.poe.tasks.downall]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev.env --profile all down"
+
+[tool.poe.tasks.upallp]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev_port.env --profile all up -d"
+
+[tool.poe.tasks.downallp]
+cmd = "docker compose -f use/dev/docker-compose.yml --env-file use/dev/dev_port.env --profile all down"

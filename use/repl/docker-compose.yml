@@ -7,29 +7,32 @@ services:
     volumes:
       # <volume name in volumes below>:<container destination directory>
       # This means the volume will be accessible from the container in the dest. directory in the container
-      - d-dodeka-db-volume:${DB_RESOURCES_TARGET}
+      - dodeka_repl-db-volume:${DB_RESOURCES_TARGET}
     command: -c config_file=${DB_CONF_FILE}
-    # Environment file to load into the container
-    env_file:
-      - deploy.env
     # Some environment variables depend on deployment variables, so we load those in manually
     environment:
       - PGDATA=${DB_RESOURCES_TARGET}
       - POSTGRES_PASSWORD
       - POSTGRES_USER
-      - BARMAN_PASSWORD
     # This maps ports, so the container port will be available at localhost:<HOST_PORT>
     ports:
-      - "${DB_HOST_HOST}:${DB_HOST_PORT}:${DB_CONTAINER_PORT}"
+      - "${DB_HOST_HOST}:${DB_HOST_PORT}:3141"
     # Shared memory size, defaults to 64m which can cause problems (apparently)
     shm_size: 256m
-    restart: always
+    restart: "no"
+#    healthcheck:
+#        test: "pg_isready -p 3141"
+#        interval: 30s
+#        retries: 5
+#        start_period: 10s
+#        start_interval: 2s
+#        timeout: 10s
 volumes:
   # This name should correspond to the volume mentioned in volumes above
-  d-dodeka-db-volume:
+  dodeka_repl-db-volume:
     # A local directory
     driver: local
-    name: d-dodeka-db-volume-production
+    name: dodeka_repl-db-volume-production
 networks:
   # Set up a network so that other containers on this network can access each other
   # A different container on this network can access this container by using the container name as the hostname

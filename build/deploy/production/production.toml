@@ -4,17 +4,9 @@
 config = "config.toml"
 
 [[sources]]
-source = "build/deploy/production"
+source = "build/deploy/compose"
 target = "use/production"
 
 [[sources]]
-source = "build/deploy/db"
-target = "use/production/db"
-
-[[sources]]
-source = "build/deploy/kv"
-target = "use/production/kv"
-
-[[sources]]
-source = "build/deploy/server"
-target = "use/production/server"
+source = "build/deploy/production"
+target = "use/production"
