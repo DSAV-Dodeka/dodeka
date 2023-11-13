@@ -53,7 +53,7 @@ realm="dodeka"
 
 [confspawn_env.production]
 name = "production"
-version = "v2.0.1"
+version = "v2.1.0"
 allowed_envs = "\"production\""
 # Only the credentials url is with trailing slash, the rest should all be without
 api_root = "https://api.dsavdodeka.nl"
