@@ -40,12 +40,7 @@ version = "test"
 name = "localdev"
 version = "localdev"
 db_password = "postpost"
-<<<<<<< HEAD
-barman_password = "barbar"
 kv_password = "redisredis"
-=======
-redis_password = "redisredis"
->>>>>>> 3d58a28 (significantly simplify deployment->into 1 compose)
 restart = "\"no\""
 
 [confspawn_env.less]
