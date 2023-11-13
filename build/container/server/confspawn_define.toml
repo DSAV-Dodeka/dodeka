@@ -9,3 +9,4 @@ valid_redirects = [{{ confspawn_env.valid_redirects }}]
 credentials_url = "{{ confspawn_env.credentials_url }}"
 signup_url = "{{ server.signup_url }}"
 onboard_email = "{{ server.onboard_email }}"
+realm = "{{ server.realm }}"
