@@ -50,7 +50,7 @@ rm -rf "./versions/tmp"
 gh repo clone DSAV-Dodeka/dodeka "./versions/tmp" -- --depth 1 --branch ${REF}
 cd "./versions/tmp"
 # latest commit hash
-REF_HASH=$(git rev-parse --short HEAD)
+REF_HASH=$(git -c advice.detachedHead=false rev-parse --short HEAD)
 rm -rf "./versions/tmp/.git"
 VERSION_TARGET="./versions/${REF_HASH}"
 cd "${CUR_DIR}"
@@ -75,4 +75,4 @@ set -a
 cd "$CUR_DIR/deployments/active$ENV_STR"
 echo "Running..."
 # Run the deploy script
-"./deploy.sh" "$DEPLOY_ARG"
+"./${ENV_STR}deploy.sh" "$DEPLOY_ARG"
