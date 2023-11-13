@@ -28,6 +28,7 @@ service_name = "kv"
 container_name = "dodeka-kv-1"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/redis"
+redis_conf_dir = "/usr/local/etc/redis/redis.conf"
 host_host = "127.0.0.1"
 host_port = "6379"
 container_port = "6379"

@@ -33,7 +33,7 @@ services:
     image: "${KV_IMAGE}:${KV_VERSION}"
     ports:
       - "${KV_HOST_HOST}:${KV_HOST_PORT}:{{ kv.container_port }}"
-    command: /bin/sh -c "redis-server --requirepass ${REDIS_PASSWORD}"
+    command: /bin/sh -c "redis-server {{ kv.redis_conf_dir }} --requirepass ${REDIS_PASSWORD}"
     restart: {{ confspawn_env.restart }}
   {{ server.service_name }}:
     profiles: [ "all" ]

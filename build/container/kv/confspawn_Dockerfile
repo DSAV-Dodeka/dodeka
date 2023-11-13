@@ -1,6 +1,6 @@
 # Base redis
 FROM redis:7.2-bookworm
-ADD redis_base.conf /usr/local/etc/redis/redis.conf
+ADD redis_base.conf {{ kv.redis_conf_dir }}
 # loadmodule in conf is done on startup
 COPY librejson.so /rejson/librejson.so
-CMD [ "redis-server", "/usr/local/etc/redis/redis.conf" ]
+CMD [ "redis-server", "{{ kv.redis_conf_dir }}" ]
