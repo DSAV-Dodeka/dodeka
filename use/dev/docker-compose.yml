@@ -31,9 +31,10 @@ services:
   kv:
     profiles: [ "data", "all" ]
     image: "${KV_IMAGE}:${KV_VERSION}"
+    environment:
+      - REDIS_PASSWORD
     ports:
       - "${KV_HOST_HOST}:${KV_HOST_PORT}:6379"
-    command: /bin/sh -c "redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}"
     restart: "no"
   server:
     profiles: [ "all" ]
