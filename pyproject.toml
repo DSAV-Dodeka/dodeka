@@ -11,6 +11,7 @@ confspawn = "^0.6.0"
 psqlsync = { version = "^0.2.3", extras = ["dirgh"] }
 dirgh = "^0.3.1"
 alembic = "^1.12.0"
+psycopg = { extras = ["binary"], version="^3.1.0" }
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
