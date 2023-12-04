@@ -1,6 +1,7 @@
 services:
   # Service name, container name will be <project name>-<service name>-1 by default
   db:
+    container_name: "db${DEPLOY_NAME:-}"
     profiles: [ "data", "all" ]
     # Docker image that it will set up
     image: "${DB_APP_IMAGE}:${DB_VERSION}"
@@ -29,6 +30,7 @@ services:
 #        start_interval: 2s
 #        timeout: 10s
   kv:
+    container_name: "kv${DEPLOY_NAME:-}"
     profiles: [ "data", "all" ]
     image: "${KV_IMAGE}:${KV_VERSION}"
     environment:
@@ -37,6 +39,7 @@ services:
       - "${KV_HOST_HOST}:${KV_HOST_PORT}:6379"
     restart: always
   server:
+    container_name: "server${DEPLOY_NAME:-}"
     profiles: [ "all" ]
     depends_on:
       - db

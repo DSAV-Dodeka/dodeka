@@ -1,1 +1,0 @@
-docker compose --env-file production.env --profile all down
