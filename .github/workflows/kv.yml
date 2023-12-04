@@ -53,25 +53,31 @@ jobs:
       # Set up buildx for later build-push-action
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      # Set env from config.toml
-      - name: Set env.KV_TAG
-        if: ${{ inputs.env != 'production' || github.event_name != 'release' || github.event.action != 'published' }}
+      # Set container tags
+      - name: Commit SHA_SHORT
+        run: echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+      - name: Set env.IMAGE_TAG
+        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
         run: |
-          export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
-          export KV_VERSION=$(poetry run confenv -c config.toml -v confspawn_env.version -e ${{ inputs.env }})
-          echo "KV_TAG=$KV_IMAGE:$KV_VERSION" >> $GITHUB_ENV
-      - name: Set env.KV_TAG if release
-        if: ${{ github.event_name == 'release' && github.event.action == 'published' && inputs.env == 'production' }}
+          export IMAGE_NM=$(poetry run confenv -c config.toml -v db.image_name -e ${{ inputs.env }})
+          echo "IMAGE_TAG=$IMAGE_NM:${{ inputs.env }}-latest,$IMAGE_NM:${{ inputs.env }}-$SHA_SHORT" >> $GITHUB_ENV
+      - name: Set env.IMAGE_TAG if release
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
-          export KV_IMAGE=$(poetry run confenv -c config.toml -v kv.image_name)
-          echo "KV_TAG=$KV_IMAGE:${{ github.event.release.tag_name }},$KV_IMAGE:latest" >> $GITHUB_ENV
+          export IMAGE_NM=$(poetry run confenv -c config.toml -v db.image_name)
+          echo "IMAGE_TAG=$IMAGE_NM:${{ inputs.env }}-${{ github.event.release.tag_name }},$IMAGE_NM:${{ inputs.env }}-latest,$IMAGE_NM:${{ inputs.env }}-$SHA_SHORT" >> $GITHUB_ENV
+      - name: Add production tag if release
+        if: ${{ inputs.env == 'production' && github.event_name == 'release' && github.event.action == 'published' }}
+        run: |
+          export IMAGE_NM=$(poetry run confenv -c config.toml -v db.image_name)
+          echo "IMAGE_TAG=$IMAGE_TAG,$IMAGE_NM:${{ github.event.release.tag_name }},$IMAGE_NM:$SHA_SHORT,$IMAGE_NM:latest" >> $GITHUB_ENV
       # Build and push
       - name: Build and push
         uses: docker/build-push-action@v3
         with:
           context: ${{ github.workspace }}/context
           # Dockerfile tag
-          tags: ${{ env.KV_TAG }}
+          tags: ${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha, mode=max
           push: ${{ github.event_name != 'pull_request' }}

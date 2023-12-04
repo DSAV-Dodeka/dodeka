@@ -14,3 +14,9 @@ downdevp: (down "dev" "dev_port" "data")
 updev: (up "dev" "dev" "data")
 
 downdev: (down "dev" "dev" "data")
+
+deploy env tag:
+    tidploy deploy {{env}} {{tag}}
+
+deploydown env tag_repl:
+    docker compose -p dodeka-{{env}}-{{tag_repl}} down
