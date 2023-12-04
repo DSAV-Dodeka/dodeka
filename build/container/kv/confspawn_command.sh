@@ -15,7 +15,7 @@ if [ -n "$REDIS_PASSWORD" ]; then
   echo "Starting redis...."
   redis-server {{ kv.redis_conf_dir }} --requirepass "$REDIS_PASSWORD" &
   redis_pid=$!  # Save the PID of Redis server process
-  wait "$redis_pid"  # Wait for Redis to finish startup
+  wait "$redis_pid"  # Wait for Redis
 else
   echo "Error: \$REDIS_PASSWORD must be set!"
   exit 1

@@ -22,13 +22,13 @@ services:
     # Shared memory size, defaults to 64m which can cause problems (apparently)
     shm_size: 256m
     restart: always
-#    healthcheck:
-#        test: "pg_isready -p 3141"
-#        interval: 30s
-#        retries: 5
-#        start_period: 10s
-#        start_interval: 2s
-#        timeout: 10s
+    healthcheck:
+        test: "pg_isready -p 3141"
+        interval: 30s
+        retries: 5
+        start_period: 10s
+        start_interval: 2s
+        timeout: 10s
   kv:
     container_name: "dodeka-kv-${DEPLOY_NAME:-}"
     profiles: [ "data", "all" ]
@@ -48,18 +48,18 @@ services:
     image: "${SERVER_IMAGE}:${SERVER_VERSION}"
     # Some environment variables depend on deployment variables, so we load those in manually
     environment:
-      - DB_PASS=${POSTGRES_PASSWORD}
-      - KV_PASS=${REDIS_PASSWORD}
-      - MAIL_PASS=${COMCOM_MAIL_PASS}
-      - KEY_PASS=${KEY_PASSWORD}
-      - RECREATE=${RECREATE}
-      - DB_HOST="${SERVER_DB_HOST}-${DEPLOY_NAME:-}"
-      - DB_PORT=${SERVER_DB_PORT}
-      - KV_HOST="${SERVER_KV_HOST}-${DEPLOY_NAME:-}"
-      - KV_PORT=${SERVER_KV_PORT}
-      - MAIL_ENABLED=${SERVER_MAIL_ENABLED}
-      - SMTP_SERVER=${SERVER_SMTP_SERVER}
-      - SMTP_PORT=${SERVER_SMTP_PORT}
+      DB_PASS: ${POSTGRES_PASSWORD:?err}
+      KV_PASS: ${REDIS_PASSWORD:?err}
+      MAIL_PASS: ${COMCOM_MAIL_PASS}
+      KEY_PASS: ${KEY_PASSWORD:?err}
+      RECREATE: ${RECREATE}
+      DB_HOST: "${SERVER_DB_HOST}-${DEPLOY_NAME:-}"
+      DB_PORT: ${SERVER_DB_PORT}
+      KV_HOST: "${SERVER_KV_HOST}-${DEPLOY_NAME:-}"
+      KV_PORT: ${SERVER_KV_PORT}
+      MAIL_ENABLED: ${SERVER_MAIL_ENABLED}
+      SMTP_SERVER: ${SERVER_SMTP_SERVER}
+      SMTP_PORT: ${SERVER_SMTP_PORT}
     # This maps ports, so the container port will be available at localhost:<HOST_PORT>
     ports:
       - "${SERVER_HOST_HOST}:${SERVER_HOST_PORT}:4241"
