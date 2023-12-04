@@ -1,7 +1,7 @@
 services:
   # Service name, container name will be <project name>-<service name>-1 by default
   db:
-    container_name: "db${DEPLOY_NAME:-}"
+    container_name: "dodeka-db-${DEPLOY_NAME:-}"
     profiles: [ "data", "all" ]
     # Docker image that it will set up
     image: "${DB_APP_IMAGE}:${DB_VERSION}"
@@ -30,7 +30,7 @@ services:
 #        start_interval: 2s
 #        timeout: 10s
   kv:
-    container_name: "kv${DEPLOY_NAME:-}"
+    container_name: "dodeka-kv-${DEPLOY_NAME:-}"
     profiles: [ "data", "all" ]
     image: "${KV_IMAGE}:${KV_VERSION}"
     environment:
@@ -39,7 +39,7 @@ services:
       - "${KV_HOST_HOST}:${KV_HOST_PORT}:6379"
     restart: always
   server:
-    container_name: "server${DEPLOY_NAME:-}"
+    container_name: "dodeka-server-${DEPLOY_NAME:-}"
     profiles: [ "all" ]
     depends_on:
       - db
@@ -53,6 +53,13 @@ services:
       - MAIL_PASS=${COMCOM_MAIL_PASS}
       - KEY_PASS=${KEY_PASSWORD}
       - RECREATE=${RECREATE}
+      - DB_HOST="${SERVER_DB_HOST}-${DEPLOY_NAME:-}"
+      - DB_PORT=${SERVER_DB_PORT}
+      - KV_HOST="${SERVER_KV_HOST}-${DEPLOY_NAME:-}"
+      - KV_PORT=${SERVER_KV_PORT}
+      - MAIL_ENABLED=${SERVER_MAIL_ENABLED}
+      - SMTP_SERVER=${SERVER_SMTP_SERVER}
+      - SMTP_PORT=${SERVER_SMTP_PORT}
     # This maps ports, so the container port will be available at localhost:<HOST_PORT>
     ports:
       - "${SERVER_HOST_HOST}:${SERVER_HOST_PORT}:4241"
@@ -72,7 +79,7 @@ volumes:
   dodeka-db-volume:
     # A local directory
     driver: local
-    name: dodeka-db-volume-production
+    name: dodeka-db-volume-${DEPLOY_NAME:-production}
 networks:
   # Set up a network so that other containers on this network can access each other
   # A different container on this network can access this container by using the container name as the hostname

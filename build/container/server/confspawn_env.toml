@@ -1,16 +1,10 @@
 APISERVER_ENV="{{ confspawn_env.name }}"
 
 DB_USER="{{ db.db_user }}"
-DB_HOST="{{ db.container_name }}"
-DB_PORT="{{ db.container_port }}"
 DB_NAME="{{ db.db_name }}"
 DB_NAME_ADMIN="{{ db.db_name_admin }}"
 
-KV_HOST="{{ kv.container_name }}"
-KV_PORT="{{ kv.container_port }}"
-
-MAIL_ENABLED ="{{ confspawn_env.mail_enabled }}"
-SMTP_SERVER ="{{ confspawn_env.smtp_server }}"
-SMTP_PORT ="{{ server.smtp_port }}"
-
-# DB_PASS, KV_PASS, MAIL_PASS, KEY_PASS, RECREATE are missing on purpose so they must be provided as env variables
+# DB_HOST, DB_PORT, KV_HOST, KV_PORT, MAIL_ENABLED, SMPT_SERVER, SMPT_PORT are missing, they can be defined in an .env
+# file
+# DB_PASS, KV_PASS, MAIL_PASS, KEY_PASS, RECREATE are also missing on purpose so they must be provided as env 
+# variables, preferably at runtime

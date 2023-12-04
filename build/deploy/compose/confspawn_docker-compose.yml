@@ -1,7 +1,7 @@
 services:
   # Service name, container name will be <project name>-<service name>-1 by default
   {{ db.service_name }}:
-    container_name: "{{ db.service_name }}${DEPLOY_NAME:-}"
+    container_name: "{{ db.container_name }}-${DEPLOY_NAME:-}"
     profiles: [ "data", "all" ]
     # Docker image that it will set up
     image: "${DB_APP_IMAGE}:${DB_VERSION}"
@@ -30,7 +30,7 @@ services:
 #        start_interval: 2s
 #        timeout: 10s
   {{ kv.service_name }}:
-    container_name: "{{ kv.service_name }}${DEPLOY_NAME:-}"
+    container_name: "{{ kv.container_name }}-${DEPLOY_NAME:-}"
     profiles: [ "data", "all" ]
     image: "${KV_IMAGE}:${KV_VERSION}"
     environment:
@@ -39,7 +39,7 @@ services:
       - "${KV_HOST_HOST}:${KV_HOST_PORT}:{{ kv.container_port }}"
     restart: {{ confspawn_env.restart }}
   {{ server.service_name }}:
-    container_name: "{{ server.service_name }}${DEPLOY_NAME:-}"
+    container_name: "{{ server.container_name }}-${DEPLOY_NAME:-}"
     profiles: [ "all" ]
     depends_on:
       - {{ db.service_name }}
@@ -53,6 +53,13 @@ services:
       - MAIL_PASS=${COMCOM_MAIL_PASS}
       - KEY_PASS=${KEY_PASSWORD}
       - RECREATE=${RECREATE}
+      - DB_HOST="${SERVER_DB_HOST}-${DEPLOY_NAME:-}"
+      - DB_PORT=${SERVER_DB_PORT}
+      - KV_HOST="${SERVER_KV_HOST}-${DEPLOY_NAME:-}"
+      - KV_PORT=${SERVER_KV_PORT}
+      - MAIL_ENABLED=${SERVER_MAIL_ENABLED}
+      - SMTP_SERVER=${SERVER_SMTP_SERVER}
+      - SMTP_PORT=${SERVER_SMTP_PORT}
     # This maps ports, so the container port will be available at localhost:<HOST_PORT>
     ports:
       - "${SERVER_HOST_HOST}:${SERVER_HOST_PORT}:{{ server.container_port }}"
@@ -72,7 +79,7 @@ volumes:
   {{ db.volume_name }}:
     # A local directory
     driver: local
-    name: {{ db.volume_name }}-{{ confspawn_env.name }}
+    name: {{ db.volume_name }}-${DEPLOY_NAME:-{{ confspawn_env.name }}}
 networks:
   # Set up a network so that other containers on this network can access each other
   # A different container on this network can access this container by using the container name as the hostname

@@ -4,8 +4,7 @@ project = "dodeka"
 
 [db]
 service_name = "db"
-# must match <project>-<service_name>-1
-container_name = "dodeka-db-1"
+container_name = "dodeka-db"
 postgres_conf_dir = "/dodeka_conf"
 init_dir = "/dodeka_init"
 # metaconfig
@@ -24,8 +23,7 @@ image_desc = "Image for D.S.A.V. Dodeka PostgreSQL instance."
 [kv]
 redisjson_version = "v2.6.6"
 service_name = "kv"
-# must match <project>-<service_name>-1
-container_name = "dodeka-kv-1"
+container_name = "dodeka-kv"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/redis"
 redis_conf_dir = "/usr/local/etc/redis/redis.conf"
@@ -36,8 +34,7 @@ container_port = "6379"
 [server]
 project = "dodeka"
 service_name = "server"
-# must match <project>-<service_name>-1
-container_name = "dodeka-server-1"
+container_name = "dodeka-server"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/server"
 deps_image_name = "ghcr.io/dsav-dodeka/server-deps"
