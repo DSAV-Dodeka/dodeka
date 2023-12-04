@@ -84,7 +84,7 @@ jobs:
         if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
         run: |
           export IMAGE_NM=$(poetry run confenv -c config.toml -v db.image_name -e ${{ inputs.env }})
-          echo "IMAGE_TAG=$IMAGE_NM:${{ inputs.env }}-latest,$IMAGE_NM:${{ inputs.env }}-$SHA_SHORT" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_NM:${{ inputs.env }},$IMAGE_NM:${{ inputs.env }}-$SHA_SHORT" >> $GITHUB_ENV
       - name: Set env.IMAGE_TAG if release
         if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
