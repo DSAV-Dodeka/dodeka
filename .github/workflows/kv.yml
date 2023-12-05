@@ -53,24 +53,41 @@ jobs:
       # Set up buildx for later build-push-action
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      # Set container tags
+
+      # *************************************************
+      # ************** SET CONTAINER TAGS ***************
+      # *************************************************
+      ##### Set the base env vars we will need
+      # We uniquely identify a commit with its short SHA
       - name: Commit SHA_SHORT
         run: echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-      - name: Set env.IMAGE_TAG
-        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
-        run: |
-          export IMAGE_NM=$(poetry run confenv -c config.toml -v kv.image_name -e ${{ inputs.env }})
-          echo "IMAGE_TAG=$IMAGE_NM:${{ inputs.env }},$IMAGE_NM:${{ inputs.env }}-$SHA_SHORT" >> $GITHUB_ENV
-      - name: Set env.IMAGE_TAG if release
-        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
-        run: |
-          export IMAGE_NM=$(poetry run confenv -c config.toml -v kv.image_name)
-          echo "IMAGE_TAG=$IMAGE_NM:${{ inputs.env }}-${{ github.event.release.tag_name }},$IMAGE_NM:${{ inputs.env }},$IMAGE_NM:${{ inputs.env }}-$SHA_SHORT" >> $GITHUB_ENV
-      - name: Add production tag if release
-        if: ${{ inputs.env == 'production' && github.event_name == 'release' && github.event.action == 'published' }}
-        run: |
-          export IMAGE_NM=$(poetry run confenv -c config.toml -v kv.image_name)
-          echo "IMAGE_TAG=$IMAGE_TAG,$IMAGE_NM:${{ github.event.release.tag_name }},$IMAGE_NM:$SHA_SHORT,$IMAGE_NM:latest" >> $GITHUB_ENV
+      # We need to use the image name in each tag, so we set that to an env as well
+      - name: Image name
+        run: echo "IMAGE_NM=$(poetry run confenv -c config.toml -v kv.image_name -e ${{ inputs.env }})" >> $GITHUB_ENV
+      
+      ##### not-production will get :<env> and :<env>-<commit sha>, production only gets :<commit sha>
+      ##### because for production the 'latest' should only be on a release
+      - name: Set base env.IMAGE_TAG not production
+        if: ${{ inputs.env != 'production' }}
+        run: echo "IMAGE_TAG=$IMAGE_NM:${{ inputs.env }},$IMAGE_NM:${{ inputs.env }}-$SHA_SHORT" >> $GITHUB_ENV
+      - name: Set base env.IMAGE_TAG for production
+        if: ${{ inputs.env == 'production' }}
+        run: echo "IMAGE_TAG=$IMAGE_NM:$SHA_SHORT" >> $GITHUB_ENV
+      ##### we only run on a "release" (with type "published") or a "push" event. those have the following values
+      #####       PUSH                                  RELEASE
+      ##### github.event_name = 'push'    github.event_name = 'release'
+      #####        N/A                    github.event.action = 'published'
+      #####        N/A                    github.event.release.prerelease = 'true' / 'false'
+      # for any release, if not production, we want to add the release name after the env
+      - name: Set env.IMAGE_TAG if release and not production
+        if: ${{ github.event_name == 'release' && inputs.env != 'production'  }}
+        run: echo "IMAGE_TAG=$IMAGE_TAG,$IMAGE_NM:${{ inputs.env }}-${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+      # if production, also set latest and the version number without the env
+      - name: Add production tag if full release and production
+        if: ${{ github.event_name == 'release' && !github.event.release.prerelease && inputs.env == 'production'  }}
+        run: echo "IMAGE_TAG=$IMAGE_TAG,$IMAGE_NM:${{ github.event.release.tag_name }},$IMAGE_NM:latest" >> $GITHUB_ENV
+      # ************** END SET CONTAINER TAGS ***************
+
       # Build and push
       - name: Build and push
         uses: docker/build-push-action@v3
