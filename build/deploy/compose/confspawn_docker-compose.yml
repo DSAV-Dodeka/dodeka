@@ -79,6 +79,8 @@ volumes:
   {{ db.volume_name }}:
     # A local directory
     driver: local
+    # In general for staging this will be different in time as staging is always started with a specific version
+    # In production this will in general be simply -production-latest
     name: {{ db.volume_name }}-${DEPLOY_NAME:-{{ confspawn_env.name }}}
 networks:
   # Set up a network so that other containers on this network can access each other

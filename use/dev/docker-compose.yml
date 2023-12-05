@@ -79,6 +79,8 @@ volumes:
   dodeka-db-volume:
     # A local directory
     driver: local
+    # In general for staging this will be different in time as staging is always started with a specific version
+    # In production this will in general be simply -production-latest
     name: dodeka-db-volume-${DEPLOY_NAME:-localdev}
 networks:
   # Set up a network so that other containers on this network can access each other
