@@ -51,8 +51,8 @@ realm="dodeka"
 
 [confspawn_env.production]
 name = "production"
-version = "v2.1.0"
-git_ref = "v2.1.0"
+version = "v2.1.1"
+git_ref = "v2.1.1"
 allowed_envs = "\"production\""
 # Only the credentials url is with trailing slash, the rest should all be without
 api_root = "https://api.dsavdodeka.nl"
@@ -65,7 +65,7 @@ mail_enabled = true
 
 [confspawn_env.staging]
 name = "staging"
-version = "v2.1.0-rc.2"
+version = "v2.1.1"
 git_ref = "main"
 allowed_envs = "\"staging\""
 api_root = "https://apidemo.tipten.nl"
