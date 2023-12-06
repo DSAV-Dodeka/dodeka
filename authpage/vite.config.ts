@@ -24,7 +24,7 @@ export default defineConfig({
         reset: resolve(__dirname, 'reset/index.html')
       }
     },
-    outDir: '../src/apiserver/resources/static/credentials'
+    outDir: '../backend/src/apiserver/resources/static/credentials'
   },
   server: {
     port: 4244

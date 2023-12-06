@@ -1,4 +1,4 @@
-name: KV Build
+name: Server Build
 
 on:
   workflow_call:
@@ -7,44 +7,66 @@ on:
           required: true
           type: string
 
-jobs:
-  build-kv:
-    runs-on: ubuntu-latest
+permissions:
+  packages: write
+  contents: read
 
+jobs:
+  build-server:
+    runs-on: ubuntu-latest
+    # In case of production only run when it is a non-prerelease release
+    if: ${{ inputs.env != 'production' || (github.event_name == 'release' && !github.event.release.prerelease) }}
+    defaults:
+      run:
+        working-directory: deploy
     steps:
-      - uses: actions/checkout@v3
-      - run: pipx install poetry==1.4.2
+      - uses: actions/checkout@v4
+      - run: pipx install poetry==1.7.1
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
           cache: 'poetry'
+          cache-dependency-path: deploy/poetry.lock
       - run: poetry install
-      # Build config using tiptenbrink/confspawn
       - name: Config
         run: |
-          poetry run confspawn -c config.toml -s ./build/container/kv -t ./context -e ${{ inputs.env }}
-          poetry run confspawn -c config.toml -s ./build/container/librejson -t ./contextlibrejson  -e ${{ inputs.env }}
-      # Set env from config.toml
-      - name: Set env.REJSON_VERSION
+          poetry run confspawn -c config.toml -s ./build/container/server -t ./context/backend -e ${{ inputs.env }}
+          poetry run confspawn -c config.toml -s ./build/container/authpage -t ./context/envauthpage -e ${{ inputs.env }}
+
+      # First the lock file and project declaration are moved
+      # Then the source is moved
+      # Then the context for building authpage is prepared
+      # dotglob is enabled to also allow the '.*' files to be moved
+      # Finally configuration files for building authpage is moved (TEMP until confspawn option)
+      - name: Move source
+        working-directory: ${{ github.workspace }}
         run: |
-          export REJSON_VERSION=$(poetry run confenv -c config.toml -v kv.redisjson_version)
-          echo "REJSON_VERSION=$REJSON_VERSION" >> $GITHUB_ENV
-      # If librejson was previously built and stored in cache, use it
-      - name: Load cached librejson.so
-        id: cached-librejson
+          mv backend/poetry.lock deploy/context/backend
+          mv backend/pyproject.toml deploy/context/backend
+          mv backend/src deploy/context/backend/src
+          mv authpage deploy/context/authpage
+          shopt -s dotglob
+          mv deploy/context/envauthpage/* deploy/context/authpage
+      - name: Cache authpage
+        id: cached-authpage
         uses: actions/cache@v3
         with:
-          path: ${{ github.workspace }}/context/librejson.so
-          key: rejson_module-${{ env.REJSON_VERSION }}
-      - name: librejson.so
-        # If cache was not found, rebuild
-        # Requires GH login
-        if: steps.cached-librejson.outputs.cache-hit != 'true'
+          key: authpage-${{ hashFiles('deploy/context/authpage') }}
+          path: deploy/context/backend/src/apiserver/resources/static/credentials
+      - uses: actions/setup-node@v3
+        if: steps.cached-authpage.outputs.cache-hit != 'true'
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: deploy/context/authpage/package-lock.json
+      - name: Build credentials
+        if: ${{ (github.event_name == 'release' && github.event.action == 'published') || steps.cached-authpage.outputs.cache-hit != 'true' }}
+        working-directory: ${{ github.workspace }}/deploy/context/authpage
         run: |
-          echo "${{ github.token }}" | gh auth login --with-token
-          ./contextlibrejson/build_librejson.sh
+          npm install
+          npm run build-mode -- --mode ${{ inputs.env }}
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           # We use the repo/action token, which has specified access to the package
@@ -52,7 +74,7 @@ jobs:
           password: ${{ github.token }}
       # Set up buildx for later build-push-action
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       # *************************************************
       # ************** SET CONTAINER TAGS ***************
@@ -63,7 +85,7 @@ jobs:
         run: echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
       # We need to use the image name in each tag, so we set that to an env as well
       - name: Image name
-        run: echo "IMAGE_NM=$(poetry run confenv -c config.toml -v kv.image_name -e ${{ inputs.env }})" >> $GITHUB_ENV
+        run: echo "IMAGE_NM=$(poetry run confenv -c config.toml -v server.image_name -e ${{ inputs.env }})" >> $GITHUB_ENV
       
       ##### not-production will get :<env> and :<env>-<commit sha>, production only gets :<commit sha>
       ##### because for production the 'latest' should only be on a release
@@ -87,13 +109,14 @@ jobs:
         if: ${{ github.event_name == 'release' && !github.event.release.prerelease && inputs.env == 'production'  }}
         run: echo "IMAGE_TAG=$IMAGE_TAG,$IMAGE_NM:${{ github.event.release.tag_name }},$IMAGE_NM:latest" >> $GITHUB_ENV
       # ************** END SET CONTAINER TAGS ***************
-
+      
       # Build and push
       - name: Build and push
         uses: docker/build-push-action@v3
         with:
-          context: ${{ github.workspace }}/context
+          context: deploy/context/backend
           # Dockerfile tag
+          file: deploy/context/backend/server.Dockerfile
           tags: ${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha, mode=max

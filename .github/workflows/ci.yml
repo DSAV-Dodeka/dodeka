@@ -7,19 +7,27 @@ on:
   release:
     types: [ published ]
 
+permissions:
+  packages: write
+  contents: write
+
 jobs:
+  backend-ci:
+    uses: DSAV-Dodeka/dodeka/.github/workflows/backend.yml@main
+  
   config-deploy:
     runs-on: ubuntu-latest
-
+    defaults:
+      run:
+        working-directory: deploy
     steps:
-      - uses: actions/checkout@v3
-        with:
-          ref: ${{ github.head_ref }}
-      - run: pipx install poetry==1.6.1
+      - uses: actions/checkout@v4
+      - run: pipx install poetry==1.7.1
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'poetry'
+          cache-dependency-path: deploy/poetry.lock
       - run: poetry install
       # Build config using tiptenbrink/confspawn
       - name: Config
@@ -29,14 +37,18 @@ jobs:
           poetry run confrecipe -r build/deploy/production/production.toml -e production
           poetry run confrecipe -r build/data_sync/data_sync.toml -e production
           poetry run confrecipe -r build/deploy/repl/repl.toml -e production
-      - uses: stefanzweifel/git-auto-commit-action@v4
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        id: auto-commit-action
         if: github.event_name != 'pull_request'
         with:
           commit_message: Config build (automated)
-          file_pattern: use/
+          file_pattern: deploy/use/
+      - name: "Run if changes have been detected"
+        if: steps.auto-commit-action.outputs.changes_detected == 'true'
+        run: exit 1
 
-  build_db:
-    # if: ${{ false }}
+  build-db:
+    needs: [backend-ci, config-deploy]
     strategy:
       matrix:
         target: ['localdev', 'staging', 'production' ]
@@ -44,19 +56,17 @@ jobs:
     with:
       env: ${{ matrix.target }}
 
-  build_server:
-    # if: ${{ false }}
+  build-server:
+    needs: [backend-ci, config-deploy]
     strategy:
       matrix:
         target: ['localdev', 'staging', 'production' ]
     uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@main
     with:
       env: ${{ matrix.target }}
-    secrets:
-      GH_DODEKACOMCOM_TOKEN: ${{ secrets.GH_DODEKACOMCOM_TOKEN }}
 
-  build_kv:
-    # if: ${{ false }}
+  build-kv:
+    needs: [backend-ci, config-deploy]
     strategy:
       matrix:
         target: ['localdev', 'staging', 'production' ]
