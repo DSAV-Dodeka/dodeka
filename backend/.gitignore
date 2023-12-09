@@ -1,9 +1,2 @@
-**/.idea
-**/*.pyc
-**/*.pyd
-**/.coverage
-.python-version
-.DS_Store
-.vscode
 localenv.toml
 *.local

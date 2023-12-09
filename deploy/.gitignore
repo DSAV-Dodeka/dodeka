@@ -1,7 +1,2 @@
-.idea
-*.pyc
-**/__pycache__
-.python-version
-.DS_Store
 deployments
 migrate

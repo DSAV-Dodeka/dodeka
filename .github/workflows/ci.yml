@@ -30,6 +30,9 @@ jobs:
           cache-dependency-path: deploy/poetry.lock
       - run: poetry install
       # Build config using tiptenbrink/confspawn
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nu
       - name: Config
         run: |
           poetry run confrecipe -r build/deploy/dev/dev.toml -e localdev
