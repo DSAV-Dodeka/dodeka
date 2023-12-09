@@ -58,7 +58,9 @@ async def init_signup(
         su_ex = await data.signedup.signedup_exists(conn, signup.email)
 
     do_send_email = not u_ex and not su_ex
-    logger.debug(f"{signup.email} not u_ex={u_ex} and not su_ex={su_ex} is {do_send_email}")
+    logger.debug(
+        f"{signup.email} not u_ex={u_ex} and not su_ex={su_ex} is {do_send_email}"
+    )
 
     confirm_id = random_time_hash_hex()
 
@@ -78,7 +80,9 @@ async def init_signup(
     confirmation_url = f"{DEFINE.credentials_url}email/?{urlencode(params)}"
 
     if do_send_email:
-        logger.opt(ansi=True).debug(f"Creating email with confirmation url <u><red>{confirmation_url}</red></u>")
+        logger.opt(colors=True).debug(
+            f"Creating email with confirmation url <u><red>{confirmation_url}</red></u>"
+        )
         send_signup_email(
             background_tasks,
             signup.email,
@@ -230,7 +234,10 @@ async def confirm_join(
         )
         await data.signedup.confirm_signup(conn, signup_email)
 
-    logger.debug(f"Confirmed onboard for {signup_email} = {signed_up.firstname} {signed_up.lastname}")
+    logger.debug(
+        f"Confirmed onboard for {signup_email} ="
+        f" {signed_up.firstname} {signed_up.lastname}"
+    )
     info = {
         "register_id": register_id,
         "firstname": signed_up.firstname,
@@ -242,7 +249,9 @@ async def confirm_join(
     params = {"info": info_str}
     registration_url = f"{DEFINE.credentials_url}register/?{urlencode(params)}"
 
-    logger.opt(ansi=True).debug(f"Creating email with registration url <u><red>{registration_url}</red></u>")
+    logger.opt(colors=True).debug(
+        f"Creating email with registration url <u><red>{registration_url}</red></u>"
+    )
     send_register_email(
         background_tasks, signup_email, mail_from_config(dsrc.config), registration_url
     )

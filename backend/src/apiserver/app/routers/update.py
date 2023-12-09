@@ -68,7 +68,9 @@ async def request_password_change(
     params = {"reset_id": flow_id, "email": change_pass.email}
     reset_url = f"{DEFINE.credentials_url}reset/?{urlencode(params)}"
 
-    logger.opt(ansi=True).debug(f"Creating password reset email with url <u><red>{reset_url}</red></u>")
+    logger.opt(colors=True).debug(
+        f"Creating password reset email with url <u><red>{reset_url}</red></u>"
+    )
     send_reset_email(
         background_tasks,
         change_pass.email,
@@ -89,7 +91,10 @@ async def update_password_start(
 ) -> PasswordResponse:
     stored_email = await data.trs.pop_string(dsrc, update_pass.flow_id)
     if stored_email is None:
-        reason = f"Password reset of account {update_pass.email}: No reset has been requested for this user."
+        reason = (
+            f"Password reset of account {update_pass.email}: No reset has been"
+            " requested for this user."
+        )
         raise ErrorResponse(
             400, err_type="invalid_reset", err_desc=reason, debug_key="no_user_reset"
         )
@@ -117,7 +122,9 @@ async def update_password_start(
             debug_key="reset_user_not_exists",
         )
 
-    logger.debug(f"Initiating password reset for user {u.user_id} with email {update_pass.email}")
+    logger.debug(
+        f"Initiating password reset for user {u.user_id} with email {update_pass.email}"
+    )
     return await send_register_start(
         dsrc.store, auth_context.register_ctx, u.user_id, update_pass.client_request
     )
@@ -172,11 +179,11 @@ async def update_email(
         async with data.get_conn(dsrc) as conn:
             u = await ops.user.get_user_by_id(conn, user_id)
     except NoDataError:
-        message = f"User {user_id} updating email to {new_email.new_email} no longer exists."
-        logger.debug(message)
-        raise ErrorResponse(
-            400, "bad_update", message, "update_user_empty"
+        message = (
+            f"User {user_id} updating email to {new_email.new_email} no longer exists."
         )
+        logger.debug(message)
+        raise ErrorResponse(400, "bad_update", message, "update_user_empty")
     old_email = u.email
 
     flow_id = auth.core.util.random_time_hash_hex(user_id)
@@ -196,9 +203,14 @@ async def update_email(
     )
 
     await data.trs.reg.store_update_email(dsrc, user_id, state)
-    logger.debug(f"Stored user {user_id} email change from {old_email} to {new_email.new_email} with flow_id {flow_id}.")
+    logger.debug(
+        f"Stored user {user_id} email change from {old_email} to"
+        f" {new_email.new_email} with flow_id {flow_id}."
+    )
 
-    logger.opt(ansi=True).debug(f"Creating email change email with url <red><u>{reset_url}</u></red>")
+    logger.opt(colors=True).debug(
+        f"Creating email change email with url <red><u>{reset_url}</u></red>"
+    )
     send_change_email_email(
         background_tasks,
         new_email.new_email,
@@ -229,7 +241,9 @@ async def update_email_check(
             auth_context.login_ctx, dsrc.store, update_check.code
         )
     except NoDataError as e:
-        logger.debug(f"No flow_user for code {update_check.code} with error {e.message}")
+        logger.debug(
+            f"No flow_user for code {update_check.code} with error {e.message}"
+        )
         reason = "Expired or missing auth code"
         raise ErrorResponse(
             status_code=400,
@@ -276,7 +290,7 @@ async def update_email_check(
                 400,
                 err_type="bad_update",
                 err_desc=reason,
-                debug_key="update_email_user_not_exists"
+                debug_key="update_email_user_not_exists",
             )
 
         # If someone changed their email by now, we do not want it possible to happen again
@@ -297,7 +311,10 @@ async def update_email_check(
         )
         if count_ud != 1:
             raise DataError("Internal data error.", "user_data_error")
-    logger.debug(f"User {user_id} successfully changed email from {stored_email.old_email} to {stored_email.new_email}.")
+    logger.debug(
+        f"User {user_id} successfully changed email from {stored_email.old_email} to"
+        f" {stored_email.new_email}."
+    )
 
     return ChangedEmailResponse(
         old_email=stored_email.old_email, new_email=stored_email.new_email

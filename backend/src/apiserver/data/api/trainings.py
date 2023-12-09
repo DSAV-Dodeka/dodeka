@@ -1,7 +1,15 @@
 from datetime import date
-from schema.model.model import C_EVENTS_CATEGORY, C_EVENTS_DATE, C_EVENTS_DESCRIPTION, C_EVENTS_ID, CLASS_EVENTS_TABLE, CLASS_ID
+from schema.model.model import (
+    C_EVENTS_CATEGORY,
+    C_EVENTS_DATE,
+    C_EVENTS_DESCRIPTION,
+    C_EVENTS_ID,
+    CLASS_EVENTS_TABLE,
+    CLASS_ID,
+)
 from sqlalchemy.ext.asyncio import AsyncConnection
 from store.db import LiteralDict, insert_many
+
 
 async def add_training_event(
     conn: AsyncConnection,
@@ -16,7 +24,7 @@ async def add_training_event(
     idList = []
     event_rows: list[LiteralDict] = []
     for subCategory in categories:
-        subEventId = f'training{event_date.isoformat()}{subCategory}'
+        subEventId = f"training{event_date.isoformat()}{subCategory}"
         idList.append(subEventId)
 
         event_row: LiteralDict = {
