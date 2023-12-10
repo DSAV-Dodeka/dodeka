@@ -34,12 +34,8 @@ jobs:
         with:
           tool: nu
       - name: Config
-        run: |
-          poetry run confrecipe -r build/deploy/dev/dev.toml -e localdev
-          poetry run confrecipe -r build/deploy/staging/staging.toml -e staging
-          poetry run confrecipe -r build/deploy/production/production.toml -e production
-          poetry run confrecipe -r build/data_sync/data_sync.toml -e production
-          poetry run confrecipe -r build/deploy/repl/repl.toml -e production
+        run: nu build.nu deploy
+        working-directory: ${{ github.workspace }}
       - uses: stefanzweifel/git-auto-commit-action@v5
         id: auto-commit-action
         if: github.event_name != 'pull_request'
