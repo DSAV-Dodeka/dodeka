@@ -1,0 +1,15 @@
+{
+    "dployer": true,
+    "info": {
+        "latest": "{{ confspawn_env.git_ref }}"
+    },
+    "secrets": {
+        "dployer_env": "BWS_ACCESS_TOKEN",
+        "ids": [
+            "fad6f227-e0fb-46f9-9380-b0ce0130e122",
+            "02134621-a2cc-4a96-a695-b0ce0131081f",
+            "5fc28b91-b3c4-4b68-b7aa-b0ce0130fb4f",
+            "16da2f09-be29-41d3-b47f-b0ce0130ed0f"
+        ]
+    }
+}

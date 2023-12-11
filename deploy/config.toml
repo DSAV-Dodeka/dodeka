@@ -37,7 +37,6 @@ service_name = "server"
 container_name = "dodeka-server"
 # metaconfig
 image_name = "ghcr.io/dsav-dodeka/server"
-deps_image_name = "ghcr.io/dsav-dodeka/server-deps"
 host_host = "127.0.0.1"
 host_port = "4241"
 container_port = "4241"
