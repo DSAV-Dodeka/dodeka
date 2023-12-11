@@ -5,6 +5,7 @@ while [ true ]
 do 
     # if file exists and is named pipe
     if [ -p "$1" ]; then
+        echo "Loaded secret."
         . $1
     else
         sleep 1
@@ -16,5 +17,3 @@ do
         break
     fi
 done
-
-echo "done!"
