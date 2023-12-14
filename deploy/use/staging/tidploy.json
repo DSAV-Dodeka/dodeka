@@ -1,10 +1,9 @@
 {
-    "dployer": true,
     "info": {
         "latest": "main"
     },
     "secrets": {
-        "dployer_env": "BWS_ACCESS_TOKEN",
+        "env_var": "BWS_ACCESS_TOKEN",
         "ids": [
             "fad6f227-e0fb-46f9-9380-b0ce0130e122",
             "02134621-a2cc-4a96-a695-b0ce0131081f",
