@@ -1,6 +1,7 @@
 #!/bin/sh
-export COMPOSE_PROJECT_NAME="{{ main.project }}-${TIDPLOY_TAG}"
-export NETWORK_NAME="{{ main.docker_net_name }}-${TIDPLOY_TAG}"
+export DEPLOY_NAME="staging-${TIDPLOY_TAG}"
+export COMPOSE_PROJECT_NAME="{{ main.project }}-${DEPLOY_NAME}"
+export NETWORK_NAME="{{ main.docker_net_name }}-${DEPLOY_NAME}"
 export KV_VERSION=staging-${TIDPLOY_SHA}
 export DB_VERSION=staging-${TIDPLOY_SHA}
 export SERVER_VERSION=staging-${TIDPLOY_SHA}
