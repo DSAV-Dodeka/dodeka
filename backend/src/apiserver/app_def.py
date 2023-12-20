@@ -14,9 +14,11 @@ from apiserver.app_lifespan import AppLifespan
 # its top-level run
 from apiserver.resources import res_path
 from apiserver.app.error import (
+    AppError,
     error_response_return,
     ErrorResponse,
     error_response_handler,
+    unexpected_error_handler,
 )
 
 # Router modules, each router has its own API endpoints
@@ -119,5 +121,6 @@ def create_app(app_lifespan: AppLifespan) -> FastAPI:
     )
     new_app = add_routers(new_app)
     new_app.add_exception_handler(ErrorResponse, handler=error_response_handler)
+    new_app.add_exception_handler(AppError, handler=unexpected_error_handler)
 
     return new_app

@@ -3,7 +3,7 @@ from typing import Any, Optional, Union
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
-from store.store import StoreError
+from store.error import StoreError
 
 __all__ = [
     "store_json",

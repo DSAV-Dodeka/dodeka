@@ -1,7 +1,10 @@
 from enum import StrEnum
+from traceback import StackSummary
 from typing import Optional
 
-from fastapi import Request
+from loguru import logger
+
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
 
@@ -12,6 +15,7 @@ class ErrorKeys(StrEnum):
     GET_CLASS = "invalid_get_class"
     CHECK = "invalid_code_check"
     UPDATE = "invalid_update"
+    STARTUP = "startup_failure"
 
 
 class AppError(Exception):
@@ -19,6 +23,7 @@ class AppError(Exception):
     err_desc: str
     debug_key: Optional[str]
     inner: Optional[Exception]
+    stack: Optional[StackSummary]
 
     def __init__(
         self,
@@ -36,6 +41,11 @@ class AppError(Exception):
     def to_message(self) -> str:
         debug_key = ":" + self.debug_key if self.debug_key is not None else ""
         return f"{self.err_type}{debug_key}: {self.err_desc}"
+
+
+def unexpected_error_handler(_request: Request, e: AppError) -> Response:
+    logger.opt(exception=e).error("AppError occurred!")
+    return Response(status_code=500)
 
 
 class ErrorResponse(Exception):

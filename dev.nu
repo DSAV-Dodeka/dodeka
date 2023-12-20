@@ -3,6 +3,7 @@
 use root.nu
 # This allows use to also run this file from different subdirectories as long as you are in the same git repository
 let deploy_dir = root deploy_dir
+let backend_dir = root backend_dir
 
 def pull [envnmt: string, env_file: string, profile: string] {
     docker compose -f $"($deploy_dir)/use/($envnmt)/docker-compose.yml" --env-file $"($deploy_dir)/use/($envnmt)/($env_file).env" --profile $profile pull
@@ -37,6 +38,12 @@ def "main down" [] {
 def "main upp" [] {
     print "Starting databases for development (WSL port mode)..."
     up dev dev_port data
+}
+
+# Start development databases when not running Docker directly in your OS (i.e. WSL)
+def "main backend" [] {
+    cd $backend_dir
+    poetry run backend
 }
 
 # important for the command to be exposed to the outside

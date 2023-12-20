@@ -6,6 +6,7 @@ import tomllib
 from apiserver.app.error import AppEnvironmentError
 
 from apiserver.resources import res_path, project_path
+from pydantic import ValidationError
 from store import StoreConfig
 
 
@@ -48,6 +49,16 @@ class Config(StoreConfig):
 
 
 def get_config_path(config_path_name: Optional[os.PathLike[Any]] = None) -> Path:
+    """Gets path to load onfig from. Environment variable APISERVER_CONFIG takes precedence.
+
+    Args:
+        config_path_name: Optional path to load config from. If neither env var or argument is given, it will first
+        look for:
+            - env.toml in `resources` (empty by default)
+            - devenv.toml.local in the project path
+            - devenv.toml in the project path
+    Returns:
+        Path for config to load."""
     env_config_path = os.environ.get("APISERVER_CONFIG")
     if env_config_path is not None:
         return Path(env_config_path)
@@ -73,6 +84,11 @@ def get_config_path(config_path_name: Optional[os.PathLike[Any]] = None) -> Path
 def load_config_with_message(
     config_path_name: Optional[os.PathLike[Any]] = None,
 ) -> tuple[Config, str]:
+    """Loads and validates config using `get_config_path`. It overrides values in the config with
+    environment variables.
+
+    Raises:
+        AppEnvironmentError: If failed to validate config."""
     config_path = get_config_path(config_path_name)
 
     with open(config_path, "rb") as f:
@@ -89,7 +105,20 @@ def load_config_with_message(
 
     config_message = f"config from {config_path}{override_message}"
 
-    return Config.model_validate(config), config_message
+    try:
+        return Config.model_validate(config), config_message
+    except ValidationError as e:
+        err = ""
+        for err_detail in e.errors():
+            err_ctx = f". context: {err_detail['ctx']}" if "ctx" in err_detail else ""
+            err += (
+                f"\n\t- Err: {err_detail['loc']} with type={err_detail['type']}:"
+                f" {err_detail['msg']}{err_ctx}"
+            )
+
+        raise AppEnvironmentError(
+            f"<magenta>Failed to load {config_message}:{err}</magenta>"
+        )
 
 
 def load_config(config_path_name: Optional[os.PathLike[Any]] = None) -> Config:

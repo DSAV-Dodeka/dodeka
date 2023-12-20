@@ -6,9 +6,7 @@ from redis.asyncio import Redis
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, AsyncConnection
 
-
-class StoreError(ConnectionError):
-    pass
+from store.error import StoreObjectError
 
 
 class StoreConfig(BaseModel):
@@ -27,48 +25,68 @@ class StoreConfig(BaseModel):
 class Store:
     db: Optional[AsyncEngine] = None
     kv: Optional[Redis] = None
+    db_url: Optional[str]
     # Session is for reusing a single connection across multiple functions
     session: Optional[AsyncConnection] = None
 
     def init_objects(self, config: StoreConfig) -> None:
+        """Connections are not actually established, it simply initializes the connection parameters."""
         db_cluster = (
             f"{config.DB_USER}:{config.DB_PASS}@{config.DB_HOST}:{config.DB_PORT}"
         )
-        db_url = f"{db_cluster}/{config.DB_NAME}"
-        # # Connections are not actually established, it simply initializes the connection parameters
+        self.db_url = f"{db_cluster}/{config.DB_NAME}"
+        # #
         self.kv = Redis(
             host=config.KV_HOST, port=config.KV_PORT, db=0, password=config.KV_PASS
         )
-        self.db = create_async_engine(f"postgresql+asyncpg://{db_url}")
 
-    async def connect(self) -> None:
+        self.db = create_async_engine(f"postgresql+asyncpg://{self.db_url}")
+
+    def recreate_engine(self) -> None:
+        self.db = create_async_engine(f"postgresql+asyncpg://{self.db_url}")
+
+    async def ping(self) -> None:
+        """Connects with external data sources to see if they are online.
+
+        Raises:
+            StoreError: If external datasources or not running or if Store is not initialized.
+        """
         if self.kv is None or self.db is None:
-            raise StoreError(f"KV: {self.kv!s} or DB: {self.db!s} not initialized!")
+            raise StoreObjectError(
+                f"Cannot ping: KV: {self.kv!s} or DB: {self.db!s} not initialized!"
+            )
 
         try:
-            # Redis requires no explicit call to connect, it simply connects the first time
-            # a call is made to the database, so we test the connection by pinging
             await self.kv.ping()
         except RedisConnectionError:
-            raise StoreError(
+            raise StoreObjectError(
                 "Unable to ping Redis server! Please check if it is running."
             )
         try:
             async with self.db.connect() as conn:
                 _ = conn.info
         except SQLAlchemyError:
-            raise StoreError(
+            raise StoreObjectError(
                 "Unable to connect to DB with SQLAlchemy! Please check if it is"
                 " running."
             )
 
     async def disconnect(self) -> None:
-        if self.kv is None:
-            raise StoreError("Cannot disconenct from uninitialized KV!")
+        if self.kv is None or self.db is None:
+            raise StoreObjectError(
+                f"Cannot disconnect: KV: {self.kv!s} or DB: {self.db!s} not"
+                " initialized!"
+            )
         await self.kv.close()
+        await self.db.dispose()
 
     async def startup(self) -> None:
-        await self.connect()
+        """Runs `self.ping()`, to check if it can connect to the external data sources.
+
+        Raises:
+            StoreError: If external datasources or not running or if Store is not initialized.
+        """
+        await self.ping()
 
     async def shutdown(self) -> None:
         await self.disconnect()
