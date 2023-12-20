@@ -49,6 +49,11 @@ jobs:
       run: poetry run black src tests
     - name: Ruff
       run: poetry run ruff src tests
+    - name: Cache mypy results
+      uses: actions/cache@v3
+      with:
+        key: mypy-${{ hashFiles('backend/poetry.lock') }}
+        path: backend/.mypy_cache
     - name: Mypy
       run: poetry run mypy
     services:
