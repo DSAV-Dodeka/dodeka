@@ -29,7 +29,10 @@ class InterceptHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        logger.opt(depth=depth, exception=record.exc_info).log(
+        # print(record)
+        # print(record.exc_info)
+
+        logger.opt(depth=depth, exception=record.exc_info, colors=True).log(
             level, record.getMessage()
         )
 
@@ -56,18 +59,21 @@ def logger_format(record: "loguru.Record") -> str:
     extra = record["extra"]
     if "request_id" not in extra:
         extra["request_id"] = ""
+
     return (
         "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
         "<level>{level: <8}</level> | "
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-        "- {extra[request_id]}<level>{message}</level>\n"
+        "- {extra[request_id]}<level>{message}</level>\n{exception}"
     )
 
 
 def logger_stderr_sink() -> None:
     # Adapted from default loguru format
 
-    logger.add(sys.stderr, colorize=True, format=logger_format, level="DEBUG")
+    logger.add(
+        sys.stderr, colorize=True, format=logger_format, level="DEBUG", diagnose=False
+    )
     # logger = logger.patch(lambda record: record["extra"].update(utc=datetime.utcnow()))
 
 
@@ -78,7 +84,7 @@ def dict_sink(msg: "loguru.Message") -> None:
 
 
 def logger_dict_sink(log_dict: dict[str, Any]) -> None:
-    logger.add(dict_sink, format=logger_format, level="DEBUG")
+    logger.add(dict_sink, format=logger_format, level="DEBUG", backtrace=True)
 
 
 # we need 'loguru.Message' due to the way Loguru's type hints work

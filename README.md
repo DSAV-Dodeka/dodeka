@@ -13,6 +13,8 @@ The scripts are all in the root directory, but you can call them using `../` if 
 
 Start (this will also pull the images, so make sure you're logged in with `docker login ghcr.io`): 
 
+↓ the extra 'p' is on purpose
+
 ```
 nu dev.nu upp
 ```

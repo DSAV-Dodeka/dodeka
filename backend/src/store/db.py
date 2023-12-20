@@ -2,7 +2,7 @@ from typing import Optional, Any, LiteralString, TypeAlias
 from pydantic import BaseModel
 
 from sqlalchemy import CursorResult, TextClause, text, RowMapping
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from store.error import DbError, DbErrors
@@ -49,7 +49,7 @@ def select_set(columns: set[LiteralString]) -> str:
     return ", ".join(columns)
 
 
-async def execute_catch_conn(
+async def execute_catch(
     conn: AsyncConnection,
     query: TextClause,
     parameters: LiteralDict | list[LiteralDict],
@@ -64,6 +64,8 @@ async def execute_catch_conn(
         raise DbError(
             "Database relational integrity violation", str(e), DbErrors.INTEGRITY
         )
+    except ProgrammingError as e:
+        raise DbError("Database programming error.", str(e), DbErrors.PROGRAMMING)
 
     return result
 
@@ -86,7 +88,7 @@ async def retrieve_by_id(
 ) -> Optional[dict[str, Any]]:
     """Ensure `table` is never user-defined."""
     query = text(f"SELECT * FROM {table} WHERE id = :id;")
-    res: CursorResult[Any] = await conn.execute(query, parameters={"id": id_int})
+    res: CursorResult[Any] = await execute_catch(conn, query, parameters={"id": id_int})
     return first_or_none(res)
 
 
@@ -98,7 +100,7 @@ async def retrieve_by_unique(
 ) -> Optional[dict[str, Any]]:
     """Ensure `table` and `unique_column` are never user-defined."""
     query = text(f"SELECT * FROM {table} WHERE {unique_column} = :val;")
-    res: CursorResult[Any] = await conn.execute(query, parameters={"val": value})
+    res: CursorResult[Any] = await execute_catch(conn, query, parameters={"val": value})
     return first_or_none(res)
 
 
@@ -112,7 +114,7 @@ async def select_some_where(
     """Ensure `table`, `where_col` and `sel_col` are never user-defined."""
     some = select_set(sel_col)
     query = text(f"SELECT {some} FROM {table} WHERE {where_col} = :val;")
-    res = await conn.execute(query, parameters={"val": where_value})
+    res = await execute_catch(conn, query, parameters={"val": where_value})
     return all_rows(res)
 
 
@@ -131,8 +133,8 @@ async def select_some_two_where(
         f"SELECT {some} FROM {table} WHERE {where_col1} = :vala AND {where_col2} ="
         " :valb;"
     )
-    res = await conn.execute(
-        query, parameters={"vala": where_value1, "valb": where_value2}
+    res = await execute_catch(
+        conn, query, parameters={"vala": where_value1, "valb": where_value2}
     )
     return all_rows(res)
 
@@ -142,7 +144,7 @@ async def select_where(
 ) -> list[RowMapping]:
     """Ensure `table` and `column` are never user-defined."""
     query = text(f"SELECT * FROM {table} WHERE {column} = :val;")
-    res = await conn.execute(query, parameters={"val": value})
+    res = await execute_catch(conn, query, parameters={"val": value})
     return all_rows(res)
 
 
@@ -163,7 +165,7 @@ async def select_some_join_where(
         f"SELECT {some} FROM {table_1} JOIN {table_2} on {table_1}.{join_col_1} ="
         f" {table_2}.{join_col_2} WHERE {where_col} = :val;"
     )
-    res = await conn.execute(query, parameters={"val": value})
+    res = await execute_catch(conn, query, parameters={"val": value})
     return all_rows(res)
 
 
@@ -184,8 +186,8 @@ async def get_largest_where(
         f"SELECT {some} FROM {table} where {where_col} = :where_val ORDER BY"
         f" {order_col} {desc_str} LIMIT {num};"
     )
-    res: CursorResult[Any] = await conn.execute(
-        query, parameters={"where_val": where_val}
+    res: CursorResult[Any] = await execute_catch(
+        conn, query, parameters={"where_val": where_val}
     )
     return all_rows(res)
 
@@ -201,7 +203,7 @@ async def exists_by_unique(
         f"SELECT EXISTS (SELECT * FROM {table} WHERE {unique_column} = :val) AS"
         ' "exists";'
     )
-    res: CursorResult[Any] = await conn.scalar(query, parameters={"val": value})
+    res = (await execute_catch(conn, query, parameters={"val": value})).scalar()
     return bool(res) if res is not None else False
 
 
@@ -221,7 +223,7 @@ async def upsert_by_unique(
         f" ({unique_column}) DO UPDATE SET {row_keys_set};"
     )
 
-    res = await execute_catch_conn(conn, query, parameters=row)
+    res = await execute_catch(conn, query, parameters=row)
     return row_cnt(res)
 
 
@@ -239,9 +241,7 @@ async def update_column_by_unique(
         f"UPDATE {table} SET {set_column} = :set WHERE {unique_column} = :val;"
     )
 
-    res = await execute_catch_conn(
-        conn, query, parameters={"set": set_value, "val": value}
-    )
+    res = await execute_catch(conn, query, parameters={"set": set_value, "val": value})
     return row_cnt(res)
 
 
@@ -262,7 +262,7 @@ async def concat_column_by_unique_returning(
         f" :add WHERE {unique_column} = :val RETURNING ({return_col});"
     )
 
-    res = await execute_catch_conn(
+    res = await execute_catch(
         conn, query, parameters={"add": concat_value, "val": value}
     )
     return res.scalar()
@@ -275,7 +275,7 @@ async def insert(conn: AsyncConnection, table: LiteralString, row: LiteralDict) 
     row_keys, row_keys_vars, _ = _row_keys_vars_set(row)
     query = text(f"INSERT INTO {table} ({row_keys}) VALUES ({row_keys_vars});")
 
-    res: CursorResult[Any] = await execute_catch_conn(conn, query, parameters=row)
+    res: CursorResult[Any] = await execute_catch(conn, query, parameters=row)
     return row_cnt(res)
 
 
@@ -291,13 +291,13 @@ async def insert_return_col(
         f" ({return_col});"
     )
 
-    return await conn.scalar(query, parameters=params(row))
+    return (await execute_catch(conn, query, parameters=row)).scalar()
 
 
 async def delete_by_id(conn: AsyncConnection, table: LiteralString, id_int: int) -> int:
     """Ensure `table` is never user-defined."""
     query = text(f"DELETE FROM {table} WHERE id = :id;")
-    res: CursorResult[Any] = await conn.execute(query, parameters={"id": id_int})
+    res: CursorResult[Any] = await execute_catch(conn, query, parameters={"id": id_int})
     return row_cnt(res)
 
 
@@ -306,7 +306,9 @@ async def delete_by_column(
 ) -> int:
     """Ensure `table` and `column` are never user-defined."""
     query = text(f"DELETE FROM {table} WHERE {column} = :val;")
-    res: CursorResult[Any] = await conn.execute(query, parameters={"val": column_val})
+    res: CursorResult[Any] = await execute_catch(
+        conn, query, parameters={"val": column_val}
+    )
     return row_cnt(res)
 
 
@@ -320,5 +322,5 @@ async def insert_many(
     row_keys, row_keys_vars, _ = _row_keys_vars_set(row_list[0])
     query = text(f"INSERT INTO {table} ({row_keys}) VALUES ({row_keys_vars});")
 
-    res: CursorResult[Any] = await execute_catch_conn(conn, query, parameters=row_list)
+    res: CursorResult[Any] = await execute_catch(conn, query, parameters=row_list)
     return row_cnt(res)

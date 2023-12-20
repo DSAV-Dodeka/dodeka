@@ -1,7 +1,15 @@
 from enum import StrEnum
 
 
-class DataError(Exception):
+class StoreError(Exception):
+    pass
+
+
+class StoreObjectError(Exception):
+    pass
+
+
+class DataError(StoreError):
     key: str
 
     def __init__(self, message: str, key: str) -> None:
@@ -16,9 +24,10 @@ class NoDataError(DataError):
 class DbErrors(StrEnum):
     INTEGRITY = "integrity_violation"
     INPUT = "invalid_input"
+    PROGRAMMING = "programming"
 
 
-class DbError(Exception):
+class DbError(StoreError):
     """Exception that represents special internal errors."""
 
     def __init__(self, err_desc: str, err_internal: str, key: DbErrors) -> None:

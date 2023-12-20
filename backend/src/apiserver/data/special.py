@@ -20,7 +20,7 @@ from schema.model import (
     C_EVENTS_CATEGORY,
     C_EVENTS_DESCRIPTION,
 )
-from store.db import execute_catch_conn, row_cnt, all_rows
+from store.db import execute_catch, row_cnt, all_rows
 
 
 async def update_class_points(
@@ -146,7 +146,7 @@ async def update_class_points(
         {DISPLAY_POINTS} = excluded.{DISPLAY_POINTS};
     """)
 
-    res = await execute_catch_conn(conn, query, parameters={"id": class_id})
+    res = await execute_catch(conn, query, parameters={"id": class_id})
     return row_cnt(res)
 
 

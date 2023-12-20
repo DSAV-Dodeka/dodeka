@@ -1,5 +1,6 @@
 from loguru import logger
-from store.store import Store, StoreError, StoreConfig, StoreContext
+from store.error import StoreError
+from store.store import Store, StoreConfig, StoreContext
 
 __all__ = ["Store", "StoreConfig", "StoreError", "StoreContext"]
 

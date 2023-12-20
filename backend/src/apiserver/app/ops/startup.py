@@ -1,12 +1,20 @@
+from apiserver.app.error import AppError, ErrorKeys
 from loguru import logger
 from asyncio import sleep
 from datetime import date
 from random import random
 
 from sqlalchemy import create_engine
+from store.error import StoreObjectError, DataError
 
-from apiserver.data.api.classifications import insert_classification
-from apiserver.data.source import KeyState
+from auth.core import util
+from auth.hazmat.structs import A256GCMKey
+from auth.hazmat.crypt_dict import encrypt_dict, decrypt_dict
+from auth.hazmat.key_decode import aes_from_symmetric
+from auth.data.relational.opaque import insert_opaque_row
+
+from schema.model import metadata as db_model
+
 from apiserver.env import Config
 from apiserver.lib.model.entities import (
     JWKSet,
@@ -15,22 +23,31 @@ from apiserver.lib.model.entities import (
     JWKPublicEdDSA,
     JWKSymmetricA256GCM,
 )
-from auth.data.relational.opaque import insert_opaque_row
-from auth.hazmat.structs import A256GCMKey
 from apiserver.lib.hazmat import keys
 from apiserver.lib.hazmat.keys import ed448_private_to_pem
-from auth.hazmat.crypt_dict import encrypt_dict, decrypt_dict
-from auth.hazmat.key_decode import aes_from_symmetric
-from auth.core import util
-from store import StoreError
+from apiserver.data.api.classifications import insert_classification
+from apiserver.data.source import KeyState
 from apiserver import data
 from apiserver.data import Source
-from schema.model import metadata as db_model
 from apiserver.data.admin import drop_recreate_database
-from store.error import DataError
 
 
 async def startup(dsrc: Source, config: Config, recreate: bool = False) -> None:
+    """Starts and loads all external data. Will fail if data sources are not available. Do not call in test
+    environment. Recreates database with default values when recreate=True. To prevent multiple processes from
+    attempting this, it uses a simple lock mechanism by letting the first process set a value in the KV.
+    """
+
+    try:
+        # Store startup (tests connection)
+        await dsrc.store.startup()
+    except StoreObjectError as e:
+        raise AppError(
+            ErrorKeys.STARTUP,
+            "<magenta>Failed to start store! Did you start the databases?</magenta>",
+            "startup_store_failure",
+        ) from e
+
     # Checks lock: returns True if it is the first lock since at least 25 seconds (lock expire time)
     is_first_process = await wait_for_lock_is_first(dsrc)
     logger.debug(f"Unlocked startup, first={is_first_process}")
@@ -40,13 +57,16 @@ async def startup(dsrc: Source, config: Config, recreate: bool = False) -> None:
     # Set lock
     await data.trs.startup.set_startup_lock(dsrc)
     if is_first_process and recreate:
-        logger.warning("Dropping and recreating...")
+        logger.warning(
+            "Dropping and recreating... Set `recreate='no'` in your config if you don't"
+            " want this."
+        )
         drop_create_database(config)
 
-    # Store startup (tests connection)
-    await dsrc.store.startup()
+        # We need to recreate the engine so it will not use any connections that might have been closed by dropping
+        # and recreating the database
+        dsrc.store.recreate_engine()
 
-    if is_first_process and recreate:
         logger.warning("Initial population...")
         await initial_population(dsrc, config)
 
@@ -67,18 +87,33 @@ async def wait_for_lock_is_first(dsrc: Source) -> bool:
     true if it is the first lock since at least 25 seconds (lock expire time)."""
     # We sleep for a shor time to increase the distribution in startup times, hopefully reducing race conditions
     await sleep(random() + 0.1)
-    was_locked = await data.trs.startup.startup_is_locked(dsrc)
-    logger.debug(f"Checked for startup lock: {was_locked}")
+    # was_locked = await data.trs.startup.startup_is_locked(dsrc)
+    was_locked = None
     if was_locked is None:
-        return True
+        lock_msg = "First process."
+        return_val = True
     elif was_locked is False:
-        return False
+        lock_msg = "Now unlocked."
+        return_val = False
+    else:
+        lock_msg = "Currently locked."
+        return_val = None
+
+    logger.debug(f"Startup lock: {lock_msg}")
+
+    if return_val is not None:
+        return return_val
+
     i = 0
     while await data.trs.startup.startup_is_locked(dsrc):
         await sleep(1)
         i += 1
         if i > MAX_WAIT_INDEX:
-            raise StoreError("Waited too long during startup!")
+            raise AppError(
+                ErrorKeys.STARTUP,
+                "Waited too long for startup lock!",
+                "startup_lock_timeout",
+            )
     return False
 
 
@@ -191,7 +226,17 @@ async def load_keys_from_jwk(dsrc: Source, config: Config) -> JWKSet:
     # Key used to decrypt the keys stored in the database
     runtime_key = aes_from_symmetric(config.KEY_PASS)
     async with data.get_conn(dsrc) as conn:
-        encrypted_key_set = await data.key.get_jwk(conn)
+        try:
+            encrypted_key_set = await data.key.get_jwk(conn)
+        except DataError as e:
+            if e.key != "jwk_programming_error":
+                print("no way")
+                raise e
+            msg = """<magenta>Internal error when loading keys. Is the database empty? Restart and set `recreate='yes'`
+              in your config to recreate the database. Be sure to set it to false again afterwards.</magenta>"""
+            # raise ValueError(msg)
+            raise AppError(ErrorKeys.STARTUP, msg, "startup_no_jwk") from e
+
         key_set_dict = decrypt_dict(runtime_key.private, encrypted_key_set)
         key_set = JWKSet.model_validate(key_set_dict)
         # We re-encrypt as is required when using AES encryption
@@ -203,6 +248,7 @@ async def load_keys_from_jwk(dsrc: Source, config: Config) -> JWKSet:
 
 async def load_keys(dsrc: Source, config: Config) -> KeyState:
     key_set = await load_keys_from_jwk(dsrc, config)
+
     key_state = await get_keystate(dsrc)
 
     pem_keys = []
