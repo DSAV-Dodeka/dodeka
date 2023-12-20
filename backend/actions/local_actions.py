@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 
 import opaquepy as opq
@@ -28,21 +27,15 @@ from datacontext.context import DontReplaceContext
 from store import Store
 
 
-@pytest.fixture(scope="session", autouse=True)
-def event_loop():
-    """Necessary for async tests with module-scoped fixtures"""
-    loop = asyncio.get_event_loop()
-    yield loop
-    loop.close()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def api_config():
     test_config_path = Path(__file__).parent.joinpath("localdead.toml")
     yield load_config(test_config_path)
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="session")
 async def local_dsrc(api_config):
     store = Store()
     store.init_objects(api_config)
@@ -52,7 +45,7 @@ async def local_dsrc(api_config):
     yield dsrc
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="session")
 async def admin_access(local_dsrc):
     admin_id = "admin_test"
     scope = "member admin"
@@ -89,7 +82,7 @@ async def admin_access(local_dsrc):
     yield access_token
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(scope="session")
 async def test_get_admin_token(admin_access):
     print(admin_access)
 
