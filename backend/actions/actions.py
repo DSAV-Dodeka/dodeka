@@ -2,12 +2,21 @@ import asyncio
 from pathlib import Path
 import sys
 
-import opaquepy as opq
 from apiserver.data import Source, ops
-import apiserver.lib.utilities as util
 from apiserver import data
+
+import opaquepy as opq
+
+import apiserver.lib.utilities as util
+import auth.core.util
+from apiserver.app.ops.startup import get_keystate
+from apiserver.define import DEFINE
 from apiserver.env import load_config
 from auth.data.authentication import get_apake_setup
+from auth.data.keys import get_keys
+from auth.data.relational.user import EmptyIdUserData
+from auth.define import refresh_exp, access_exp, id_exp
+from auth.token.build import create_tokens, finish_tokens
 from datacontext.context import DontReplaceContext
 from store import Store
 
@@ -28,6 +37,43 @@ async def get_local_dsrc():
     return dsrc
 
 
+async def admin_access():
+    local_dsrc = await get_local_dsrc()
+    admin_id = "admin_test"
+    scope = "member admin"
+    utc_now = auth.core.util.utc_timestamp()
+    id_userdata = EmptyIdUserData()
+    access_token_data, id_token_data, access_scope, refresh_save = create_tokens(
+        admin_id,
+        scope,
+        utc_now - 1,
+        "test_nonce",
+        utc_now,
+        id_userdata,
+        DEFINE.issuer,
+        DEFINE.frontend_client_id,
+        DEFINE.backend_client_id,
+        refresh_exp,
+    )
+    refresh_id = 5252626
+    key_state = await get_keystate(local_dsrc)
+    keys = await get_keys(DontReplaceContext(), local_dsrc.store, key_state)
+    refresh_token, access_token, id_token = finish_tokens(
+        refresh_id,
+        refresh_save,
+        keys.symmetric,
+        access_token_data,
+        id_token_data,
+        id_userdata,
+        utc_now,
+        keys.signing,
+        access_exp,
+        id_exp,
+        nonce="",
+    )
+    return access_token
+
+
 async def set_pw():
     local_dsrc = await get_local_dsrc()
     admin_password = "admin"
@@ -42,6 +88,11 @@ async def set_pw():
         await ops.user.update_password_file(conn, util.usp_hex("0_admin"), pw_file)
 
     print("set admin password to 'admin'.")
+
+
+async def print_admin_token():
+    admin_token = await admin_access()
+    print(admin_token)
 
 
 async def run_function(func_name):
