@@ -10,6 +10,7 @@ from apiserver.app.ops.startup import drop_create_database
 
 
 from apiserver.env import Config, load_config
+import uvloop
 from tests.test_util import Fixture, AsyncFixture
 from store.conn import get_conn
 from store.store import Store
@@ -22,20 +23,14 @@ if not os.environ.get("QUERY_TEST"):
         "Skipping store_test as QUERY_TEST is not set.", allow_module_level=True
     )
 
-
-@pytest.fixture(scope="session", autouse=True)
-def event_loop():
-    """Necessary for async tests with module-scoped fixtures"""
-    loop = asyncio.get_event_loop()
-    yield loop
-    loop.close()
-
+@pytest.fixture(scope="module")
+def event_loop_policy():
+    return uvloop.EventLoopPolicy()
 
 @pytest.fixture(scope="module")
 def api_config() -> Fixture[Config]:
     test_config_path = res_path.joinpath("querytestenv.toml")
     yield load_config(test_config_path)
-
 
 @pytest_asyncio.fixture(scope="module")
 async def local_store(api_config: Config):
@@ -48,7 +43,7 @@ async def local_store(api_config: Config):
     yield store
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="module")
 async def setup_table(local_store: Store) -> AsyncFixture[str]:
     table_name = f"table_{randint(0, 100000)}"
     async with get_conn(local_store) as conn:
@@ -72,7 +67,7 @@ async def setup_table(local_store: Store) -> AsyncFixture[str]:
         await conn.execute(query)
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(scope="module")
 async def test_insert(local_store: Store, setup_table: LiteralString):
     row: LiteralDict = {"first": 3, "second": "some", "third": "other"}
     async with get_conn(local_store) as conn:
