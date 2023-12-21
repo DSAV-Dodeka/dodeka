@@ -14,6 +14,7 @@ from apiserver.data import Source
 from apiserver.data.context.app_context import RankingContext, conn_wrap
 from apiserver.data.context.ranking import (
     add_new_event,
+    add_new_training,
     context_most_recent_class_points,
     sync_publish_ranking,
 )
@@ -21,6 +22,7 @@ from apiserver.lib.logic.ranking import is_rank_type
 from apiserver.lib.model.entities import (
     ClassEvent,
     NewEvent,
+    NewTrainingEvent,
     UserEvent,
     UserPointsNames,
     UserPointsNamesList,
@@ -47,6 +49,16 @@ async def admin_update_ranking(
 ) -> None:
     try:
         await add_new_event(app_context.rank_ctx, dsrc, new_event)
+    except AppError as e:
+        raise ErrorResponse(400, "invalid_ranking_update", e.err_desc, e.debug_key)
+
+
+@ranking_admin_router.post("/update/training")
+async def admin_update_ranking_add_training(
+    new_event: NewTrainingEvent, dsrc: SourceDep, app_context: AppContext
+) -> None:
+    try:
+        await add_new_training(dsrc, new_event)
     except AppError as e:
         raise ErrorResponse(400, "invalid_ranking_update", e.err_desc, e.debug_key)
 

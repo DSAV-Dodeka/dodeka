@@ -264,3 +264,11 @@ class NewEvent(BaseModel):
     event_id: str
     category: str
     description: str = ""
+
+
+class NewTrainingEvent(BaseModel):
+    categoriesEnrolled: dict[str, list[UserPoints]]
+    class_type: Literal["points", "training"]
+    date: date
+    event_id: str
+    description: str = ""
