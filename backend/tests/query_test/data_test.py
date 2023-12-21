@@ -35,7 +35,6 @@ def event_loop_policy():
     return uvloop.EventLoopPolicy()
 
 
-
 @pytest.fixture(scope="module")
 def api_config() -> Fixture[Config]:
     test_config_path = res_path.joinpath("querytestenv.toml")
@@ -83,6 +82,7 @@ async def new_db_store(api_config: Config, admin_engine: Engine):
     with admin_engine.connect() as conn:
         drop_db = text(f"DROP DATABASE {db_name};")
         conn.execute(drop_db)
+
 
 @pytest.mark.asyncio
 async def test_create_class(new_db_store: Store):

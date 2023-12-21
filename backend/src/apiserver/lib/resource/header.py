@@ -22,7 +22,7 @@ def extract_token_and_kid(authorization: str) -> tuple[str, str]:
             err_type="invalid_request",
             err_desc="Authorization must follow 'Bearer' scheme",
         )
-    
+
     token = authorization.removeprefix("Bearer ")
 
     try:

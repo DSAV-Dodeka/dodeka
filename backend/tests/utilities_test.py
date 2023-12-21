@@ -1,6 +1,3 @@
-import pytest
-from pytest_mock import MockerFixture
-
 import apiserver.lib.utilities as util
 import auth.core.util
 
@@ -13,8 +10,11 @@ import auth.core.util
 #     secrets_patch.side_effect = lambda b: bytes.fromhex("8ca96077b3191e3c")
 
 
+HASH_LENGTH = 32
+
+
 def test_hash_hex():
-    assert len(auth.core.util.random_time_hash_hex()) == 32
+    assert len(auth.core.util.random_time_hash_hex()) == HASH_LENGTH
 
 
 def test_usp_hex():

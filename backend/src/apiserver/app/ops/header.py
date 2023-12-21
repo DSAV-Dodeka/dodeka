@@ -20,12 +20,16 @@ www_authenticate = f"Bearer realm={DEFINE.realm}"
 
 
 class AuthBearerHeader(SecurityBase):
-    """This allows using the OpenAPI docs (/docs) and enter the access token. Note that it already prepends 'Bearer' 
+    """This allows using the OpenAPI docs (/docs) and enter the access token. Note that it already prepends 'Bearer'
     to the value, so that's not necessary to add when using the docs."""
+
     scheme: Literal["bearer"] = "bearer"
 
-    def __init__(self):
-        self.model = HTTPBaseModel(scheme="bearer", description="Provide the access token like 'Bearer <encoded token>'.")
+    def __init__(self) -> None:
+        self.model = HTTPBaseModel(
+            scheme="bearer",
+            description="Provide the access token like 'Bearer <encoded token>'.",
+        )
         self.scheme_name = "Bearer authorization scheme."
 
     async def __call__(self, request: Request) -> str:

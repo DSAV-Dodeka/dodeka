@@ -13,6 +13,7 @@ def check_backend [] {
     cd $backend_dir
     poetry run black src tests
     poetry run ruff src tests
+    print "Running mypy, this could take a while..."
     poetry run mypy
 }
 

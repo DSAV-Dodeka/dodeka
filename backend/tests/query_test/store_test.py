@@ -1,4 +1,3 @@
-import asyncio
 import os
 from random import randint
 from typing import LiteralString
@@ -23,14 +22,17 @@ if not os.environ.get("QUERY_TEST"):
         "Skipping store_test as QUERY_TEST is not set.", allow_module_level=True
     )
 
+
 @pytest.fixture(scope="module")
 def event_loop_policy():
     return uvloop.EventLoopPolicy()
+
 
 @pytest.fixture(scope="module")
 def api_config() -> Fixture[Config]:
     test_config_path = res_path.joinpath("querytestenv.toml")
     yield load_config(test_config_path)
+
 
 @pytest_asyncio.fixture(scope="module")
 async def local_store(api_config: Config):
