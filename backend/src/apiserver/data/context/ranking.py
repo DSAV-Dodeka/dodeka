@@ -1,5 +1,8 @@
+from apiserver.data.api.trainings import add_training_event
 from datacontext.context import ContextRegistry
-from typing import Literal
+from typing import Any, Literal
+from schema.model.model import CLASS_EVENTS_TABLE
+from store.db import retrieve_by_unique
 
 from store.error import DataError
 
@@ -7,6 +10,7 @@ from apiserver.lib.model.entities import (
     ClassEvent,
     ClassView,
     NewEvent,
+    NewTrainingEvent,
     UserEvent,
     UserPointsNames,
 )
@@ -73,6 +77,42 @@ async def add_new_event(dsrc: Source, new_event: NewEvent) -> None:
         await update_class_points(
             conn,
             classification.classification_id,
+        )
+
+
+async def add_new_training(dsrc: Source, new_event: NewTrainingEvent) -> None:
+    async with get_conn(dsrc) as conn:
+        event_ids = await add_training_event(
+            conn,
+            1,
+            list(new_event.categoriesEnrolled.keys()),
+            new_event.date,
+            new_event.description,
+        )
+
+        try:
+            for event_id in event_ids:
+                event: dict[str, Any] | None = await retrieve_by_unique(
+                    conn, CLASS_EVENTS_TABLE, "event_id", event_id
+                )
+                if event is None:
+                    raise DataError("event_not_found", "Event not found")
+
+                users = new_event.categoriesEnrolled[event["category"]]
+                print(users)
+                await add_users_to_event(conn, event_id=event_id, points=users)
+        except DataError as e:
+            if e.key != "database_integrity":
+                raise e
+            raise AppError(
+                ErrorKeys.RANKING_UPDATE,
+                e.message,
+                "add_event_users_violates_integrity",
+            )
+
+        await update_class_points(
+            conn,
+            1,
         )
 
 
