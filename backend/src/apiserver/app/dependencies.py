@@ -37,7 +37,7 @@ Authorization = Annotated[str, Depends(auth_header)]
 
 async def dep_header_token(
     authorization: Authorization, dsrc: SourceDep, app_ctx: AppContext
-) -> AccessToken:
+) -> AccessToken:    
     try:
         return await ctxlize(verify_token_header)(
             app_ctx.authrz_ctx, authorization, dsrc
