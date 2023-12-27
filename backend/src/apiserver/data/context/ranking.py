@@ -19,6 +19,8 @@ from apiserver.data.api.classifications import (
     add_class_event,
     add_users_to_event,
     all_points_in_class,
+    class_last_updated,
+    class_update_last_updated,
     events_in_class,
     get_event_user_points,
     most_recent_class_of_type,
@@ -33,7 +35,7 @@ ctx_reg = ContextRegistry()
 
 
 def check_add_to_class(classification: ClassView, new_event: NewEvent) -> None:
-    """Throws AppError if not correct."""
+    """Checks whether the event is after the classification start date. Throws AppError if not correct."""
     if classification.start_date > new_event.date:
         desc = "Event cannot happen before start of classification!"
         raise AppError(ErrorKeys.RANKING_UPDATE, desc, "ranking_date_before_start")
@@ -77,6 +79,16 @@ async def add_new_event(dsrc: Source, new_event: NewEvent) -> None:
         await update_class_points(
             conn,
             classification.classification_id,
+        )
+
+    # we want in a new transaction to ensure the event has been added
+    async with get_conn(dsrc) as conn:
+        # this can throw but should never happen after above transaction
+        last_updated_date = await class_last_updated(
+            conn, classification.classification_id
+        )
+        await class_update_last_updated(
+            conn, classification.classification_id, last_updated_date
         )
 
 
