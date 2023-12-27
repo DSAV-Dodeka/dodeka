@@ -1,3 +1,4 @@
+from datetime import date
 from apiserver.data.api.trainings import add_training_event
 from datacontext.context import ContextRegistry
 from typing import Any, Literal
@@ -11,6 +12,7 @@ from apiserver.lib.model.entities import (
     ClassView,
     NewEvent,
     NewTrainingEvent,
+    RankingInfo,
     UserEvent,
     UserPointsNames,
 )
@@ -141,14 +143,19 @@ async def context_most_recent_class_id_of_type(
 @ctx_reg.register(RankingContext)
 async def context_most_recent_class_points(
     dsrc: Source, rank_type: Literal["points", "training"], is_admin: bool
-) -> list[UserPointsNames]:
+) -> RankingInfo:
     async with get_conn(dsrc) as conn:
         class_view = await most_recent_class_of_type(conn, rank_type)
         user_points = await all_points_in_class(
             conn, class_view.classification_id, is_admin
         )
 
-    return user_points
+    is_frozen = date.today() >= class_view.hidden_date
+    ranking_info = RankingInfo(
+        points=user_points, last_updated=class_view.last_updated, frozen=is_frozen
+    )
+
+    return ranking_info
 
 
 @ctx_reg.register(RankingContext)

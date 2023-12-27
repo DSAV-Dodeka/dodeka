@@ -23,6 +23,7 @@ from apiserver.lib.model.entities import (
     ClassEvent,
     NewEvent,
     NewTrainingEvent,
+    RankingInfo,
     UserEvent,
     UserPointsNames,
     UserPointsNamesList,
@@ -75,8 +76,44 @@ async def get_classification(
             debug_key="bad_ranking",
         )
 
-    user_points = await context_most_recent_class_points(ctx, dsrc, rank_type, admin)
+    user_points = (
+        await context_most_recent_class_points(ctx, dsrc, rank_type, admin)
+    ).points
     return RawJSONResponse(UserPointsNamesList.dump_json(user_points))
+
+
+async def get_classification_with_meta(
+    dsrc: Source, ctx: RankingContext, rank_type: str, admin: bool = False
+) -> RawJSONResponse:
+    if not is_rank_type(rank_type):
+        reason = f"Ranking {rank_type} is unknown!"
+        raise ErrorResponse(
+            status_code=400,
+            err_type="invalid_ranking",
+            err_desc=reason,
+            debug_key="bad_ranking",
+        )
+
+    ranking_info = await context_most_recent_class_points(ctx, dsrc, rank_type, admin)
+    return RawJSONResponse(RankingInfo.model_dump_json(ranking_info).encode())
+
+
+@ranking_members_router.get("/get_meta/{rank_type}/", response_model=RankingInfo)
+async def member_classification_meta(
+    rank_type: str, dsrc: SourceDep, app_context: AppContext
+) -> RawJSONResponse:
+    return await get_classification_with_meta(
+        dsrc, app_context.rank_ctx, rank_type, False
+    )
+
+
+@ranking_admin_router.get("/get_meta/{rank_type}/", response_model=RankingInfo)
+async def member_classification_admin_meta(
+    rank_type: str, dsrc: SourceDep, app_context: AppContext
+) -> RawJSONResponse:
+    return await get_classification_with_meta(
+        dsrc, app_context.rank_ctx, rank_type, True
+    )
 
 
 @ranking_members_router.get("/get/{rank_type}/", response_model=list[UserPointsNames])

@@ -223,6 +223,12 @@ class UserPointsNames(BaseModel):
 UserPointsNamesList = TypeAdapter(List[UserPointsNames])
 
 
+class RankingInfo(BaseModel):
+    last_updated: date
+    frozen: bool
+    points: list[UserPointsNames]
+
+
 # class PointsData(BaseModel):
 #     points: int
 

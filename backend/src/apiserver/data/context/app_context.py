@@ -19,6 +19,7 @@ from apiserver.data import Source
 from apiserver.lib.model.entities import (
     ClassEvent,
     NewEvent,
+    RankingInfo,
     UserData,
     User,
     UserEvent,
@@ -76,7 +77,7 @@ class RankingContext(Context):
     @classmethod
     async def context_most_recent_class_points(
         cls, dsrc: Source, rank_type: Literal["points", "training"], is_admin: bool
-    ) -> list[UserPointsNames]:
+    ) -> RankingInfo:
         raise ContextNotImpl()
 
     @classmethod
