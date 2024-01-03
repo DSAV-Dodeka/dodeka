@@ -15,12 +15,18 @@ from apiserver.data.context.app_context import RankingContext, conn_wrap
 from apiserver.data.context.ranking import (
     add_new_event,
     add_new_training,
+    context_modify_class,
     context_most_recent_class_points,
+    context_new_classes,
+    most_recent_classes,
     sync_publish_ranking,
 )
 from apiserver.lib.logic.ranking import is_rank_type
 from apiserver.lib.model.entities import (
     ClassEvent,
+    ClassMetaList,
+    ClassUpdate,
+    ClassView,
     NewEvent,
     NewTrainingEvent,
     RankingInfo,
@@ -98,22 +104,13 @@ async def get_classification_with_meta(
     return RawJSONResponse(RankingInfo.model_dump_json(ranking_info).encode())
 
 
-@ranking_members_router.get("/get_meta/{rank_type}/", response_model=RankingInfo)
-async def member_classification_meta(
-    rank_type: str, dsrc: SourceDep, app_context: AppContext
+@ranking_admin_router.get("/get_meta/{recent_number}/", response_model=list[ClassView])
+async def get_classifications(
+    recent_number: int, dsrc: SourceDep, app_context: AppContext
 ) -> RawJSONResponse:
-    return await get_classification_with_meta(
-        dsrc, app_context.rank_ctx, rank_type, False
-    )
-
-
-@ranking_admin_router.get("/get_meta/{rank_type}/", response_model=RankingInfo)
-async def member_classification_admin_meta(
-    rank_type: str, dsrc: SourceDep, app_context: AppContext
-) -> RawJSONResponse:
-    return await get_classification_with_meta(
-        dsrc, app_context.rank_ctx, rank_type, True
-    )
+    recent_classes = await most_recent_classes(app_context.rank_ctx, dsrc, recent_number)
+    
+    return RawJSONResponse(ClassMetaList.dump_json(recent_classes))
 
 
 @ranking_members_router.get("/get/{rank_type}/", response_model=list[UserPointsNames])
@@ -205,3 +202,17 @@ async def get_event_users(
     )
 
     return RawJSONResponse(UserPointsNamesList.dump_json(event_users))
+
+
+@ranking_admin_router.post("/new/")
+async def new_classes(
+    dsrc: SourceDep, app_context: AppContext,
+) -> None:
+    await context_new_classes(app_context.rank_ctx, dsrc)
+
+
+@ranking_admin_router.post("/modify/")
+async def modify_class(
+    updated_class: ClassUpdate, dsrc: SourceDep, app_context: AppContext,
+) -> None:
+    await context_modify_class(app_context.rank_ctx, dsrc, updated_class)

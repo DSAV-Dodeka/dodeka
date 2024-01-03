@@ -282,3 +282,16 @@ class NewTrainingEvent(BaseModel):
 
 class EventDate(BaseModel):
     date: date
+
+
+class ClassMeta(ClassView):
+    end_date: date
+
+
+class ClassUpdate(BaseModel):
+    classification_id: int
+    start_date: date
+    hidden_date: date
+    end_date: date
+
+ClassMetaList = TypeAdapter(List[ClassMeta])
