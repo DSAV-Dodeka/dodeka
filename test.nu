@@ -17,6 +17,11 @@ def check_backend [] {
     poetry run mypy
 }
 
+def lint_fix [] {
+    cd $backend_dir
+    poetry run ruff src tests --fix
+}
+
 # Run pyest and run the formatter, linter and type checker
 def "main backend" [] {
     print "Testing and checking backend..."
@@ -28,6 +33,12 @@ def "main backend" [] {
 def "main pytest" [] {
     print "Testing backend..."
     pytest_backend
+}
+
+# Run pytest on the backend
+def "main lint:fix" [] {
+    print "Linting and fixing issues..."
+    lint_fix
 }
 
 

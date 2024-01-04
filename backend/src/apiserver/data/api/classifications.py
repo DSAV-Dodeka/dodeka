@@ -8,6 +8,7 @@ from apiserver.lib.model.entities import (
     ClassEvent,
     Classification,
     ClassView,
+    EventDate,
     UserPoints,
     UserPointsNames,
     UserPointsNamesList,
@@ -45,6 +46,7 @@ from store.db import (
     lit_model,
     select_some_join_where,
     select_some_where,
+    update_column_by_unique,
 )
 from store.error import DataError, NoDataError, DbError, DbErrors
 
@@ -218,3 +220,43 @@ async def get_event_user_points(
     )
 
     return UserPointsNamesList.validate_python(user_points)
+
+
+async def class_last_updated(conn: AsyncConnection, class_id: int) -> date:
+    """Get the date of the most recent event in a classification or otherwise the start date of the classification."""
+    most_recent_event_date = await get_largest_where(
+        conn,
+        CLASS_EVENTS_TABLE,
+        {C_EVENTS_DATE},
+        CLASS_ID,
+        class_id,
+        C_EVENTS_DATE,
+        1,
+        True,
+    )
+    if len(most_recent_event_date) == 0:
+        # in this case no event exists, so we set the date to the start date of the classification
+        most_recent_event_date = await select_some_where(
+            conn, CLASSIFICATION_TABLE, {CLASS_START_DATE}, CLASS_ID, class_id
+        )
+
+    if len(most_recent_event_date) != 1:
+        # in this case there is certainly a problem
+        raise NoDataError(
+            f"Could not retrieve last updated date for classification {class_id}. Does"
+            " it exist?",
+            "no_class_last_date",
+        )
+
+    event_date = EventDate.model_validate(most_recent_event_date[0]).date
+
+    return event_date
+
+
+async def class_update_last_updated(
+    conn: AsyncConnection, class_id: int, date: date
+) -> int:
+    """Update the `last_updated` column of a classification so users know how recent it is."""
+    return await update_column_by_unique(
+        conn, CLASSIFICATION_TABLE, CLASS_LAST_UPDATED, date, CLASS_ID, class_id
+    )

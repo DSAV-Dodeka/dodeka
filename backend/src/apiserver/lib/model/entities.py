@@ -272,3 +272,7 @@ class NewTrainingEvent(BaseModel):
     date: date
     event_id: str
     description: str = ""
+
+
+class EventDate(BaseModel):
+    date: date
