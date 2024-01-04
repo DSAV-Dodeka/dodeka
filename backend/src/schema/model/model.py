@@ -262,3 +262,65 @@ class_punten = sqla.Table(
     sqla.Column(TRUE_POINTS, sqla.Integer, nullable=False),
     sqla.Column(DISPLAY_POINTS, sqla.Integer, nullable=False),
 )
+
+# Table for the personal records
+# Naam is used to identify records because some current (04/01/2024)
+#   record holders have no account on the website and thus no user_id
+PR_RECORDS_TABLE = "pr_records"
+PR_ID = "id"
+# USER_ID is a foreign key
+PR_NAAM = "naam"
+PR_ONDERDEEL = "onderdeel"
+PR_PRESTATIE = "prestatie"
+PR_DATUM = "datum"
+PR_PLAATS = "plaats"
+PR_LINK = "link"
+PR_GELDIG = 'geldig'
+pr_records = sqla.Table(
+    PR_RECORDS_TABLE,
+    metadata,
+    sqla.Column(
+        PR_ID,
+        sqla.String(length=150),
+        primary_key=True
+    ),
+    sqla.Column(
+        USER_ID,
+        sqla.String(length=150),
+        sqla.ForeignKey(f"{USER_TABLE}.{USER_ID}", ondelete="SET NULL"),
+    ),
+    sqla.Column(
+        PR_NAAM,
+        sqla.String(length=150),
+        primary_key=True
+    ),
+    sqla.Column(
+        PR_ONDERDEEL,
+        sqla.String(length=150),
+        nullable=False
+    ),
+    sqla.Column(
+        PR_PRESTATIE,
+        sqla.String(length=150),
+        nullable=False
+    ),
+    sqla.Column(
+        PR_DATUM,
+        sqla.Date(),
+        nullable=False
+    ),
+    sqla.Column(
+        PR_PLAATS,
+        sqla.String(length=150),
+        nullable=False
+    ),
+    sqla.Column(
+        PR_LINK,
+        sqla.String(length=150),
+        nullable=False
+    ),
+    sqla.Column(
+        PR_GELDIG,
+        sqla.Bit(),
+    ),
+)
