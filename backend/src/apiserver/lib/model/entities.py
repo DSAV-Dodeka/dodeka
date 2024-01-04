@@ -272,3 +272,11 @@ class NewTrainingEvent(BaseModel):
     date: date
     event_id: str
     description: str = ""
+
+class PRRecordData(BaseModel):
+    name: str
+    event: str
+    prestation: str
+    date: date
+    place: str
+    valid: bool
