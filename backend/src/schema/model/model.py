@@ -267,13 +267,13 @@ class_punten = sqla.Table(
 PR_RECORDS_TABLE = "pr_records"
 PR_ID = "id"
 # USER_ID is a foreign key
-PR_NAAM = "naam"
-PR_ONDERDEEL = "onderdeel"
-PR_PRESTATIE = "prestatie"
-PR_DATUM = "datum"
-PR_PLAATS = "plaats"
+PR_NAME = "name"
+PR_EVENT = "event"
+PR_PRESTATION = "prestation"
+PR_DATE = "date"
+PR_PLACE = "place"
 PR_LINK = "link"
-PR_GELDIG = 'geldig'
+PR_VALID = 'valid'
 pr_records = sqla.Table(
     PR_RECORDS_TABLE,
     metadata,
@@ -288,27 +288,27 @@ pr_records = sqla.Table(
         sqla.ForeignKey(f"{USER_TABLE}.{USER_ID}", ondelete="SET NULL"),
     ),
     sqla.Column(
-        PR_NAAM,
+        PR_NAME,
         sqla.String(length=150),
         nullable=False
     ),
     sqla.Column(
-        PR_ONDERDEEL,
+        PR_EVENT,
         sqla.String(length=150),
         nullable=False
     ),
     sqla.Column(
-        PR_PRESTATIE,
+        PR_PRESTATION,
         sqla.String(length=150),
         nullable=False
     ),
     sqla.Column(
-        PR_DATUM,
+        PR_DATE,
         sqla.Date(),
         nullable=False
     ),
     sqla.Column(
-        PR_PLAATS,
+        PR_PLACE,
         sqla.String(length=150),
         nullable=False
     ),
@@ -318,7 +318,7 @@ pr_records = sqla.Table(
         nullable=False
     ),
     sqla.Column(
-        PR_GELDIG,
-        sqla.Boolean(),
+        PR_VALID,
+        sqla.String(length=1),
     ),
 )
