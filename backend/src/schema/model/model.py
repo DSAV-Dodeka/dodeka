@@ -264,8 +264,6 @@ class_punten = sqla.Table(
 )
 
 # Table for the personal records
-# Naam is used to identify records because some current (04/01/2024)
-#   record holders have no account on the website and thus no user_id
 PR_RECORDS_TABLE = "pr_records"
 PR_ID = "id"
 # USER_ID is a foreign key
@@ -292,7 +290,7 @@ pr_records = sqla.Table(
     sqla.Column(
         PR_NAAM,
         sqla.String(length=150),
-        primary_key=True
+        nullable=False
     ),
     sqla.Column(
         PR_ONDERDEEL,
