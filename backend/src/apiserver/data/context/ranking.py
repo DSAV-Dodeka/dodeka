@@ -53,7 +53,9 @@ async def add_new_event(dsrc: Source, new_event: NewEvent) -> None:
     date. Use the 'publish' function to force them to be equal."""
     async with get_conn(dsrc) as conn:
         try:
-            classification = (await most_recent_class_of_type(conn, new_event.class_type))[0]
+            classification = (
+                await most_recent_class_of_type(conn, new_event.class_type)
+            )[0]
         except DataError as e:
             if e.key != "incorrect_class_type":
                 raise e
@@ -139,14 +141,18 @@ async def context_most_recent_class_id_of_type(
     dsrc: Source, rank_type: Literal["points", "training"]
 ) -> int:
     async with get_conn(dsrc) as conn:
-        class_id = (await most_recent_class_of_type(conn, rank_type))[0].classification_id
+        class_id = (await most_recent_class_of_type(conn, rank_type))[
+            0
+        ].classification_id
 
     return class_id
 
 
 @ctx_reg.register(RankingContext)
 async def context_most_recent_class_points(
-    dsrc: Source, rank_type: Literal["points", "training"], is_admin: bool,
+    dsrc: Source,
+    rank_type: Literal["points", "training"],
+    is_admin: bool,
 ) -> RankingInfo:
     async with get_conn(dsrc) as conn:
         class_view = (await most_recent_class_of_type(conn, rank_type))[0]
@@ -198,36 +204,39 @@ async def context_get_event_users(dsrc: Source, event_id: str) -> list[UserPoint
     return events_points
 
 
+MIN_AMOUNT = 2
+
+
 @ctx_reg.register(RankingContext)
-async def most_recent_classes(
-    dsrc: Source, amount: int = 10
-) -> list[ClassMeta]:
-    if amount < 2 or amount % 2 != 0:
+async def most_recent_classes(dsrc: Source, amount: int = 10) -> list[ClassMeta]:
+    if amount < MIN_AMOUNT or amount % 2 != 0:
         raise AppError(
-                ErrorKeys.DATA,
-                "Request at least 2 classes and make sure it is an even number!",
-                "most_recent_too_few",
-            )
-    
+            ErrorKeys.DATA,
+            "Request at least 2 classes and make sure it is an even number!",
+            "most_recent_too_few",
+        )
+
     async with get_conn(dsrc) as conn:
-        training_classes = (await most_recent_class_of_type(conn, "training", amount // 2))
-        points_classes = (await most_recent_class_of_type(conn, "points", amount // 2))
+        training_classes = await most_recent_class_of_type(
+            conn, "training", amount // 2
+        )
+        points_classes = await most_recent_class_of_type(conn, "points", amount // 2)
 
     return training_classes + points_classes
 
 
 @ctx_reg.register(RankingContext)
-async def context_new_classes(
-    dsrc: Source
-) -> None:    
+async def context_new_classes(dsrc: Source) -> None:
     async with get_conn(dsrc) as conn:
-        await insert_classification(conn, "training")
-        await insert_classification(conn, "points")
+        new_training_id = await insert_classification(conn, "training")
+        new_points_id = await insert_classification(conn, "points")
+
+        await update_class_points(conn, new_training_id, False)
+        await update_class_points(conn, new_points_id, False)
 
 
 @ctx_reg.register(RankingContext)
-async def context_modify_class(
-    dsrc: Source, class_update: ClassUpdate 
-) -> None:    
+async def context_modify_class(dsrc: Source, class_update: ClassUpdate) -> None:
     async with get_conn(dsrc) as conn:
         await update_classification(conn, class_update)
+        await update_class_points(conn, class_update.classification_id, False)

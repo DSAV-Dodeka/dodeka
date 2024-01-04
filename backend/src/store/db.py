@@ -238,9 +238,7 @@ async def update_by_unique(
 
     _, _, row_keys_set = _row_keys_vars_set(set_dict)
 
-    query = text(
-        f"UPDATE {table} SET {row_keys_set} WHERE {unique_column} = :val;"
-    )
+    query = text(f"UPDATE {table} SET {row_keys_set} WHERE {unique_column} = :val;")
     val_dict: LiteralDict = {"val": value}
     params = set_dict | val_dict
 

@@ -285,6 +285,7 @@ class EventDate(BaseModel):
 
 
 class ClassMeta(ClassView):
+    type: Literal["points", "training"]
     end_date: date
 
 
@@ -293,5 +294,6 @@ class ClassUpdate(BaseModel):
     start_date: date
     hidden_date: date
     end_date: date
+
 
 ClassMetaList = TypeAdapter(List[ClassMeta])

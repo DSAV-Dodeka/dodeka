@@ -9,7 +9,10 @@ from apiserver.app.modules.ranking import (
     mod_user_events_in_class,
 )
 from apiserver.app.response import RawJSONResponse
-from apiserver.data.api.classifications import get_event_user_points
+from apiserver.data.api.classifications import (
+    get_event_user_points,
+    remove_classification,
+)
 from apiserver.data import Source
 from apiserver.data.context.app_context import RankingContext, conn_wrap
 from apiserver.data.context.ranking import (
@@ -108,8 +111,10 @@ async def get_classification_with_meta(
 async def get_classifications(
     recent_number: int, dsrc: SourceDep, app_context: AppContext
 ) -> RawJSONResponse:
-    recent_classes = await most_recent_classes(app_context.rank_ctx, dsrc, recent_number)
-    
+    recent_classes = await most_recent_classes(
+        app_context.rank_ctx, dsrc, recent_number
+    )
+
     return RawJSONResponse(ClassMetaList.dump_json(recent_classes))
 
 
@@ -206,13 +211,27 @@ async def get_event_users(
 
 @ranking_admin_router.post("/new/")
 async def new_classes(
-    dsrc: SourceDep, app_context: AppContext,
+    dsrc: SourceDep,
+    app_context: AppContext,
 ) -> None:
     await context_new_classes(app_context.rank_ctx, dsrc)
 
 
 @ranking_admin_router.post("/modify/")
 async def modify_class(
-    updated_class: ClassUpdate, dsrc: SourceDep, app_context: AppContext,
+    updated_class: ClassUpdate,
+    dsrc: SourceDep,
+    app_context: AppContext,
 ) -> None:
     await context_modify_class(app_context.rank_ctx, dsrc, updated_class)
+
+
+@ranking_admin_router.post("/remove/{class_id}/")
+async def remove_class(
+    class_id: int,
+    dsrc: SourceDep,
+    app_context: AppContext,
+) -> None:
+    await ctxlize_wrap(remove_classification, conn_wrap)(
+        app_context.rank_ctx, dsrc, class_id
+    )

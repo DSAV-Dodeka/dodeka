@@ -20,7 +20,6 @@ from apiserver.lib.model.entities import (
     ClassEvent,
     ClassMeta,
     ClassUpdate,
-    ClassView,
     NewEvent,
     RankingInfo,
     UserData,
@@ -104,23 +103,21 @@ class RankingContext(Context):
         cls, dsrc: Source, event_id: str
     ) -> list[UserPointsNames]:
         raise ContextNotImpl()
-    
+
     @classmethod
     async def most_recent_classes(
         cls, dsrc: Source, amount: int = 10
     ) -> list[ClassMeta]:
         raise ContextNotImpl()
-    
+
     @classmethod
-    async def context_new_classes(
-        cls, dsrc: Source
-    ) -> None:
+    async def context_new_classes(cls, dsrc: Source) -> None:
         raise ContextNotImpl()
-    
+
     @classmethod
     async def context_modify_class(
-        cls, dsrc: Source, class_update: ClassUpdate 
-    ) -> None:  
+        cls, dsrc: Source, class_update: ClassUpdate
+    ) -> None:
         raise ContextNotImpl()
 
 
