@@ -18,7 +18,10 @@ from auth.data.context import Contexts
 from apiserver.data import Source
 from apiserver.lib.model.entities import (
     ClassEvent,
+    ClassMeta,
+    ClassUpdate,
     NewEvent,
+    RankingInfo,
     UserData,
     User,
     UserEvent,
@@ -76,7 +79,7 @@ class RankingContext(Context):
     @classmethod
     async def context_most_recent_class_points(
         cls, dsrc: Source, rank_type: Literal["points", "training"], is_admin: bool
-    ) -> list[UserPointsNames]:
+    ) -> RankingInfo:
         raise ContextNotImpl()
 
     @classmethod
@@ -99,6 +102,22 @@ class RankingContext(Context):
     async def context_get_event_users(
         cls, dsrc: Source, event_id: str
     ) -> list[UserPointsNames]:
+        raise ContextNotImpl()
+
+    @classmethod
+    async def most_recent_classes(
+        cls, dsrc: Source, amount: int = 10
+    ) -> list[ClassMeta]:
+        raise ContextNotImpl()
+
+    @classmethod
+    async def context_new_classes(cls, dsrc: Source) -> None:
+        raise ContextNotImpl()
+
+    @classmethod
+    async def context_modify_class(
+        cls, dsrc: Source, class_update: ClassUpdate
+    ) -> None:
         raise ContextNotImpl()
 
 

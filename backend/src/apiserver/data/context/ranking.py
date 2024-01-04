@@ -1,3 +1,4 @@
+from datetime import date
 from apiserver.data.api.trainings import add_training_event
 from datacontext.context import ContextRegistry
 from typing import Any, Literal
@@ -8,9 +9,12 @@ from store.error import DataError
 
 from apiserver.lib.model.entities import (
     ClassEvent,
+    ClassMeta,
+    ClassUpdate,
     ClassView,
     NewEvent,
     NewTrainingEvent,
+    RankingInfo,
     UserEvent,
     UserPointsNames,
 )
@@ -23,7 +27,9 @@ from apiserver.data.api.classifications import (
     class_update_last_updated,
     events_in_class,
     get_event_user_points,
+    insert_classification,
     most_recent_class_of_type,
+    update_classification,
 )
 from apiserver.data.context import RankingContext
 from apiserver.data.source import get_conn
@@ -47,7 +53,9 @@ async def add_new_event(dsrc: Source, new_event: NewEvent) -> None:
     date. Use the 'publish' function to force them to be equal."""
     async with get_conn(dsrc) as conn:
         try:
-            classification = await most_recent_class_of_type(conn, new_event.class_type)
+            classification = (
+                await most_recent_class_of_type(conn, new_event.class_type)
+            )[0]
         except DataError as e:
             if e.key != "incorrect_class_type":
                 raise e
@@ -133,29 +141,38 @@ async def context_most_recent_class_id_of_type(
     dsrc: Source, rank_type: Literal["points", "training"]
 ) -> int:
     async with get_conn(dsrc) as conn:
-        class_id = (await most_recent_class_of_type(conn, rank_type)).classification_id
+        class_id = (await most_recent_class_of_type(conn, rank_type))[
+            0
+        ].classification_id
 
     return class_id
 
 
 @ctx_reg.register(RankingContext)
 async def context_most_recent_class_points(
-    dsrc: Source, rank_type: Literal["points", "training"], is_admin: bool
-) -> list[UserPointsNames]:
+    dsrc: Source,
+    rank_type: Literal["points", "training"],
+    is_admin: bool,
+) -> RankingInfo:
     async with get_conn(dsrc) as conn:
-        class_view = await most_recent_class_of_type(conn, rank_type)
+        class_view = (await most_recent_class_of_type(conn, rank_type))[0]
         user_points = await all_points_in_class(
             conn, class_view.classification_id, is_admin
         )
 
-    return user_points
+    is_frozen = date.today() >= class_view.hidden_date
+    ranking_info = RankingInfo(
+        points=user_points, last_updated=class_view.last_updated, frozen=is_frozen
+    )
+
+    return ranking_info
 
 
 @ctx_reg.register(RankingContext)
 async def sync_publish_ranking(dsrc: Source, publish: bool) -> None:
     async with get_conn(dsrc) as conn:
-        training_class = await most_recent_class_of_type(conn, "training")
-        points_class = await most_recent_class_of_type(conn, "points")
+        training_class = (await most_recent_class_of_type(conn, "training"))[0]
+        points_class = (await most_recent_class_of_type(conn, "points"))[0]
         await update_class_points(conn, training_class.classification_id, publish)
         await update_class_points(conn, points_class.classification_id, publish)
 
@@ -185,3 +202,41 @@ async def context_get_event_users(dsrc: Source, event_id: str) -> list[UserPoint
         events_points = await get_event_user_points(conn, event_id)
 
     return events_points
+
+
+MIN_AMOUNT = 2
+
+
+@ctx_reg.register(RankingContext)
+async def most_recent_classes(dsrc: Source, amount: int = 10) -> list[ClassMeta]:
+    if amount < MIN_AMOUNT or amount % 2 != 0:
+        raise AppError(
+            ErrorKeys.DATA,
+            "Request at least 2 classes and make sure it is an even number!",
+            "most_recent_too_few",
+        )
+
+    async with get_conn(dsrc) as conn:
+        training_classes = await most_recent_class_of_type(
+            conn, "training", amount // 2
+        )
+        points_classes = await most_recent_class_of_type(conn, "points", amount // 2)
+
+    return training_classes + points_classes
+
+
+@ctx_reg.register(RankingContext)
+async def context_new_classes(dsrc: Source) -> None:
+    async with get_conn(dsrc) as conn:
+        new_training_id = await insert_classification(conn, "training")
+        new_points_id = await insert_classification(conn, "points")
+
+        await update_class_points(conn, new_training_id, False)
+        await update_class_points(conn, new_points_id, False)
+
+
+@ctx_reg.register(RankingContext)
+async def context_modify_class(dsrc: Source, class_update: ClassUpdate) -> None:
+    async with get_conn(dsrc) as conn:
+        await update_classification(conn, class_update)
+        await update_class_points(conn, class_update.classification_id, False)

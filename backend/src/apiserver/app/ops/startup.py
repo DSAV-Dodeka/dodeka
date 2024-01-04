@@ -1,4 +1,5 @@
 from apiserver.app.error import AppError, ErrorKeys
+from apiserver.data.special import update_class_points
 from loguru import logger
 from asyncio import sleep
 from datetime import date
@@ -199,8 +200,11 @@ async def initial_population(dsrc: Source, config: Config) -> None:
         user_id = await data.user.insert_return_user_id(conn, fake_user)
         assert user_id == "1_fakerecord"
 
-        await insert_classification(conn, "training")
-        await insert_classification(conn, "points")
+        new_training_id = await insert_classification(conn, "training")
+        new_points_id = await insert_classification(conn, "points")
+
+        await update_class_points(conn, new_training_id, False)
+        await update_class_points(conn, new_points_id, False)
 
 
 async def get_keystate(dsrc: Source) -> KeyState:
