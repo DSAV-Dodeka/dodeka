@@ -321,6 +321,6 @@ pr_records = sqla.Table(
     ),
     sqla.Column(
         PR_GELDIG,
-        sqla.Bit(),
+        sqla.Boolean(),
     ),
 )
