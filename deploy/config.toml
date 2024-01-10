@@ -45,7 +45,7 @@ frontend_client_id = "dodekaweb_client"
 backend_client_id = "dodekabackend_client"
 signup_url = "https://www.av40.nl/index.php?page=Inschrijfformulier&sid=1"
 onboard_email = "comcom@dsavdodeka.nl"
-smtp_port = 587
+smtp_port = 465
 realm="dodeka"
 
 [confspawn_env.production]
