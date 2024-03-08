@@ -70,7 +70,7 @@ async def member_get_upcoming_training_events(
 ) -> RawJSONResponse:
     try:
         upcoming_training_eventList = await get_all_upcoming_training_events(dsrc)
-        return upcoming_training_eventList
+        return RawJSONResponse(upcoming_training_eventList)
     except AppError as e:
         raise ErrorResponse(400, "invalid_training_request", e.err_desc, e.debug_key)
 

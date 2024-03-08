@@ -1,6 +1,5 @@
 from datetime import date
 from datetime import datetime
-from apiserver.lib.model.entities import ClassEvent
 from schema.model.model import (
     C_EVENTS_CATEGORY,
     C_EVENTS_DATE,
@@ -9,11 +8,12 @@ from schema.model.model import (
     CLASS_EVENTS_TABLE,
     CLASS_ID,
 )
+from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 from store.db import (
     LiteralDict,
     insert_many,
-    select_where_bigger_than,
+    select_where_equal_bigger_than,
 )
 
 
@@ -48,11 +48,11 @@ async def add_training_event(
 
 async def get_upcoming_training_events_from_db(
     conn: AsyncConnection,
-) -> list[ClassEvent]:
+) -> list[RowMapping]:
     """If resulting list is empty, either the event doesn't exist or it has no users in it."""
 
     now = datetime.now()
-    upcoming_training_events = await select_where_bigger_than(
+    upcoming_training_events = await select_where_equal_bigger_than(
         conn, CLASS_EVENTS_TABLE, C_EVENTS_DATE, now
     )
 
