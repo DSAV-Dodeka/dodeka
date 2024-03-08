@@ -1,5 +1,8 @@
+from apiserver.data.api.trainings import (
+    add_training_event,
+    get_upcoming_training_events_from_db,
+)
 from datetime import date
-from apiserver.data.api.trainings import add_training_event
 from datacontext.context import ContextRegistry
 from typing import Any, Literal
 from schema.model.model import CLASS_EVENTS_TABLE
@@ -134,6 +137,50 @@ async def add_new_training(dsrc: Source, new_event: NewTrainingEvent) -> None:
             conn,
             1,
         )
+
+
+async def add_new_training(dsrc: Source, new_event: NewTrainingEvent) -> None:
+    async with get_conn(dsrc) as conn:
+        event_ids = await add_training_event(
+            conn,
+            1,
+            list(new_event.categoriesEnrolled.keys()),
+            new_event.date,
+            new_event.description,
+        )
+
+        try:
+            for event_id in event_ids:
+                event: dict[str, Any] | None = await retrieve_by_unique(
+                    conn, CLASS_EVENTS_TABLE, "event_id", event_id
+                )
+                if event is None:
+                    raise DataError("event_not_found", "Event not found")
+
+                users = new_event.categoriesEnrolled[event["category"]]
+                print(users)
+                await add_users_to_event(conn, event_id=event_id, points=users)
+        except DataError as e:
+            if e.key != "database_integrity":
+                raise e
+            raise AppError(
+                ErrorKeys.RANKING_UPDATE,
+                e.message,
+                "add_event_users_violates_integrity",
+            )
+
+        await update_class_points(
+            conn,
+            1,
+        )
+
+
+async def get_all_upcoming_training_events(dsrc: Source) -> list[ClassEvent]:
+    """If resulting list is empty, either the event doesn't exist or it has no users in it."""
+    async with get_conn(dsrc) as conn:
+        events_points = await get_upcoming_training_events_from_db(conn)
+
+    return events_points
 
 
 @ctx_reg.register(RankingContext)

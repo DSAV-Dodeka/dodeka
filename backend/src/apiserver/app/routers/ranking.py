@@ -18,8 +18,9 @@ from apiserver.data.context.app_context import RankingContext, conn_wrap
 from apiserver.data.context.ranking import (
     add_new_event,
     add_new_training,
-    context_modify_class,
     context_most_recent_class_points,
+    get_all_upcoming_training_events,
+    context_modify_class,
     context_new_classes,
     most_recent_classes,
     sync_publish_ranking,
@@ -72,6 +73,15 @@ async def admin_update_ranking_add_training(
     except AppError as e:
         raise ErrorResponse(400, "invalid_ranking_update", e.err_desc, e.debug_key)
 
+@ranking_members_router.get("/training/upcoming")
+async def member_get_upcoming_training_events(
+    dsrc: SourceDep, app_context: AppContext
+) -> RawJSONResponse:
+    try:
+        upcoming_training_eventList = await get_all_upcoming_training_events(dsrc)
+        return RawJSONResponse(upcoming_training_eventList)
+    except AppError as e:
+        raise ErrorResponse(400, "invalid_training_request", e.err_desc, e.debug_key)
 
 async def get_classification(
     dsrc: Source, ctx: RankingContext, rank_type: str, admin: bool = False
