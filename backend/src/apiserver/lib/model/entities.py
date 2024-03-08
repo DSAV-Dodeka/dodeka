@@ -238,6 +238,8 @@ class ClassEvent(BaseModel):
     date: date
 
 
+ClassEventList = TypeAdapter(List[ClassEvent])
+
 EventsList = TypeAdapter(List[ClassEvent])
 
 

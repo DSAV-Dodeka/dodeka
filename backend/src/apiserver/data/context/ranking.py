@@ -1,4 +1,7 @@
-from apiserver.data.api.trainings import add_training_event
+from apiserver.data.api.trainings import (
+    add_training_event,
+    get_upcoming_training_events_from_db,
+)
 from datacontext.context import ContextRegistry
 from typing import Any, Literal
 from schema.model.model import CLASS_EVENTS_TABLE
@@ -114,6 +117,14 @@ async def add_new_training(dsrc: Source, new_event: NewTrainingEvent) -> None:
             conn,
             1,
         )
+
+
+async def get_all_upcoming_training_events(dsrc: Source) -> list[ClassEvent]:
+    """If resulting list is empty, either the event doesn't exist or it has no users in it."""
+    async with get_conn(dsrc) as conn:
+        events_points = await get_upcoming_training_events_from_db(conn)
+
+    return events_points
 
 
 @ctx_reg.register(RankingContext)

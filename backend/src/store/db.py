@@ -148,6 +148,15 @@ async def select_where(
     return all_rows(res)
 
 
+async def select_where_bigger_than(
+    conn: AsyncConnection, table: LiteralString, column: LiteralString, value: Any
+) -> list[RowMapping]:
+    """Ensure `table` and `column` are never user-defined."""
+    query = text(f"SELECT * FROM {table} WHERE {column} > :val;")
+    res = await execute_catch(conn, query, parameters={"val": value})
+    return all_rows(res)
+
+
 async def select_some_join_where(
     conn: AsyncConnection,
     sel_col: set[LiteralString],
