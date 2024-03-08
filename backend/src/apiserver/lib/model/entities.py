@@ -223,6 +223,12 @@ class UserPointsNames(BaseModel):
 UserPointsNamesList = TypeAdapter(List[UserPointsNames])
 
 
+class RankingInfo(BaseModel):
+    last_updated: date
+    frozen: bool
+    points: list[UserPointsNames]
+
+
 # class PointsData(BaseModel):
 #     points: int
 
@@ -274,3 +280,21 @@ class NewTrainingEvent(BaseModel):
     date: date
     event_id: str
     description: str = ""
+
+
+class EventDate(BaseModel):
+    date: date
+
+
+class ClassMeta(ClassView):
+    type: Literal["points", "training"]
+    end_date: date
+
+
+class ClassUpdate(BaseModel):
+    classification_id: int
+    start_date: date
+    hidden_date: date
+    end_date: date
+
+ClassMetaList = TypeAdapter(List[ClassMeta])

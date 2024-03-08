@@ -14,6 +14,7 @@ from apiserver.app_lifespan import AppLifespan
 # its top-level run
 from apiserver.resources import res_path
 from apiserver.app.error import (
+    AppEnvironmentError,
     AppError,
     error_response_return,
     ErrorResponse,
@@ -55,6 +56,14 @@ async def validation_exception_handler(
 
 
 def define_static_routes() -> list[Mount]:
+    static_credential_path = res_path.joinpath("static/credentials")
+    if not static_credential_path.exists():
+        raise AppEnvironmentError(
+            f"Could not find the static HTML files at {static_credential_path}. Did you"
+            " build "
+            + "the files for the authpage?"
+        )
+
     credential_mount = Mount(
         "/credentials",
         app=StaticFiles(directory=res_path.joinpath("static/credentials"), html=True),

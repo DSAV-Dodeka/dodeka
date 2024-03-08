@@ -1,13 +1,17 @@
 from datetime import date, timedelta
 from typing import Literal
+from schema.model.model import CLASS_END_DATE
 
 from sqlalchemy import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from apiserver.lib.model.entities import (
     ClassEvent,
+    ClassMeta,
+    ClassMetaList,
+    ClassUpdate,
     Classification,
-    ClassView,
+    EventDate,
     UserPoints,
     UserPointsNames,
     UserPointsNamesList,
@@ -39,12 +43,16 @@ from schema.model import (
 )
 from store.db import (
     LiteralDict,
+    delete_by_column,
     get_largest_where,
     insert,
     insert_many,
+    insert_return_col,
     lit_model,
     select_some_join_where,
     select_some_where,
+    update_by_unique,
+    update_column_by_unique,
 )
 from store.error import DataError, NoDataError, DbError, DbErrors
 
@@ -59,7 +67,7 @@ def parse_user_points(user_points: list[RowMapping]) -> list[UserPointsNames]:
 
 async def insert_classification(
     conn: AsyncConnection, class_type: str, start_date: date | None = None
-) -> None:
+) -> int:
     if start_date is None:
         start_date = date.today()
     new_classification = Classification(
@@ -69,12 +77,15 @@ async def insert_classification(
         end_date=start_date + timedelta(days=30 * 5),
         hidden_date=start_date + timedelta(days=30 * 4),
     )
-    await insert(conn, CLASSIFICATION_TABLE, lit_model(new_classification))
+    return_id: int = await insert_return_col(
+        conn, CLASSIFICATION_TABLE, lit_model(new_classification), CLASS_ID
+    )
+    return return_id
 
 
 async def most_recent_class_of_type(
-    conn: AsyncConnection, class_type: Literal["training", "points"]
-) -> ClassView:
+    conn: AsyncConnection, class_type: Literal["training", "points"], amount: int = 1
+) -> list[ClassMeta]:
     if class_type == "training":
         query_class_type = "training"
     elif class_type == "points":
@@ -88,11 +99,18 @@ async def most_recent_class_of_type(
     largest_class_list = await get_largest_where(
         conn,
         CLASSIFICATION_TABLE,
-        {CLASS_ID, CLASS_LAST_UPDATED, CLASS_START_DATE, CLASS_HIDDEN_DATE},
+        {
+            CLASS_ID,
+            CLASS_TYPE,
+            CLASS_LAST_UPDATED,
+            CLASS_START_DATE,
+            CLASS_HIDDEN_DATE,
+            CLASS_END_DATE,
+        },
         CLASS_TYPE,
         query_class_type,
         CLASS_START_DATE,
-        1,
+        amount,
     )
     if len(largest_class_list) == 0:
         raise NoDataError(
@@ -100,7 +118,7 @@ async def most_recent_class_of_type(
             "no_most_recent_training_class",
         )
 
-    return ClassView.model_validate(largest_class_list[0])
+    return ClassMetaList.validate_python(largest_class_list)
 
 
 async def all_points_in_class(
@@ -218,3 +236,57 @@ async def get_event_user_points(
     )
 
     return UserPointsNamesList.validate_python(user_points)
+
+
+async def class_last_updated(conn: AsyncConnection, class_id: int) -> date:
+    """Get the date of the most recent event in a classification or otherwise the start date of the classification."""
+    most_recent_event_date = await get_largest_where(
+        conn,
+        CLASS_EVENTS_TABLE,
+        {C_EVENTS_DATE},
+        CLASS_ID,
+        class_id,
+        C_EVENTS_DATE,
+        1,
+        True,
+    )
+    if len(most_recent_event_date) == 0:
+        # in this case no event exists, so we set the date to the start date of the classification
+        most_recent_event_date = await select_some_where(
+            conn, CLASSIFICATION_TABLE, {CLASS_START_DATE}, CLASS_ID, class_id
+        )
+
+    if len(most_recent_event_date) != 1:
+        # in this case there is certainly a problem
+        raise NoDataError(
+            f"Could not retrieve last updated date for classification {class_id}. Does"
+            " it exist?",
+            "no_class_last_date",
+        )
+
+    event_date = EventDate.model_validate(most_recent_event_date[0]).date
+
+    return event_date
+
+
+async def class_update_last_updated(
+    conn: AsyncConnection, class_id: int, date: date
+) -> int:
+    """Update the `last_updated` column of a classification so users know how recent it is."""
+    return await update_column_by_unique(
+        conn, CLASSIFICATION_TABLE, CLASS_LAST_UPDATED, date, CLASS_ID, class_id
+    )
+
+
+async def update_classification(conn: AsyncConnection, class_view: ClassUpdate) -> None:
+    await update_by_unique(
+        conn,
+        CLASSIFICATION_TABLE,
+        lit_model(class_view),
+        "classification_id",
+        class_view.classification_id,
+    )
+
+
+async def remove_classification(conn: AsyncConnection, class_id: int) -> None:
+    await delete_by_column(conn, CLASSIFICATION_TABLE, "classification_id", class_id)

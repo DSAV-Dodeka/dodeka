@@ -65,9 +65,6 @@ services:
       - "${SERVER_HOST_HOST}:${SERVER_HOST_PORT}:4241"
     # Shared memory size, defaults to 64m which can cause problems (apparently)
     shm_size: 256m
-    # This important for being able to send email when email has same ip as host
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: "no"
     # Prevent too large core dumps
     ulimits:

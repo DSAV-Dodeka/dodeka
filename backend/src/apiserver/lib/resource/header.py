@@ -12,6 +12,7 @@ class AccessSettings:
 
 
 def extract_token_and_kid(authorization: str) -> tuple[str, str]:
+    """Checks the proper scheme, extracting the actual token and which key to use to verify it."""
     if authorization is None:
         raise ResourceError(
             err_type="invalid_request", err_desc="No authorization provided."
@@ -21,6 +22,7 @@ def extract_token_and_kid(authorization: str) -> tuple[str, str]:
             err_type="invalid_request",
             err_desc="Authorization must follow 'Bearer' scheme",
         )
+
     token = authorization.removeprefix("Bearer ")
 
     try:

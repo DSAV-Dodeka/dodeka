@@ -1,8 +1,8 @@
-import asyncio
 from datetime import date, datetime
 import os
 from uuid import uuid4
 
+import uvloop
 import pytest
 import pytest_asyncio
 from sqlalchemy import Engine, create_engine, text
@@ -18,6 +18,7 @@ from schema.model.model import (
     CLASS_TYPE,
     CLASSIFICATION_TABLE,
 )
+
 from tests.test_util import Fixture
 from store.conn import get_conn
 from store.store import Store
@@ -29,12 +30,9 @@ if not os.environ.get("QUERY_TEST"):
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
-def event_loop():
-    """Necessary for async tests with module-scoped fixtures"""
-    loop = asyncio.get_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture(scope="module")
+def event_loop_policy():
+    return uvloop.EventLoopPolicy()
 
 
 @pytest.fixture(scope="module")
