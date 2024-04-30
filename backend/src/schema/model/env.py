@@ -21,23 +21,13 @@ try:
     db_cluster = f"postgresql+psycopg://{api_config.DB_USER}:{api_config.DB_PASS}@{api_config.DB_HOST}:{api_config.DB_PORT}"
     db_url = f"{db_cluster}/{api_config.DB_NAME}"
 except ImportError:
-    # we use json so we don't have to worry about tomli/tomllib
-    # when server uses 3.11 we can switch to TOML
-    import json
-    import getpass
+    import os
 
-    # relative to where the alembic command is run
-    with open("connect.json", "rb") as f:
-        db_config = json.load(f)
-
-    db_pass = getpass.getpass("Input the DB password (press enter to use default):\n")
-    if not db_pass:
-        db_pass = db_config["DB_PASS"]
-    db_cluster = (
-        f"postgresql+psycopg://{db_config['DB_USER']}:{db_pass}"
-        + f"@{db_config['DB_HOST']}:{db_config['DB_PORT']}"
+    # This should be the part after :// 
+    env_db_url = os.environ.get("DATABASE_URL")
+    db_url = (
+        f"postgresql+psycopg://{env_db_url}"
     )
-    db_url = f"{db_cluster}/{db_config['DB_NAME']}"
 
 
 config.set_main_option("sqlalchemy.url", db_url)

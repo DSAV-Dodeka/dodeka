@@ -262,3 +262,26 @@ class_punten = sqla.Table(
     sqla.Column(TRUE_POINTS, sqla.Integer, nullable=False),
     sqla.Column(DISPLAY_POINTS, sqla.Integer, nullable=False),
 )
+
+CONTENT_TABLE = "content"
+CONTENT_ID = "content_id"
+CONTENT_CATEGORY = "category"
+CONTENT_DATA = "data"
+content = sqla.Table(
+    CONTENT_TABLE,
+    metadata,
+    sqla.Column(
+        CONTENT_ID,
+        sqla.String(length=150),
+        primary_key=True
+    ),
+    sqla.Column(
+        CONTENT_CATEGORY,
+        sqla.String(length=150),
+        primary_key=True
+    ),
+    sqla.Column(
+        CONTENT_DATA,
+        sqla.JSON
+    )
+)
