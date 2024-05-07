@@ -1,6 +1,5 @@
-[argument]
-executable = "dployer.sh"
+exe_name = "dployer.sh"
 
-[[argument.envs]]
+[[vars]]
 env_name = "BWS_ACCESS_TOKEN"
 key = "bws"
