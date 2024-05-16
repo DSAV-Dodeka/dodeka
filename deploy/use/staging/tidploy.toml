@@ -1,5 +1,6 @@
 [argument]
 executable = "dployer.sh"
+execution_path = "."
 
 [[argument.envs]]
 env_name = "BWS_ACCESS_TOKEN"
