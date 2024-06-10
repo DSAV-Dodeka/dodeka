@@ -28,6 +28,7 @@ from apiserver.data.context.ranking import (
 from apiserver.lib.logic.ranking import is_rank_type
 from apiserver.lib.model.entities import (
     ClassEvent,
+    ClassEventList,
     ClassMetaList,
     ClassUpdate,
     ClassView,
@@ -78,8 +79,8 @@ async def member_get_upcoming_training_events(
     dsrc: SourceDep, app_context: AppContext
 ) -> RawJSONResponse:
     try:
-        upcoming_training_eventList = await get_all_upcoming_training_events(dsrc)
-        return RawJSONResponse(upcoming_training_eventList)
+        upcoming_training_event_list = await get_all_upcoming_training_events(dsrc)
+        return RawJSONResponse(ClassEventList.dump_json(upcoming_training_event_list))
     except AppError as e:
         raise ErrorResponse(400, "invalid_training_request", e.err_desc, e.debug_key)
 
