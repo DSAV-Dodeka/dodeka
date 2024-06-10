@@ -244,6 +244,8 @@ class ClassEvent(BaseModel):
     date: date
 
 
+ClassEventList = TypeAdapter(List[ClassEvent])
+
 EventsList = TypeAdapter(List[ClassEvent])
 
 
@@ -294,6 +296,5 @@ class ClassUpdate(BaseModel):
     start_date: date
     hidden_date: date
     end_date: date
-
 
 ClassMetaList = TypeAdapter(List[ClassMeta])
