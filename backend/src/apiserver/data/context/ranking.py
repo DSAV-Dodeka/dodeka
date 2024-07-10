@@ -106,7 +106,7 @@ async def add_new_training(dsrc: Source, new_event: NewTrainingEvent) -> None:
     async with get_conn(dsrc) as conn:
         event_ids = await add_training_event(
             conn,
-            1,
+            new_event.classification_id,
             list(new_event.categoriesEnrolled.keys()),
             new_event.date,
             new_event.description,
