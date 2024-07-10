@@ -244,6 +244,8 @@ class ClassEvent(BaseModel):
     date: date
 
 
+ClassEventList = TypeAdapter(List[ClassEvent])
+
 EventsList = TypeAdapter(List[ClassEvent])
 
 
@@ -275,6 +277,7 @@ class NewEvent(BaseModel):
 class NewTrainingEvent(BaseModel):
     categoriesEnrolled: dict[str, list[UserPoints]]
     class_type: Literal["points", "training"]
+    classification_id: int
     date: date
     event_id: str
     description: str = ""
@@ -294,6 +297,5 @@ class ClassUpdate(BaseModel):
     start_date: date
     hidden_date: date
     end_date: date
-
 
 ClassMetaList = TypeAdapter(List[ClassMeta])
