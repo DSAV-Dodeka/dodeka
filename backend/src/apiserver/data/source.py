@@ -1,4 +1,4 @@
-__all__ = ["Source", "get_kv", "get_conn"]
+__all__ = ["Source", "get_conn", "get_kv"]
 
 from contextlib import asynccontextmanager
 from typing import AsyncIterator

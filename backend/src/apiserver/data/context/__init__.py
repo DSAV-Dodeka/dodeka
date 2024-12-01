@@ -7,11 +7,11 @@ from apiserver.data.context.app_context import (
 )
 
 __all__ = [
-    "SourceContexts",
-    "RegisterAppContext",
-    "UpdateContext",
-    "RankingContext",
     "Code",
+    "RankingContext",
+    "RegisterAppContext",
+    "SourceContexts",
+    "UpdateContext",
 ]
 
 """Context functions are the core of the application, as they should contain the majority of the stateful, impure code

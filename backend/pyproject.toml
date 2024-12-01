@@ -1,55 +1,60 @@
-[tool.poetry]
+[project]
 name = "apiserver"
-version = "2.1.0"
-description = ""
-authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
-packages = [
-    { include = "apiserver", from = "src" },
-    { include = "auth", from = "src" },
-    { include = "schema", from = "src" },
-    { include = "store", from = "src" },
-    { include = "datacontext", from = "src" }
+version = "2.3.0"
+description = "D.S.A.V. Dodeka backend"
+authors = [
+    { name = "Tip ten Brink", email = "75669206+tiptenbrink@users.noreply.github.com" },
+    { name = "Matthijs Arnoldus", email = "mat.arnoldus@kpnmail.nl" },
+    { name = "Leander Bindt", email = "leander.bindt@ziggo.nl" },
+    { name = "Senne Drent", email = "sennedrent@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "cryptography==41.0.7",
+    "PyJWT==2.8.0",
+    "fastapi==0.105.0",
+    "gunicorn==21.2.0",
+    "uvicorn[standard]==0.24.0",
+    "asyncpg==0.29.0",
+    "psycopg[binary]>=3.1.0,<4.0.0",
+    "pydantic==2.5.2",
+    "redis==5.0.1",
+    "sqlalchemy[asyncio]==2.0.23",
+    "opaquepy==0.3.5",
+    "jinja2>=3.1.2,<4.0.0",
+    "anyio>=3.7.1,<4.0.0",
+    "regex>=2023.10.3,<2024.0.0",
+    "orjson>=3.9.5,<4.0.0",
+    "yarl>=1.9.2,<2.0.0",
+    "loguru>=0.7.2,<1.0.0"
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.11, <3.12"
-cryptography = "41.0.7"
-PyJWT = "2.8.0"
-fastapi = "0.105.0"
-gunicorn = "21.2.0"
-uvicorn = { extras = ["standard"], version = "0.24.0" }
-asyncpg = "0.29.0"
-psycopg = { extras = ["binary"], version="^3.1.0" }
-pydantic = "2.5.2"
-redis = "5.0.1"
-sqlalchemy = { extras = ["asyncio"], version = "2.0.23" }
-opaquepy = "0.3.5"
-jinja2 = "^3.1.2"
-anyio = "^3.7.1"
-regex = "^2023.10.3"
-orjson = "^3.9.5"
-yarl = "^1.9.2"
-loguru = "^0.7.2"
-
-[tool.pytest.ini_options]
-asyncio_mode = "strict"
-
-[tool.poetry.scripts]
+[project.scripts]
 backend = "apiserver.dev:run"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.0.1"
-pytest-asyncio = "^0.23.2"
-pytest-mock = "^3.7.0"
-pre-commit = "^2.20.0"
-httpx = "^0.24.1"
-alembic = "^1.12.0"
-coverage = "^7.3.2"
-black = "23.11.0"
-mypy = "^1.5.1"
-faker = "^19.3.1"
-ruff = "^0.1.5"
-types-regex = "^2023.10.3.0"
+[dependency-groups]
+dev = [
+    "pytest>=7.0.1,<8.0.0",
+    "pytest-asyncio>=0.23.2,<0.24.0",
+    "pytest-mock>=3.7.0,<4.0.0",
+    "pre-commit>=2.20.0,<3.0.0",
+    "httpx>=0.24.1,<0.25.0",
+    "alembic>=1.12.0,<2.0.0",
+    "coverage>=7.3.2,<8.0.0",
+    "black==23.11.0",
+    "mypy>=1.5.1,<2.0.0",
+    "faker>=19.3.1,<20.0.0",
+    "ruff>=0.1.5,<1.0.0",
+    "types-regex>=2023.10.3.0,<2024.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+only-packages = true
+packages = ["src/apiserver", "src/auth", "src/datacontext", "src/schema", "src/store"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.black]
 target-version = ['py311']
@@ -65,28 +70,19 @@ plugins = [
 
 [[tool.mypy.overrides]]
 module = [
-    "schema.model.env"
+    "schema.model.env",
+    "schema.model.versions.*"
 ]
 ignore_errors = true
 
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.ruff]
+[tool.ruff.lint]
 select = ["F", "PL", "E", "W", "RUF"]
 # We ignore too-many-arguments and line length, as black fixes line length for code
 ignore = ["PLR0913", "E501"]
-ignore-init-module-imports = true
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F403"]
 
-[tool.ruff.pycodestyle]
+[tool.ruff.lint.pycodestyle]
 # We allow docs and comments to be long
 max-doc-length = 120
-
-[tool.poe.tasks.check]
-shell = "pytest && ruff src actions tests && mypy && black src tests actions"
-interpreter = ["powershell", "posix"]
-

@@ -6,5 +6,5 @@ let backend_dir = root backend_dir
 
 def main [action: string] {
     cd $backend_dir
-    poetry run python actions/actions.py $action
+    uv run python actions/actions.py $action
 }

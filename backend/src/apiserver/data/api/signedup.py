@@ -20,11 +20,11 @@ from schema.model import (
 from store.error import DataError, DbError
 
 __all__ = [
+    "delete_signedup",
+    "get_all_signedup",
     "get_signedup_by_email",
     "insert_su_row",
     "signedup_exists",
-    "get_all_signedup",
-    "delete_signedup",
 ]
 
 

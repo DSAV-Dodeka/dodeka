@@ -6,20 +6,20 @@ let backend_dir = root backend_dir
 
 def pytest_backend [] {
     cd $backend_dir
-    poetry run pytest
+    uv run pytest
 }
 
 def check_backend [] {
     cd $backend_dir
-    poetry run black src tests
-    poetry run ruff src tests
+    uv run black src tests
+    uv run ruff check src tests
     print "Running mypy, this could take a while..."
-    poetry run mypy
+    uv run mypy
 }
 
 def lint_fix [] {
     cd $backend_dir
-    poetry run ruff src tests --fix
+    uv run ruff check src tests --fix
 }
 
 # Run pyest and run the formatter, linter and type checker

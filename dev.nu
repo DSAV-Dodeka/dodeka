@@ -43,7 +43,7 @@ def "main upp" [] {
 # Start development databases when not running Docker directly in your OS (i.e. WSL)
 def "main backend" [] {
     cd $backend_dir
-    poetry run backend
+    uv run backend
 }
 
 # important for the command to be exposed to the outside

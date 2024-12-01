@@ -14,9 +14,9 @@ from apiserver.lib.model.entities import (
 )
 
 __all__ = [
-    "verify_access_token",
     "BadVerification",
     "get_kid",
+    "verify_access_token",
 ]
 
 

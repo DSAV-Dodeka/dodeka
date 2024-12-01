@@ -21,7 +21,7 @@ db_name_admin = "postgres"
 image_desc = "Image for D.S.A.V. Dodeka PostgreSQL instance."
 
 [kv]
-redisjson_version = "v2.6.6"
+redisjson_version = "v2.8.4"
 service_name = "kv"
 container_name = "dodeka-kv"
 # metaconfig
@@ -50,8 +50,8 @@ realm="dodeka"
 
 [confspawn_env.production]
 name = "production"
-version = "v2.1.1"
-git_ref = "v2.1.1"
+version = "v2.3.0"
+git_ref = "v2.3.0"
 allowed_envs = "\"production\""
 # Only the credentials url is with trailing slash, the rest should all be without
 api_root = "https://api.dsavdodeka.nl"
@@ -64,7 +64,7 @@ mail_enabled = true
 
 [confspawn_env.staging]
 name = "staging"
-version = "v2.1.1"
+version = "v2.3.0"
 git_ref = "main"
 allowed_envs = "\"staging\""
 api_root = "https://apidemo.tipten.nl"

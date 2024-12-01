@@ -6,11 +6,11 @@ from auth.data import keys
 from auth.data import update
 
 __all__ = [
-    "authorize",
     "authentication",
+    "authorize",
+    "keys",
     "register",
     "token",
-    "keys",
     "update",
 ]
 
