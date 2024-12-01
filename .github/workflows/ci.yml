@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   backend-ci:
-    uses: DSAV-Dodeka/dodeka/.github/workflows/backend.yml@uv-312
+    uses: DSAV-Dodeka/dodeka/.github/workflows/backend.yml@main
   
   config-deploy:
     runs-on: ubuntu-latest
@@ -53,7 +53,7 @@ jobs:
     strategy:
       matrix:
         target: ['localdev' ]
-    uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@uv-312
+    uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@main
     with:
       env: ${{ matrix.target }}
 
@@ -62,7 +62,7 @@ jobs:
     strategy:
       matrix:
         target: ['localdev' ]
-    uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@uv-312
+    uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@main
     with:
       env: ${{ matrix.target }}
 
@@ -71,6 +71,6 @@ jobs:
     strategy:
       matrix:
         target: ['localdev' ]
-    uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@uv-312
+    uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@main
     with:
       env: ${{ matrix.target }}
