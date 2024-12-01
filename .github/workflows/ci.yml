@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   backend-ci:
-    uses: DSAV-Dodeka/dodeka/.github/workflows/backend.yml@main
+    uses: DSAV-Dodeka/dodeka/.github/workflows/backend.yml@uv-312
   
   config-deploy:
     runs-on: ubuntu-latest
@@ -22,13 +22,15 @@ jobs:
         working-directory: deploy
     steps:
       - uses: actions/checkout@v4
-      - run: pipx install poetry==1.7.1
-      - uses: actions/setup-python@v4
+      - name: uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: '3.11'
-          cache: 'poetry'
-          cache-dependency-path: deploy/poetry.lock
-      - run: poetry install
+          version: "0.5.5"
+          enable-cache: true
+          cache-dependency-glob: "./deploy/uv.lock"
+      - name: uv sync
+        run: uv sync --frozen
       # Build config using tiptenbrink/confspawn
       - uses: taiki-e/install-action@v2
         with:
@@ -50,8 +52,8 @@ jobs:
     needs: [backend-ci, config-deploy]
     strategy:
       matrix:
-        target: ['localdev', 'staging', 'production' ]
-    uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@main
+        target: ['localdev' ]
+    uses: DSAV-Dodeka/dodeka/.github/workflows/db.yml@uv-312
     with:
       env: ${{ matrix.target }}
 
@@ -59,8 +61,8 @@ jobs:
     needs: [backend-ci, config-deploy]
     strategy:
       matrix:
-        target: ['localdev', 'staging', 'production' ]
-    uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@main
+        target: ['localdev' ]
+    uses: DSAV-Dodeka/dodeka/.github/workflows/server.yml@uv-312
     with:
       env: ${{ matrix.target }}
 
@@ -68,7 +70,7 @@ jobs:
     needs: [backend-ci, config-deploy]
     strategy:
       matrix:
-        target: ['localdev', 'staging', 'production' ]
-    uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@main
+        target: ['localdev' ]
+    uses: DSAV-Dodeka/dodeka/.github/workflows/kv.yml@uv-312
     with:
       env: ${{ matrix.target }}

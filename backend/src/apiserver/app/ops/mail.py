@@ -10,11 +10,11 @@ from apiserver.define import template_env, loc_dict, DEFINE
 
 
 __all__ = [
-    "send_signup_email",
-    "send_register_email",
-    "send_change_email_email",
-    "send_reset_email",
     "mail_from_config",
+    "send_change_email_email",
+    "send_register_email",
+    "send_reset_email",
+    "send_signup_email",
 ]
 
 

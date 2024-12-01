@@ -23,11 +23,9 @@ try:
 except ImportError:
     import os
 
-    # This should be the part after :// 
+    # This should be the part after ://
     env_db_url = os.environ.get("DATABASE_URL")
-    db_url = (
-        f"postgresql+psycopg://{env_db_url}"
-    )
+    db_url = f"postgresql+psycopg://{env_db_url}"
 
 
 config.set_main_option("sqlalchemy.url", db_url)

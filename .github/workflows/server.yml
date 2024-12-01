@@ -21,17 +21,19 @@ jobs:
         working-directory: deploy
     steps:
       - uses: actions/checkout@v4
-      - run: pipx install poetry==1.7.1
-      - uses: actions/setup-python@v4
+      - name: uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: '3.10'
-          cache: 'poetry'
-          cache-dependency-path: deploy/poetry.lock
-      - run: poetry install
+          version: "0.5.5"
+          enable-cache: true
+          cache-dependency-glob: "./deploy/uv.lock"
+      - name: uv sync
+        run: uv sync --frozen
       - name: Config
         run: |
-          poetry run confspawn -c config.toml -s ./build/container/server -t ./context/backend -e ${{ inputs.env }}
-          poetry run confspawn -c config.toml -s ./build/container/authpage -t ./context/envauthpage -e ${{ inputs.env }}
+          uv run confspawn -c config.toml -s ./build/container/server -t ./context/backend -e ${{ inputs.env }}
+          uv run confspawn -c config.toml -s ./build/container/authpage -t ./context/envauthpage -e ${{ inputs.env }}
 
       # First the lock file and project declaration are moved
       # Then the source is moved
@@ -41,7 +43,7 @@ jobs:
       - name: Move source
         working-directory: ${{ github.workspace }}
         run: |
-          mv backend/poetry.lock deploy/context/backend
+          mv backend/uv.lock deploy/context/backend
           mv backend/pyproject.toml deploy/context/backend
           mv backend/src deploy/context/backend/src
           mv authpage deploy/context/authpage
@@ -49,7 +51,7 @@ jobs:
           mv deploy/context/envauthpage/* deploy/context/authpage
       - name: Cache authpage
         id: cached-authpage
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: authpage-${{ hashFiles('deploy/context/authpage') }}
           path: deploy/context/backend/src/apiserver/resources/static/credentials
@@ -85,7 +87,7 @@ jobs:
         run: echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
       # We need to use the image name in each tag, so we set that to an env as well
       - name: Image name
-        run: echo "IMAGE_NM=$(poetry run confenv -c config.toml -v server.image_name -e ${{ inputs.env }})" >> $GITHUB_ENV
+        run: echo "IMAGE_NM=$(uv run confenv -c config.toml -v server.image_name -e ${{ inputs.env }})" >> $GITHUB_ENV
       
       ##### not-production will get :<env> and :<env>-<commit sha>, production only gets :<commit sha>
       ##### because for production the 'latest' should only be on a release

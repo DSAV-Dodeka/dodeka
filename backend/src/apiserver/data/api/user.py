@@ -35,12 +35,12 @@ from apiserver.lib.utilities import gen_id_name
 from apiserver.data.api.ud.userdata import new_userdata, insert_userdata
 
 __all__ = [
-    "user_exists",
-    "user_exists",
-    "insert_user",
-    "insert_return_user_id",
-    "new_user",
     "UserOps",
+    "insert_return_user_id",
+    "insert_user",
+    "new_user",
+    "user_exists",
+    "user_exists",
 ]
 
 

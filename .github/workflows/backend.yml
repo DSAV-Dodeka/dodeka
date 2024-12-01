@@ -15,26 +15,27 @@ jobs:
         working-directory: backend
     steps:
     - uses: actions/checkout@v4
-    - run: pipx install poetry==1.7.1
-    - uses: actions/setup-python@v4
+    - name: uv
+      id: setup-uv
+      uses: astral-sh/setup-uv@v4
       with:
-        python-version: '3.11'
-        cache: 'poetry'
-        cache-dependency-path: backend/poetry.lock
-    - run: |
-        poetry env use python3.11
-        poetry install --sync
+        version: "0.5.5"
+        enable-cache: true
+        cache-dependency-glob: "./backend/uv.lock"
+    - name: uv sync
+      run: uv sync --frozen --group dev
+    - name: Cache authpage
+      id: cached-authpage
+      uses: actions/cache@v4
+      with:
+        key: authpage-${{ hashFiles('authpage') }}
+        path: backend/src/apiserver/resources/static/credentials
     - uses: actions/setup-node@v4
+      if: ${{ steps.cached-authpage.outputs.cache-hit != 'true' }}
       with:
         node-version: '20'
         cache: 'npm'
         cache-dependency-path: authpage/package-lock.json
-    - name: Cache authpage
-      id: cached-authpage
-      uses: actions/cache@v3
-      with:
-        key: authpage-${{ hashFiles('authpage') }}
-        path: backend/src/apiserver/resources/static/credentials
     - name: Build credentials
       if: ${{ steps.cached-authpage.outputs.cache-hit != 'true' }}
       run: |
@@ -42,20 +43,20 @@ jobs:
         npm run build
       working-directory: ${{ github.workspace }}/authpage
     - name: Pytest
-      run: poetry run pytest
+      run: uv run pytest
       env:
         QUERY_TEST: true
     - name: Black
-      run: poetry run black src tests
+      run: uv run black src tests
     - name: Ruff
-      run: poetry run ruff src tests
+      run: uv run ruff check src tests
     - name: Cache mypy results
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
-        key: mypy-${{ hashFiles('backend/poetry.lock') }}
+        key: mypy-${{ hashFiles('backend/uv.lock') }}
         path: backend/.mypy_cache
     - name: Mypy
-      run: poetry run mypy
+      run: uv run mypy
     services:
       postgres:
         image: ghcr.io/dsav-dodeka/postgres:localdev
