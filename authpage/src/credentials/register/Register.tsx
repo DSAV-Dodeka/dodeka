@@ -40,17 +40,26 @@ const registerReducer = (state: RegisterState, action: RegisterAction): Register
 export type RegisterState = {
     firstname: string,
     lastname: string,
+    initials: string,
     email: string,
     phone: string,
-    callname: string,
+    zipcode: string,
+    city: string,
+    address: string,
+    house_number: string,
     password: string,
     password_confirm: string,
     date_of_birth: string,
+    enable_incasso: boolean,
+    iban: string,
+    iban_name: string,
+    gender: string,
     birthday_check: boolean,
     student: boolean,
+    plan: string,
     eduinstitution: string,
     eduinstitution_other: string,
-    register_id: string
+    language: string,
 }
 
 type RegisterAction =
@@ -59,19 +68,53 @@ type RegisterAction =
     | { type: 'change_bool', field: string, value: boolean }
 
 let initialState: RegisterState = {
-    register_id: "",
     firstname: "",
     lastname: "",
+    initials: "",
     email: "",
     phone: "",
-    callname: "",
+    zipcode: "",
+    city: "",
+    address: "",
+    house_number: "",
     password: "",
     password_confirm: "",
-    date_of_birth: "2019-02-25",
+    date_of_birth: "",
+    enable_incasso: false,
+    iban: "",
+    iban_name: "",
+    gender: "male",
     birthday_check: false,
     student: false,
+    plan: "Wedstrijdlid",
     eduinstitution: "TU Delft",
-    eduinstitution_other: ""
+    eduinstitution_other: "",
+    language: ""
+}
+
+let initialStateTest: RegisterState = {
+    firstname: "Tip",
+    lastname: "ten Brink",
+    initials: "T",
+    email: "mijn@email.nl",
+    phone: "0613245",
+    zipcode: "2624 AB",
+    city: "Delft",
+    address: "Een adres",
+    house_number: "1195",
+    password: "mijn06wwacht",
+    password_confirm: "mijn06wwacht",
+    date_of_birth: "2000-04-05",
+    enable_incasso: true,
+    iban: "NLMIJNIBAN",
+    iban_name: "mr IBan",
+    gender: "0",
+    birthday_check: true,
+    student: true,
+    plan: "Wedstrijdlid",
+    eduinstitution: "TU Delft",
+    eduinstitution_other: "",
+    language: "nl-NL"
 }
 
 let focus:boolean = false;
@@ -93,34 +136,9 @@ const handleBlur = (event: FocusEvent<HTMLInputElement>) => {
     }
 }
 
-const RegisterInfo = z.object({
-    register_id: z.string(),
-    firstname: z.string(),
-    lastname: z.string(),
-    email: z.string(),
-    phone: z.string(),
-})
-
 const redirectUrl = `${config.client_location}/registered`
 
 const Register = () => {
-    const readUrlSearch = (): RegisterState => {
-        const source_params = (new URLSearchParams(window.location.search))
-        const info_param = source_params.get("info")
-        if (info_param === null) {
-            throw new Error("No info given!")
-        }
-        const info_bytes = base64ToBin(info_param)
-        const decoder = new TextDecoder()
-        const info_str = decoder.decode(info_bytes)
-        const info = JSON.parse(info_str)
-        const reg_info = RegisterInfo.parse(info)
-        return {
-            ...initialState,
-            ...reg_info
-        }
-    }
-
     const [handled, setHandled] = useState(false)
     const [infoOk, setInfoOk] = useState(false)
     const [state, dispatch] = useReducer(
@@ -135,7 +153,7 @@ const Register = () => {
     useEffect(() => {
         if (!handled) {
             try {
-                const reducerInitial = readUrlSearch()
+                const reducerInitial = { ...initialStateTest }
                 setInfoOk(true)
                 dispatch({type: 'reload', new_state: reducerInitial})
             } catch (e) {
@@ -221,15 +239,33 @@ const Register = () => {
             }
             {infoOk &&
             <form className="form" onSubmit={handleSubmit}>
-                <input disabled className={submitted} required id="name" type="text" placeholder="Voornaam" name="name" value={state.firstname}
+                <div className={"dropdown"}>
+                    <label >Taal/Language:</label>
+                    <select id="language" name="language" value={state.language}
+                            onChange={handleSelectChange}>
+                        <option value="nl-NL">Nederlands</option>
+                        <option value="en-GB">English/Other</option>
+                    </select>
+                </div>
+                <input className={submitted} required id="firstname" type="text" placeholder="Voornaam" name="firstname" value={state.firstname}
                        onChange={handleFormChange}/>
-                <input disabled className={submitted} required id="surname" type="text" placeholder="Achternaam" name="surname" value={state.lastname}
+                <input className={submitted} required id="lastname" type="text" placeholder="Achternaam" name="lastname" value={state.lastname}
                        onChange={handleFormChange}/>
-                <input disabled className={submitted} required id="email" type="text" placeholder="E-mail" name="email" value={state.email}
+                <input className={submitted} required id="initials" type="text" placeholder="Initialen" name="initials" value={state.initials}
                        onChange={handleFormChange}/>
-                <input disabled className={submitted} required id="phone" type="text" placeholder="Telefoonnummer" name="phone" value={state.phone}
+                <div className={"dropdown"}>
+                    <label >Geslacht:</label>
+                    <select id="gender" name="gender" value={state.gender}
+                            onChange={handleSelectChange}>
+                        <option value="0">Man</option>
+                        <option value="1">Vrouw</option>
+                        <option value="2">Anders</option>
+                    </select>
+                </div>
+                <input className={submitted} required id="email" type="text" placeholder="E-mail" name="email" value={state.email}
                        onChange={handleFormChange}/>
-                <p className="maybeMistakeText">Staat hierboven een foutje? Het kan ook na registratie aangepast worden, laat het aan ons weten!</p>
+                <input className={submitted} required id="phone" type="text" placeholder="Telefoonnummer" name="phone" value={state.phone}
+                       onChange={handleFormChange}/>
                 <input required className={"formPassword " + submitted}  id="password" type="password" placeholder="Wachtwoord" name="password" value={state.password}
                        onChange={handleFormChange}/>
                 {/** The Suspense is used because the library used for loading is quite big, so it is loaded in the background after page load **/}
@@ -237,19 +273,44 @@ const Register = () => {
                 <input className={submitted} required id="password_confirm" type="password" placeholder="Herhaal wachtwoord" name="password_confirm" value={state.password_confirm}
                        onChange={handleFormChange}/>
                 <div className="dropdown">
+                <input className={submitted} required id="zipcode" type="text" placeholder="Postcode" name="zipcode" value={state.zipcode}
+                       onChange={handleFormChange}/>
+                <input className={submitted} required id="city" type="text" placeholder="Plaats" name="city" value={state.city}
+                       onChange={handleFormChange}/>
+                <input className={submitted} required id="address" type="text" placeholder="Straat" name="address" value={state.address}
+                       onChange={handleFormChange}/>
+                <input className={submitted} required id="house_number" type="text" placeholder="Huisnummer" name="house_number" value={state.house_number}
+                       onChange={handleFormChange}/>
                 <label>Geboortedatum:</label>
                 <input className={submitted} required id="date_of_birth" type="date" placeholder="Geboortedatum" name="date_of_birth" value={state.date_of_birth}
                         onChange={handleFormChange} />
                 </div>
-                
+                <div className={"dropdown"}>
+                    <label>Soort lidmaatschap:</label>
+                    <select id="plan" name="plan" value={state.plan}
+                            onChange={handleSelectChange}>
+                        <option value="Wedstrijdlid">Wedstrijdlid (€60 per kwartaal)</option>
+                        <option value="Recreantlid">Recreantlid (€50 per kwartaal)</option>
+                        <option value="Gastlid">Gastlid (€30 per kwartaal)</option>
+                    </select>
+                </div>
+                <div className="checkbox">
+                    <label >Automatische incasso en akkoord €5 registratiekosten</label>
+                    <input required id="enable_incasso" type="checkbox" name="enable_incasso" checked={state.enable_incasso}
+                            onChange={handleCheckboxChange}/>
+                </div>
+                <input className={submitted} required id="iban" type="text" placeholder="IBAN" name="iban" value={state.iban}
+                       onChange={handleFormChange}/>
+                <input className={submitted} required id="iban_name" type="text" placeholder="Naam op rekening" name="iban_name" value={state.iban_name}
+                       onChange={handleFormChange}/>
                 <div className="checkbox">
                     <label >Leden mogen mijn verjaardag en leeftijd zien</label>
-                    <input className={submitted} id="birthday_check" type="checkbox" name="birthday_check"
+                    <input className={submitted} id="birthday_check" type="checkbox" name="birthday_check" checked={state.birthday_check}
                             onChange={handleCheckboxChange}/>
                 </div>
                 <div className="checkbox">
                     <label >Ik ben student</label>
-                    <input id="student" type="checkbox" name="student"
+                    <input id="student" type="checkbox" name="student" checked={state.student}
                             onChange={handleCheckboxChange}/>
                 </div>
 

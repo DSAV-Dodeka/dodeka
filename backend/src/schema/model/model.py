@@ -17,6 +17,7 @@ USER_NAME_ID = "id_name"
 USER_ID = "user_id"
 USER_EMAIL = "email"
 PASSWORD = "password_file"
+# this must include member for them to have access to anything
 SCOPES = "scope"
 compute_text = sqla.text(f"{USER_INT_ID}::varchar(32) || '_' || {USER_NAME_ID}")
 users = sqla.Table(
@@ -102,35 +103,14 @@ refreshtokens = sqla.Table(
     sqla.Column(NONCE, sqla.String(length=200)),
 )
 
-SIGNEDUP_TABLE = "signedup"
-SU_FIRSTNAME = "firstname"
-SU_LASTNAME = "lastname"
-SU_PHONE = "phone"
-SU_EMAIL = "email"
-SU_CONFIRMED = "confirmed"
-signedup = sqla.Table(
-    SIGNEDUP_TABLE,
-    metadata,
-    sqla.Column(SU_FIRSTNAME, sqla.String(length=100), nullable=False),
-    sqla.Column(SU_LASTNAME, sqla.String(length=100), nullable=False),
-    sqla.Column(SU_PHONE, sqla.String(length=15), nullable=False),
-    sqla.Column(SU_EMAIL, sqla.String(length=100), primary_key=True),
-    sqla.Column(SU_CONFIRMED, sqla.Boolean, nullable=False),
-)
-
 USERDATA_TABLE = "userdata"
+# whether or not they are an active member
 UD_ACTIVE = "active"
 UD_FIRSTNAME = "firstname"
 UD_LASTNAME = "lastname"
-UD_CALLNAME = "callname"
-UD_PHONE = "phone"
 UD_EMAIL = "email"
-AV40_ID = "av40id"
 JOINED = "joined"
 BIRTHDATE = "birthdate"
-REGISTER_ID = "registerid"
-EDUCATION_INSTITUTION = "eduinstitution"
-USER_REGISTERED = "registered"
 SHOW_AGE = "showage"
 userdata = sqla.Table(
     USERDATA_TABLE,
@@ -144,8 +124,6 @@ userdata = sqla.Table(
     sqla.Column(UD_ACTIVE, sqla.Boolean, nullable=False),
     sqla.Column(UD_FIRSTNAME, sqla.String(length=100), nullable=False),
     sqla.Column(UD_LASTNAME, sqla.String(length=100), nullable=False),
-    sqla.Column(UD_CALLNAME, sqla.String(length=100)),
-    sqla.Column(UD_PHONE, sqla.String(length=32)),
     sqla.Column(
         UD_EMAIL,
         sqla.String(length=255),
@@ -155,12 +133,8 @@ userdata = sqla.Table(
         unique=True,
         nullable=False,
     ),
-    sqla.Column(AV40_ID, sqla.Integer),
     sqla.Column(JOINED, sqla.Date),
     sqla.Column(BIRTHDATE, sqla.Date, nullable=False),
-    sqla.Column(REGISTER_ID, sqla.String(length=100), unique=True),
-    sqla.Column(EDUCATION_INSTITUTION, sqla.String(length=100)),
-    sqla.Column(USER_REGISTERED, sqla.Boolean, nullable=False),
     sqla.Column(SHOW_AGE, sqla.Boolean),
 )
 

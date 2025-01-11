@@ -1,4 +1,4 @@
-from store.kv import store_json, get_json, pop_json
+from store.kv import store_json, get_json, pop_json, store_string, get_string
 from apiserver.data import Source, get_kv
 from store.error import NoDataError
 from apiserver.lib.model.entities import UpdateEmailState, Signup
@@ -13,20 +13,21 @@ async def get_register_state(dsrc: Source, auth_id: str) -> SavedRegisterState:
 
 
 async def store_email_confirmation(
-    dsrc: Source, confirm_id: str, signup: Signup, email_expiration: int
+    dsrc: Source, confirm_id: str, email: str, email_expiration: int
 ) -> None:
-    await store_json(
-        get_kv(dsrc), confirm_id, signup.model_dump(), expire=email_expiration
+    await store_string(
+        get_kv(dsrc), email, confirm_id, expire=email_expiration
     )
 
 
-async def get_email_confirmation(dsrc: Source, confirm_id: str) -> Signup:
-    signup_dict = await get_json(get_kv(dsrc), confirm_id)
-    if signup_dict is None:
+async def get_email_confirmation(dsrc: Source, email: str) -> str:
+    """Returns the confirm id stored for the email."""
+    stored_confirm_id = await get_string(get_kv(dsrc), email)
+    if stored_confirm_id is None:
         raise NoDataError(
-            "Confirmation ID does not exist or expired.", "saved_confirm_empty"
+            "No current confirmation flow for email", "saved_confirm_empty"
         )
-    return Signup.model_validate(signup_dict)
+    return stored_confirm_id
 
 
 async def store_update_email(

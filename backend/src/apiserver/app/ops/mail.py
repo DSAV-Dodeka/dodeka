@@ -70,12 +70,10 @@ def send_email(
 def send_signup_email(
     background_tasks: BackgroundTasks,
     receiver: str,
-    receiver_name: str,
     mail_server: Optional[MailServer],
-    redirect_link: str,
-    signup_link: str,
+    registration_url: str,
 ) -> None:
-    add_vars = {"redirect_link": redirect_link, "signup_link": signup_link}
+    add_vars = {"registration_url": registration_url,}
 
     def send_lam() -> None:
         send_email(
@@ -83,7 +81,7 @@ def send_signup_email(
             receiver,
             mail_server,
             "Please confirm your email",
-            receiver_name,
+            None,
             add_vars=add_vars,
         )
 

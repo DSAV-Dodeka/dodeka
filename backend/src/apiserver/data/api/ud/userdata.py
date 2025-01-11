@@ -13,7 +13,6 @@ from schema.model import (
     USERDATA_TABLE,
     USER_ID,
     UD_EMAIL,
-    REGISTER_ID,
     UD_ACTIVE,
     UD_FIRSTNAME,
     UD_LASTNAME,
@@ -37,41 +36,17 @@ def parse_userdata(user_dict: Optional[dict[str, Any]]) -> UserData:
 
 
 def new_userdata(
-    su: SignedUp, user_id: str, register_id: str, av40id: int, joined: date
+    su: SignedUp, user_id: str, joined: date, birthdate: date
 ) -> UserData:
     return UserData(
         user_id=user_id,
         active=True,
-        registerid=register_id,
         firstname=su.firstname,
         lastname=su.lastname,
         email=su.email,
-        phone=su.phone,
-        av40id=av40id,
         joined=joined,
-        registered=False,
-        showage=False,
-    )
-
-
-def finished_userdata(
-    ud: UserData, callname: str, eduinstitution: str, birthdate: date, show_age: bool
-) -> UserData:
-    return UserData(
-        user_id=ud.user_id,
-        firstname=ud.firstname,
-        lastname=ud.lastname,
-        callname=callname,
-        email=ud.email,
-        phone=ud.phone,
-        av40id=ud.av40id,
-        joined=ud.joined,
-        eduinstitution=eduinstitution,
         birthdate=birthdate,
-        registerid=ud.registerid,
-        active=True,
-        registered=True,
-        showage=show_age,
+        showage=False,
     )
 
 
@@ -108,8 +83,6 @@ class IdUserDataOps(AuthIdUserDataOps):
                 name=f"{ud.firstname} {ud.lastname}",
                 given_name=ud.firstname,
                 family_name=ud.lastname,
-                nickname=ud.callname,
-                preferred_username=ud.callname,
                 birthdate=ud.birthdate.isoformat(),
             )
         )
@@ -124,13 +97,13 @@ async def get_userdata_by_email(conn: AsyncConnection, email: str) -> UserData:
     return parse_userdata(userdata_row)
 
 
-async def get_userdata_by_register_id(
-    conn: AsyncConnection, register_id: str
-) -> UserData:
-    userdata_row = await retrieve_by_unique(
-        conn, USERDATA_TABLE, REGISTER_ID, register_id
-    )
-    return parse_userdata(userdata_row)
+# async def get_userdata_by_register_id(
+#     conn: AsyncConnection, register_id: str
+# ) -> UserData:
+#     userdata_row = await retrieve_by_unique(
+#         conn, USERDATA_TABLE, REGISTER_ID, register_id
+#     )
+#     return parse_userdata(userdata_row)
 
 
 async def insert_userdata(conn: AsyncConnection, userdata: UserData) -> str:

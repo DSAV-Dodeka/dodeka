@@ -37,8 +37,6 @@ class IdInfo(BaseModel):
     name: str
     given_name: str
     family_name: str
-    nickname: str
-    preferred_username: str
     birthdate: str
 
 
@@ -46,8 +44,6 @@ class SignedUp(BaseModel):
     firstname: str
     lastname: str
     email: str
-    phone: str
-    confirmed: bool = False
 
 
 class UserData(BaseModel):
@@ -55,15 +51,9 @@ class UserData(BaseModel):
     active: bool
     firstname: str
     lastname: str
-    callname: str = ""
     email: str
-    phone: str
-    av40id: int
     joined: date
-    eduinstitution: str = ""
-    birthdate: date = date.min
-    registerid: str = ""
-    registered: bool
+    birthdate: date
     showage: bool
 
     # Coerces null in database to false

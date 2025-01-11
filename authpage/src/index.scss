@@ -1,11 +1,12 @@
-@import "variables";
+@use "sass:list";
+@use "variables";
 
 html {
   font-family: arboria, sans-serif;
 }
 
 body {
-  background-color: $dodeka_blauw90p;
+  background-color: variables.$dodeka_blauw90p;
   margin: 0px;
   padding: 0px;
   
@@ -28,7 +29,7 @@ p {
 
 .title {
   text-align: center;
-  font-size: $font_large;
+  font-size: variables.$font_large;
   color: #ffffff;
 }
 
@@ -69,11 +70,11 @@ p {
   display: block;
   border-style: none;
   background-color: white;
-  color: $dodeka_blauw;
+  color: variables.$dodeka_blauw;
   padding: 0.75rem;
   border-radius: 0.75rem;
-  font-size: $font_medium;
-  line-height: $line_height_medium;
+  font-size: variables.$font_medium;
+  line-height: variables.$line_height_medium;
   height: 3.5rem;
   margin: 0 0 2rem 0;
 }
@@ -84,26 +85,26 @@ p {
 
 button {
   width: 100%;
-  background-color: $dodeka_rood;
+  background-color: variables.$dodeka_rood;
   color: white;
   border-radius: 0.75rem;
   border: none;
   padding: 1rem;
-  font-size: $font_medium;
-  font-weight: $bold;
+  font-size: variables.$font_medium;
+  font-weight: variables.$bold;
   cursor: pointer;
   height: 4rem; /* Set the specific height for the button */
 }
 
 button:hover{
   background: white;
-  color:  $dodeka_rood;
+  color:  variables.$dodeka_rood;
 }
 
 .formStatus {
-  font-size: $font_small;
-  line-height: $line_height_small;
-  color: $dodeka_rood;
+  font-size: variables.$font_small;
+  line-height: variables.$line_height_small;
+  color: variables.$dodeka_rood;
   margin: 0 auto 2rem auto;
 }
 
@@ -118,8 +119,8 @@ button:hover{
   max-width: 80%;
   display: block;
   color: white;
-  font-size: $font_medium;
-  line-height: $line_height_medium;
+  font-size: variables.$font_medium;
+  line-height: variables.$line_height_medium;
   padding-top: 1.5rem;
   text-align: center;
 }
@@ -131,9 +132,9 @@ $end: 5;
 
 @for $i from $start through $end {
     .passBar#{$i} {
-        color: nth($colors, $i);
-        font-size: $font_small;
-        line-height: $line_height_small;
+        color: list.nth($colors, $i);
+        font-size: variables.$font_small;
+        line-height: variables.$line_height_small;
         margin-bottom: 0.5rem;
     }
 }
