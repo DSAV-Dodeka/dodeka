@@ -28,7 +28,10 @@ class AuthBearerHeader(SecurityBase):
     def __init__(self) -> None:
         self.model = HTTPBaseModel(
             scheme="bearer",
-            description="Provide the access token like 'Bearer <encoded token>'.",
+            description=(
+                "Provide the access token like '<encoded token>'. 'Bearer ' is"
+                " prepended automatically."
+            ),
         )
         self.scheme_name = "Bearer authorization scheme."
 
@@ -46,7 +49,9 @@ def parse_auth_header(headers: Headers) -> str:
     if not authorization:
         # Conforms to RFC6750 https://www.rfc-editor.org/rfc/rfc6750.html
         raise HTTPException(
-            status_code=400, headers={"WWW-Authenticate": www_authenticate}
+            status_code=400,
+            headers={"WWW-Authenticate": www_authenticate},
+            detail="Expected authorization header.",
         )
 
     return authorization
