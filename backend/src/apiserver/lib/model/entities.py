@@ -13,7 +13,7 @@ class User(AuthUser):
     id_name: str
     # Computed in the database
     user_id: str = ""
-    scope: str = "member"
+    scope: str
 
 
 class Key(BaseModel):
@@ -55,6 +55,7 @@ class UserData(BaseModel):
     joined: date
     birthdate: date
     showage: bool
+    confirmed: bool = False
 
     # Coerces null in database to false
     @field_validator("showage")

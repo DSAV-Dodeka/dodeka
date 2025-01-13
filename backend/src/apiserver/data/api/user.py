@@ -136,7 +136,7 @@ async def new_user(
 ) -> str:
     id_name = gen_id_name(signed_up.firstname, signed_up.lastname)
 
-    user = User(id_name=id_name, email=signed_up.email, password_file="")
+    user = User(id_name=id_name, email=signed_up.email, password_file="", scope="")
     user_id = await insert_return_user_id(conn, user)
     # userdata = new_userdata(signed_up, user_id, register_id)
 

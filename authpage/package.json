@@ -1,6 +1,7 @@
 {
   "name": "authpage",
   "version": "0.2.0",
+  "type": "module",
   "scripts": {
     "dev": "vite --mode localdev",
     "build": "tsc && vite build --mode localdev",

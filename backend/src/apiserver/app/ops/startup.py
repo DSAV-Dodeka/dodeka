@@ -181,17 +181,13 @@ async def initial_population(dsrc: Source, config: Config) -> None:
     admin_userdata = UserData(
         user_id="0_admin",
         active=False,
-        registerid="",
         firstname="admin",
         lastname="admin",
-        callname="admin",
         email="admin",
-        phone="admin",
-        av40id=0,
         joined=date.today(),
         birthdate=date.today(),
-        registered=True,
         showage=False,
+        confirmed=True
     )
 
     async with data.get_conn(dsrc) as conn:

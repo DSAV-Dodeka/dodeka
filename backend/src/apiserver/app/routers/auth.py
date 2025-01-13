@@ -3,8 +3,10 @@ from loguru import logger
 from fastapi import APIRouter, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+from apiserver import data
 from apiserver.app.dependencies import AuthContext, SourceDep
 
+from apiserver.data.api.user import get_user_by_email
 from auth.core.error import RedirectError, AuthError
 from auth.core.model import PasswordRequest, FinishLogin, TokenResponse, TokenRequest
 from auth.core.response import PasswordResponse
@@ -33,6 +35,16 @@ async def start_login(
 ) -> PasswordResponse:
     """Login can be initiated in 2 different flows: the first is the OAuth 2 flow, the second is a simple password
     check flow."""
+
+    # TODO do this in a better, non-hacky way
+    async with data.get_conn(dsrc) as conn:
+        user = await data.ud.get_userdata_by_email(conn, login_start.email)
+        if user is not None and not user.confirmed:
+            raise ErrorResponse(
+                status_code=400,
+                err_type="bad_login",
+                err_desc="User must be confirmed by board before login.",
+            )
 
     return await auth_start_login(
         dsrc.store, schema.UserOps, auth_context.login_ctx, login_start

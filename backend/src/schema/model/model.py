@@ -112,6 +112,7 @@ UD_EMAIL = "email"
 JOINED = "joined"
 BIRTHDATE = "birthdate"
 SHOW_AGE = "showage"
+CONFIRMED = "confirmed"
 userdata = sqla.Table(
     USERDATA_TABLE,
     metadata,
@@ -133,6 +134,7 @@ userdata = sqla.Table(
         unique=True,
         nullable=False,
     ),
+    sqla.Column(CONFIRMED, sqla.Boolean, default=False),
     sqla.Column(JOINED, sqla.Date),
     sqla.Column(BIRTHDATE, sqla.Date, nullable=False),
     sqla.Column(SHOW_AGE, sqla.Boolean),

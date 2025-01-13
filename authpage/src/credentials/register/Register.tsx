@@ -6,12 +6,13 @@ import React, {
     FocusEvent,
     useState,
     useEffect,
-    MouseEvent
+    MouseEvent,
+    useRef
 } from "react";
 import "./Register.scss";
 import "../../index.scss";
 import config from "../../config";
-import {clientLogin, clientRegister} from "../../functions/authenticate";
+import {clientLogin, clientRegister, VoltaError} from "../../functions/authenticate";
 import {base64ToBin} from "../../functions/encode";
 import Back from "../../components/Back";
 import {z} from "zod";
@@ -139,6 +140,7 @@ const handleBlur = (event: FocusEvent<HTMLInputElement>) => {
 const redirectUrl = `${config.client_location}/registered`
 
 const Register = () => {
+    const myStatus = useRef<HTMLDivElement>(null)
     const [handled, setHandled] = useState(false)
     const [infoOk, setInfoOk] = useState(false)
     const [state, dispatch] = useReducer(
@@ -205,7 +207,16 @@ const Register = () => {
                 },
                 (e) => {
                     console.log(e)
-                    somethingWrong()
+
+                    if (e instanceof VoltaError) {
+                        setStatus(e.voltaMessage)
+                    } else {
+                        somethingWrong()
+                    }
+
+                    if (myStatus.current !== null) {
+                        myStatus.current.scrollIntoView()
+                    }
                 }
             )
         }
@@ -331,7 +342,7 @@ const Register = () => {
                 <br />
                 <button className="authButton" id="submit_button" onClick={handleSubmitClick} type="submit">Registreer</button><br />
                 <p className="buttonText">Door op registeer te klikken ga je akkoord met het eerder genoemde <a href="https://dsavdodeka.nl/files/privacyverklaring_dodeka_jan23.pdf" target="_blank" rel="noreferrer" className="privacy_link">privacybeleid</a></p>
-                <p className="formStatus">{status}</p>
+                <div ref={myStatus} id="status" className="formStatus">{status.length > 0 ? <span><strong>Error:</strong> {status}</span> : ''}</div>
             </form>}
         </div>
     )

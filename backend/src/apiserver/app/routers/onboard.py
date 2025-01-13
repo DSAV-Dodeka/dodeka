@@ -190,10 +190,6 @@ async def get_signedup(dsrc: SourceDep) -> list[SignedUp]: # type: ignore
     pass
 
 
-@router.get("/get/", response_model=list[SignedUp])
-async def get_signedup_old(dsrc: SourceDep) -> list[SignedUp]:
-    return await get_signedup(dsrc)
-
 
 class SignupConfirm(BaseModel):
     email: str

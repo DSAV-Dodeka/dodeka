@@ -3,6 +3,7 @@ import config from "../config";
 import {RegisterState} from "../credentials/register/Register";
 import {back_post, catch_api} from "./api";
 import {z} from "zod";
+import ky, { HTTPError, KyResponse } from "ky";
 
 const OpaqueResponse = z.object({
     server_message: z.string(),
@@ -145,14 +146,14 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
     }
 
     const genderParsed = parseInt(registerState.gender)
-    let gender: 0 | 1 | 2;
+    let gender: VoltaRegistration["Gender"];
     if (genderParsed === 0 || genderParsed === 1 || genderParsed === 2) {
         gender = genderParsed
     } else {
         throw new Error("Invalid gender!")
     }
 
-    let language;
+    let language: VoltaRegistration["LanguageCode"];
     if (registerState.language === "nl-NL" || registerState.language === "en-GB") {
         language = registerState.language
     } else {
@@ -176,7 +177,7 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         FirstName: registerState.firstname,
         LastName: registerState.lastname,
         Initials: registerState.initials,
-        Gender: genderParsed,
+        Gender: gender,
         Birthdate: registerState.date_of_birth,
         Email: {
             Email: registerState.email
@@ -184,12 +185,52 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         MobilePhone: {
             Number: registerState.phone
         },
-        LanguageCode: registerState.language
+        LanguageCode: language
+    }
+}
+
+const volta = ky.create({prefixUrl: "https://prod.foys.tech/api/v2/pub/registration-forms/4717c5a6-5e49-4d4d-ca49-08dd2f2dfc8c/"});
+
+export class VoltaError extends Error {
+    constructor(detail: string) {
+        super(`Volta returnedd error with detail: ${detail}`)
+        this.voltaMessage = detail
+    }
+
+    voltaMessage: string;
+}
+
+async function doVoltaRegister(voltaRegistration: VoltaRegistration) {
+    let result: KyResponse;
+    try {
+        result = await volta.post("", { json: voltaRegistration })
+    }
+    catch (e) {
+        if (e instanceof HTTPError) {
+            const result = e.response
+            console.log(`result.status=${result.status}\ncontent-type=${(result.headers.get('Content-Type') ?? '')}`)
+            if (result.status === 400 && (result.headers.get('Content-Type') ?? '').includes('json')) {
+                const jsonParsed = await result.json()
+                console.log(`jsonParsed=${JSON.stringify(jsonParsed)}.`)
+                if (typeof jsonParsed === 'object' && jsonParsed !== null && 'detail' in jsonParsed) {
+                    throw new VoltaError(String(jsonParsed.detail))
+                }
+            }
+
+            throw new Error(`Failed to register with Volta: Result:\n${await result.text()}`)
+        }
+        throw e
+    }
+
+    if (result.status !== 200) {
+        throw new Error(`Volta registration failed with status=${result.status} and content:\n${await result.text()}`)
     }
 }
 
 export async function clientRegister(registerState: RegisterState) {
     const voltaRegistration = registerStateToVolta(registerState)
+
+    //await doVoltaRegister(voltaRegistration)
 
     try {
         const { message: client_start_request, state: register_state } = client_register_wasm(registerState.password)
