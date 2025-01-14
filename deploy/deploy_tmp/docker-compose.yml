@@ -3,21 +3,21 @@ services:
   db:
     container_name: "dodeka-db-production"
     # Docker image that it will set up
-    image: "${DB_APP_IMAGE}:${DB_VERSION}"
+    image: "ghcr.io/dsav-dodeka/postgres:v3.0.0"
     # A volume is basically a file system shared between the host and the container
     volumes:
       # <volume name in volumes below>:<container destination directory>
       # This means the volume will be accessible from the container in the dest. directory in the container
-      - dodeka-db-volume:${DB_RESOURCES_TARGET}
-    command: -c config_file=${DB_CONF_FILE}
+      - dodeka-db-volume:/dodeka-db
+    command: -c config_file=/dodeka-conf/postgresql.conf
     # Some environment variables depend on deployment variables, so we load those in manually
     environment:
-      - PGDATA=${DB_RESOURCES_TARGET}
+      - PGDATA=/dodeka-db
       - POSTGRES_PASSWORD
       - POSTGRES_USER
     # This maps ports, so the container port will be available at localhost:<HOST_PORT>
     ports:
-      - "${DB_HOST_HOST}:${DB_HOST_PORT}:3141"
+      - "127.0.0.1:3141:3141"
     # Shared memory size, defaults to 64m which can cause problems (apparently)
     shm_size: 256m
     restart: always
@@ -29,13 +29,12 @@ services:
         start_interval: 2s
         timeout: 10s
   kv:
-    container_name: "dodeka-kv-${DEPLOY_NAME:-}"
-    profiles: [ "data", "all" ]
-    image: "${KV_IMAGE}:${KV_VERSION}"
+    container_name: "dodeka-kv-production"
+    image: "ghcr.io/dsav-dodeka/kv:v3.0.0"
     environment:
       - REDIS_PASSWORD
     ports:
-      - "${KV_HOST_HOST}:${KV_HOST_PORT}:6379"
+      - "127.0.0.1:6379:6379"
     restart: always
   # server:
   #   container_name: "dodeka-server-${DEPLOY_NAME:-}"
