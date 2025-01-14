@@ -93,31 +93,6 @@ let initialState: RegisterState = {
     language: ""
 }
 
-let initialStateTest: RegisterState = {
-    firstname: "Tip",
-    lastname: "ten Brink",
-    initials: "T",
-    email: "mijn@email.nl",
-    phone: "0613245",
-    zipcode: "2624 AB",
-    city: "Delft",
-    address: "Een adres",
-    house_number: "1195",
-    password: "mijn06wwacht",
-    password_confirm: "mijn06wwacht",
-    date_of_birth: "2000-04-05",
-    enable_incasso: true,
-    iban: "NLMIJNIBAN",
-    iban_name: "mr IBan",
-    gender: "0",
-    birthday_check: true,
-    student: true,
-    plan: "Wedstrijdlid",
-    eduinstitution: "TU Delft",
-    eduinstitution_other: "",
-    language: "nl-NL"
-}
-
 let focus:boolean = false;
 
 const handleFocus = (event: FocusEvent<HTMLInputElement>) => {
@@ -155,7 +130,7 @@ const Register = () => {
     useEffect(() => {
         if (!handled) {
             try {
-                const reducerInitial = { ...initialStateTest }
+                const reducerInitial = { ...initialState }
                 setInfoOk(true)
                 dispatch({type: 'reload', new_state: reducerInitial})
             } catch (e) {
