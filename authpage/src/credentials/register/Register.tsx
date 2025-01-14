@@ -124,7 +124,7 @@ const Register = () => {
     )
     const [submitted, setSubmitted] = useState("")
     const [passScore, setPassScore] = useState(0)
-    const [status, setStatus] = useState("\u00A0")
+    const [status, setStatus] = useState("")
 
 
     useEffect(() => {
