@@ -230,7 +230,7 @@ async function doVoltaRegister(voltaRegistration: VoltaRegistration) {
 export async function clientRegister(registerState: RegisterState) {
     const voltaRegistration = registerStateToVolta(registerState)
 
-    //await doVoltaRegister(voltaRegistration)
+    await doVoltaRegister(voltaRegistration)
 
     try {
         const state = client_register_wasm(registerState.password)
