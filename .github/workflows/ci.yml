@@ -49,7 +49,7 @@ jobs:
         run: exit 1
 
   build-db:
-    needs: [backend-ci, config-deploy]
+    needs: [config-deploy]
     strategy:
       matrix:
         target: ['localdev', 'production' ]
@@ -67,7 +67,7 @@ jobs:
   #     env: ${{ matrix.target }}
 
   build-kv:
-    needs: [backend-ci, config-deploy]
+    needs: [config-deploy]
     strategy:
       matrix:
         target: ['localdev', 'production' ]
