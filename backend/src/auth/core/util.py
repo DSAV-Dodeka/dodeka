@@ -67,13 +67,18 @@ def random_time_hash_hex(
 ) -> str:
     """Random string (bound to timestamp and optional extra seed) to represent events/objects that must be uniquely
     identified. These should not be used for security."""
+    
     if isinstance(extra_seed, str):
-        extra_seed = extra_seed.encode("utf-8")
+        extra_seed_bytes = extra_seed.encode("utf-8")
+    elif isinstance(extra_seed, bytes):
+        extra_seed_bytes = extra_seed
+    else:
+        extra_seed_bytes = b""
 
     timestamp = time.time_ns().to_bytes(10, byteorder="big")
     random_bytes = (
-        (extra_seed if extra_seed is not None else b"")
-        + secrets.token_bytes(10)
+        extra_seed_bytes
+        + secrets.token_bytes(32)
         + timestamp
     )
     hashed = hashlib.shake_256(random_bytes)
@@ -81,3 +86,14 @@ def random_time_hash_hex(
         return hashed.hexdigest(8)
     else:
         return hashed.hexdigest(16)
+    
+# def random_user_code() -> str:
+#     """Returns a code consisting of eight characters that are easy to distinguish and contain no vowels so no real words can be contained in it either."""
+#     # Except languages that we are not assumed to have knowledge about
+#     safe_alphabet = "BCDFGHJKMPQRTVWXY346789"
+
+#     result = ""
+#     for _ in range(8):
+#         result += secrets.choice(safe_alphabet)
+
+#     return result

@@ -3,34 +3,256 @@ import config from "../config";
 import {RegisterState} from "../credentials/register/Register";
 import {back_post, catch_api} from "./api";
 import {z} from "zod";
+import ky, { HTTPError, KyResponse } from "ky";
 
 const OpaqueResponse = z.object({
     server_message: z.string(),
     auth_id: z.string()
 })
 
-export async function clientRegister(registerState: RegisterState) {
+interface VoltaRegistration {
+    AddressInfo: {
+        countryId: 528,
+        zipcode: string,
+        city: string,
+        address1: string,
+        houseNumber: number
+    },
+    BillingInfoDto: {
+        debtCollection: true,
+        iban: string,
+        bankAccountName: string
+    },
+    PlanAssignment: Plan["PlanAssignment"],
+    FirstName: string,
+    LastName: string,
+    Initials: string,
+    Gender: 0 | 1 | 2,
+    Birthdate: string,
+    Email: {
+        Email: string
+    },
+    MobilePhone: {
+        Number: string
+    }
+    LanguageCode: "nl-NL" | "en-GB",
+    selectedPlan: Plan["selectedPlan"]
+}
+
+interface Plan {
+    PlanAssignment: {
+        startDate: string,
+        planId: number
+    },
+    selectedPlan: PlanDetails & { startDate: string, endDate: string }
+}
+
+interface PlanDetails {
+    price: 60 | 50 | 30;
+    planCode: string;
+    registrationFee: 5;
+    remittanceFee: null;
+    transferFee: 0;
+    discountFee: 0;
+    administrationFee: null;
+    remittanceDescription: null;
+    fromAge: 0;
+    toAge: 99;
+    referenceDate: null; // ISO 8601 date string or null
+    organisationTypeIds: [];
+    id: number;
+    name: string;
+}
+
+const wedstrijdlidPlan: PlanDetails = {
+    price: 60,
+    planCode: "12",
+    registrationFee: 5,
+    remittanceFee: null,
+    transferFee: 0,
+    discountFee: 0,
+    administrationFee: null,
+    remittanceDescription: null,
+    fromAge: 0,
+    toAge: 99,
+    referenceDate: null,
+    organisationTypeIds: [],
+    id: 11286,
+    name: "Wedstrijdlid"
+};
+
+const recreantPlan: PlanDetails = {
+    price: 50,
+    planCode: "13",
+    registrationFee: 5,
+    remittanceFee: null,
+    transferFee: 0,
+    discountFee: 0,
+    administrationFee: null,
+    remittanceDescription: null,
+    fromAge: 0,
+    toAge: 99,
+    referenceDate: null,
+    organisationTypeIds: [],
+    id: 11287,
+    name: "Recreant lid"
+};
+
+const gastPlan: PlanDetails = {
+    price: 30,
+    planCode: "14",
+    registrationFee: 5,
+    remittanceFee: null,
+    transferFee: 0,
+    discountFee: 0,
+    administrationFee: null,
+    remittanceDescription: null,
+    fromAge: 0,
+    toAge: 99,
+    referenceDate: null,
+    organisationTypeIds: [],
+    id: 11288,
+    name: "Gastlid"
+};
+
+function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
+    let planDetails: PlanDetails;
+    if (registerState.plan === "Wedstrijdlid") {
+        planDetails = wedstrijdlidPlan
+    } else if (registerState.plan === "Recreantlid") {
+        planDetails = recreantPlan
+    } else if (registerState.plan === "Gastlid") {
+        planDetails = gastPlan
+    } else {
+        throw new Error(`Unknown plan ${registerState.plan}!`)
+    }
+
+    // FIXME make next quarter
+    const planAssignmentStartDate = "2025-01-01T00:00:00.001Z"
+    const planStartDate = "2024-10-01T00:00:00"
+    const planEndDate = "2025-09-30T00:00:00"
+
+    const plan: Plan = {
+        selectedPlan: {
+            ...planDetails,
+            startDate: planStartDate,
+            endDate: planEndDate
+        },
+        PlanAssignment: {
+            planId: planDetails.id,
+            // FIXME check if this is indeed supposed to be different
+            startDate: planAssignmentStartDate
+        }
+    }
+
+    const genderParsed = parseInt(registerState.gender)
+    let gender: VoltaRegistration["Gender"];
+    if (genderParsed === 0 || genderParsed === 1 || genderParsed === 2) {
+        gender = genderParsed
+    } else {
+        throw new Error("Invalid gender!")
+    }
+
+    let language: VoltaRegistration["LanguageCode"];
+    if (registerState.language === "nl-NL" || registerState.language === "en-GB") {
+        language = registerState.language
+    } else {
+        throw new Error("Invalid language!")
+    }
+
+    return {
+        ...plan,
+        AddressInfo: {
+            countryId: 528,
+            zipcode: registerState.zipcode,
+            city: registerState.city,
+            address1: registerState.address,
+            houseNumber: parseInt(registerState.house_number)
+        },
+        BillingInfoDto: {
+            debtCollection: true,
+            iban: registerState.iban,
+            bankAccountName: registerState.iban_name
+        },
+        FirstName: registerState.firstname,
+        LastName: registerState.lastname,
+        Initials: registerState.initials,
+        Gender: gender,
+        Birthdate: registerState.date_of_birth,
+        Email: {
+            Email: registerState.email
+        },
+        MobilePhone: {
+            Number: registerState.phone
+        },
+        LanguageCode: language
+    }
+}
+
+const volta = ky.create({prefixUrl: "https://prod.foys.tech/api/v2/pub/registration-forms/4717c5a6-5e49-4d4d-ca49-08dd2f2dfc8c/"});
+
+export class VoltaError extends Error {
+    constructor(detail: string) {
+        super(`Volta returnedd error with detail: ${detail}`)
+        this.voltaMessage = detail
+    }
+
+    voltaMessage: string;
+}
+
+async function doVoltaRegister(voltaRegistration: VoltaRegistration) {
+    let result: KyResponse;
     try {
-        const { message: message1, state: register_state } = client_register_wasm(registerState.password)
+        result = await volta.post("", { json: voltaRegistration })
+    }
+    catch (e) {
+        if (e instanceof HTTPError) {
+            const result = e.response
+            console.log(`result.status=${result.status}\ncontent-type=${(result.headers.get('Content-Type') ?? '')}`)
+            if (result.status === 400 && (result.headers.get('Content-Type') ?? '').includes('json')) {
+                const jsonParsed = await result.json()
+                console.log(`jsonParsed=${JSON.stringify(jsonParsed)}.`)
+                if (typeof jsonParsed === 'object' && jsonParsed !== null && 'detail' in jsonParsed) {
+                    throw new VoltaError(String(jsonParsed.detail))
+                }
+            }
+
+            throw new Error(`Failed to register with Volta: Result:\n${await result.text()}`)
+        }
+        throw e
+    }
+
+    if (result.status !== 200) {
+        throw new Error(`Volta registration failed with status=${result.status} and content:\n${await result.text()}`)
+    }
+}
+
+export async function clientRegister(registerState: RegisterState) {
+    const voltaRegistration = registerStateToVolta(registerState)
+
+    //await doVoltaRegister(voltaRegistration)
+
+    try {
+        const { message: client_start_request, state: register_state } = client_register_wasm(registerState.password)
 
         const register_start = {
-            "email": registerState.email,
-            "client_request": message1,
-            "register_id": registerState.register_id
+            email: registerState.email,
+            firstname: registerState.firstname,
+            lastname: registerState.lastname,
+            client_request: client_start_request,
         }
         const res = await back_post("onboard/register/", register_start)
         const {server_message, auth_id} = OpaqueResponse.parse(res)
 
-        const message2 = client_register_finish_wasm(register_state, registerState.password, server_message)
+        const client_request = client_register_finish_wasm(register_state, registerState.password, server_message)
  
         const register_finish = {
-            "email": registerState.email,
-            "client_request": message2,
-            "auth_id": auth_id,
-            "register_id": registerState.register_id,
-            "callname": registerState.callname,
-            eduinstitution: registerState.eduinstitution,
+            firstname: registerState.firstname,
+            lastname: registerState.lastname,
+            client_request,
+            auth_id,
             birthdate: registerState.date_of_birth,
+            joined: "2025-01-01",
             age_privacy: registerState.birthday_check
         }
         await back_post("onboard/finish/", register_finish)

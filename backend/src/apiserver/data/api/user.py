@@ -25,7 +25,7 @@ from auth.data.relational.user import (
     UserOps as AuthUserOps,
     UserErrors,
 )
-from store.error import DataError, NoDataError, DbError
+from store.error import DataError, DbErrors, NoDataError, DbError
 from apiserver.lib.model.entities import (
     User,
     SignedUp,
@@ -52,6 +52,41 @@ def parse_user(user_dict: Optional[dict[str, Any]]) -> User:
 
 async def user_exists(conn: AsyncConnection, user_email: str) -> bool:
     return await exists_by_unique(conn, USER_TABLE, USER_EMAIL, user_email)
+
+
+async def no_user_or_not_registered(conn: AsyncConnection, email: str) -> bool:
+    """Returns True if a user does not exist or has not completed registration."""
+    user_row = await retrieve_by_unique(conn, USER_TABLE, USER_EMAIL, email)
+
+    if user_row is None:
+        return True
+    
+    user = parse_user(user_row)
+
+    return not user.password_file
+
+
+async def get_user_by_email(conn: AsyncConnection, email: str) -> User | None:
+    """Returns True if a user does not exist or has not completed registration."""
+    user_row = await retrieve_by_unique(conn, USER_TABLE, USER_EMAIL, email)
+
+    if user_row is None:
+        return None
+    
+    user = parse_user(user_row)
+
+    return user
+
+async def get_user_by_id(conn: AsyncConnection, user_id: str) -> User | None:
+    """Returns True if a user does not exist or has not completed registration."""
+    user_row = await retrieve_by_unique(conn, USER_TABLE, USER_ID, user_id)
+
+    if user_row is None:
+        return None
+    
+    user = parse_user(user_row)
+
+    return user
 
 
 class UserOps(AuthUserOps):
@@ -81,12 +116,16 @@ async def insert_user(conn: AsyncConnection, user: User) -> None:
     except DbError as e:
         raise DataError(f"{e.err_desc} from internal: {e.err_internal}", e.key)
 
+EMAIL_EXISTS = "email_exists"
 
 async def insert_return_user_id(conn: AsyncConnection, user: User) -> str:
     user_row = lit_dict(user.model_dump(exclude={"id", "user_id"}))
     try:
         user_id: str = await insert_return_col(conn, USER_TABLE, user_row, USER_ID)
     except DbError as e:
+        if e.key == DbErrors.INTEGRITY:
+            raise DataError(f"Integrity violation: {e.err_desc} from internal: {e.err_internal}.\nE-mail most likely already exists", EMAIL_EXISTS)
+
         raise DataError(f"{e.err_desc} from internal: {e.err_internal}", e.key)
     return user_id
 
@@ -94,17 +133,14 @@ async def insert_return_user_id(conn: AsyncConnection, user: User) -> str:
 async def new_user(
     conn: AsyncConnection,
     signed_up: SignedUp,
-    register_id: str,
-    av40id: int,
-    joined: date,
 ) -> str:
     id_name = gen_id_name(signed_up.firstname, signed_up.lastname)
 
-    user = User(id_name=id_name, email=signed_up.email, password_file="")
+    user = User(id_name=id_name, email=signed_up.email, password_file="", scope="")
     user_id = await insert_return_user_id(conn, user)
-    userdata = new_userdata(signed_up, user_id, register_id, av40id, joined)
+    # userdata = new_userdata(signed_up, user_id, register_id)
 
-    await insert_userdata(conn, userdata)
+    # await insert_userdata(conn, userdata)
 
     return user_id
 

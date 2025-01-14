@@ -14,17 +14,23 @@ config = context.config
 # the following is necessary because we want to be able to call this from the deploy server
 # we don't want any dependencies on apiserver or other things as a result in the schema package
 try:
-    from apiserver.env import load_config
-    from apiserver.resources import project_path
+    raise ImportError
+    # from apiserver.env import load_config
+    # from apiserver.resources import project_path
 
-    api_config = load_config(project_path.joinpath("devenv.toml"))
-    db_cluster = f"postgresql+psycopg://{api_config.DB_USER}:{api_config.DB_PASS}@{api_config.DB_HOST}:{api_config.DB_PORT}"
-    db_url = f"{db_cluster}/{api_config.DB_NAME}"
+    # api_config = load_config(project_path.joinpath("devenv.toml"))
+    # db_cluster = f"postgresql+psycopg://{api_config.DB_USER}:{api_config.DB_PASS}@{api_config.DB_HOST}:{api_config.DB_PORT}"
+    # db_url = f"{db_cluster}/{api_config.DB_NAME}"
 except ImportError:
     import os
 
     # This should be the part after ://
     env_db_url = os.environ.get("DATABASE_URL")
+
+    if env_db_url is None:
+        raise ValueError(
+            "DATABASE_URL environment variable must be defined to connect to database!"
+        )
     db_url = f"postgresql+psycopg://{env_db_url}"
 
 

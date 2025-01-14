@@ -117,39 +117,28 @@ async def generate_dummies():
             firstname=fname,
             lastname=lname,
             email=email,
-            phone=faker_u.phone_number(),
-            confirmed=True,
+            # phone=faker_u.phone_number(),
+            # confirmed=True,
         )
-        av40id = int.from_bytes(faker_u.binary(2), byteorder="big")
-        register_id = auth.core.util.random_time_hash_hex()
         joined = faker.date()
         async with data.get_conn(local_dsrc) as conn:
             uid = await data.user.new_user(
                 conn,
                 su,
-                register_id=register_id,
-                av40id=av40id,
-                joined=joined,
+                # register_id=register_id,
+                # av40id=av40id,
+                # joined=joined,
             )
-            userdata = new_userdata(su, uid, register_id, av40id, joined)
-
+            
             cl_req, cl_state = opq.register_client(admin_password)
             serv_resp = opq.register(setup, cl_req, uid)
             cl_fin = opq.register_client_finish(cl_state, admin_password, serv_resp)
             pw_file = opq.register_finish(cl_fin)
             birthdate = faker.date()
-            new_ud = data.ud.finished_userdata(
-                userdata,
-                callname=fname,
-                eduinstitution="TU Delft",
-                birthdate=birthdate,
-                show_age=True,
-            )
-
+            userdata = new_userdata(su, uid, joined, birthdate)
             await data.user.UserOps.update_password_file(conn, uid, pw_file)
-            did_ups = await data.ud.upsert_userdata(conn, new_ud)
+            did_ups = await data.ud.upsert_userdata(conn, userdata)
             print(did_ups)
-            await data.signedup.delete_signedup(conn, email)
 
 
 async def run_function(func_name):
