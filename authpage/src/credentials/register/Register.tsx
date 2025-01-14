@@ -40,6 +40,7 @@ const registerReducer = (state: RegisterState, action: RegisterAction): Register
 
 export type RegisterState = {
     firstname: string,
+    nameinfix: string,
     lastname: string,
     initials: string,
     email: string,
@@ -55,11 +56,10 @@ export type RegisterState = {
     iban: string,
     iban_name: string,
     gender: string,
+    photos: string,
     birthday_check: boolean,
-    student: boolean,
+    student: string,
     plan: string,
-    eduinstitution: string,
-    eduinstitution_other: string,
     language: string,
 }
 
@@ -70,6 +70,7 @@ type RegisterAction =
 
 let initialState: RegisterState = {
     firstname: "",
+    nameinfix: "",
     lastname: "",
     initials: "",
     email: "",
@@ -84,13 +85,12 @@ let initialState: RegisterState = {
     enable_incasso: false,
     iban: "",
     iban_name: "",
-    gender: "male",
+    gender: "0",
     birthday_check: false,
-    student: false,
+    photos: "ev-1-1",
     plan: "Wedstrijdlid",
-    eduinstitution: "TU Delft",
-    eduinstitution_other: "",
-    language: ""
+    student: "ev-2-1",
+    language: "nl-NL"
 }
 
 let focus:boolean = false;
@@ -161,15 +161,8 @@ const Register = () => {
         e.preventDefault()
 
         if (formIsValid()) {
-            var eduinstitution;
-            if (!state.student) {
-                eduinstitution = "";
-            } else {
-                eduinstitution = state.eduinstitution === "Anders, namelijk:" 
-                    ? state.eduinstitution_other 
-                    : state.eduinstitution;
-            }
-            const submitState = { ...state, eduinstitution }
+
+            const submitState = { ...state }
 
             clientRegister(submitState).then(
                 (result) => {
@@ -235,6 +228,8 @@ const Register = () => {
                 </div>
                 <input className={submitted} required id="firstname" type="text" placeholder="Voornaam" name="firstname" value={state.firstname}
                        onChange={handleFormChange}/>
+                <input className={submitted} id="nameinfix" type="text" placeholder="Tussenvoegsel" name="nameinfix" value={state.nameinfix}
+                       onChange={handleFormChange}/>
                 <input className={submitted} required id="lastname" type="text" placeholder="Achternaam" name="lastname" value={state.lastname}
                        onChange={handleFormChange}/>
                 <input className={submitted} required id="initials" type="text" placeholder="Initialen" name="initials" value={state.initials}
@@ -275,9 +270,9 @@ const Register = () => {
                     <label>Soort lidmaatschap:</label>
                     <select id="plan" name="plan" value={state.plan}
                             onChange={handleSelectChange}>
-                        <option value="Wedstrijdlid">Wedstrijdlid (€60 per kwartaal)</option>
-                        <option value="Recreantlid">Recreantlid (€50 per kwartaal)</option>
-                        <option value="Gastlid">Gastlid (€30 per kwartaal)</option>
+                        <option value="Wedstrijdlid">Wedstrijdlid (€53 per kwartaal)</option>
+                        <option value="Recreantlid">Recreantlid (€47 per kwartaal)</option>
+                        <option value="Gastlid">Gastlid (€44 per kwartaal)</option>
                     </select>
                 </div>
                 <div className="checkbox">
@@ -294,26 +289,26 @@ const Register = () => {
                     <input className={submitted} id="birthday_check" type="checkbox" name="birthday_check" checked={state.birthday_check}
                             onChange={handleCheckboxChange}/>
                 </div>
-                <div className="checkbox">
-                    <label >Ik ben student</label>
-                    <input id="student" type="checkbox" name="student" checked={state.student}
-                            onChange={handleCheckboxChange}/>
-                </div>
-
-                <div className={"dropdown" + (state.student ? "": " inputHidden")}>
-                    <label >Onderwijsinstelling:</label>
-                    <select id="eduinstitution" name="eduinstitution" value={state.eduinstitution}
+                <div className={"dropdown"}>
+                    <label>Ben je student?</label>
+                    <select id="student" name="student" value={state.student}
                             onChange={handleSelectChange}>
-                        <option>TU Delft</option>
-                        <option>Haagse Hogeschool - Delft</option>
-                        <option>Haagse Hogeschool - Den Haag</option>
-                        <option>Hogeschool Inholland - Delft</option>
-                        <option>Anders, namelijk:</option>
+                        <option value="ev-2-1">Nee</option>
+                        <option value="ev-2-2">Ja, op een mbo</option>
+                        <option value="ev-2-3">Ja, op een hbo</option>
+                        <option value="ev-2-4">Ja, op een universiteit</option>
                     </select>
                 </div>
-                <input className={"" + (state.student && state.eduinstitution === "Anders, namelijk:" ? "" : " inputHidden")} id="eduinstitution_other" type="text" placeholder="Onderwijsinstelling" name="eduinstitution_other" value={state.eduinstitution_other}
-                        onChange={handleFormChange} />
-
+                <div className={"dropdown"}>
+                    <label>Toestemming foto's?</label>
+                    <select id="photos" name="photos" value={state.photos}
+                            onChange={handleSelectChange}>
+                        <option value="ev-1-1">Ja, mag op sociale media</option>
+                        <option value="ev-1-3">Eerst vragen</option>
+                        <option value="ev-1-4">Niet individueel, groepsfoto mag</option>
+                        <option value="ev-1-2">Nee</option>
+                    </select>
+                </div>
                 <br />
                 <button className="authButton" id="submit_button" onClick={handleSubmitClick} type="submit">Registreer</button><br />
                 <p className="buttonText">Door op registeer te klikken ga je akkoord met het eerder genoemde <a href="https://dsavdodeka.nl/files/privacyverklaring_dodeka_jan23.pdf" target="_blank" rel="noreferrer" className="privacy_link">privacybeleid</a></p>

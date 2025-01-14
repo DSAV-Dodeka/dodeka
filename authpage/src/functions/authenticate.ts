@@ -25,6 +25,7 @@ interface VoltaRegistration {
     },
     PlanAssignment: Plan["PlanAssignment"],
     FirstName: string,
+    NameInfix: string,
     LastName: string,
     Initials: string,
     Gender: 0 | 1 | 2,
@@ -36,7 +37,18 @@ interface VoltaRegistration {
         Number: string
     }
     LanguageCode: "nl-NL" | "en-GB",
-    selectedPlan: Plan["selectedPlan"]
+    selectedPlan: Plan["selectedPlan"],
+    CustomFieldValues: { key: number, value: string }[]
+}
+
+interface PhotoCustomField {
+    key: 1582,
+    value: string
+}
+
+interface StudentCustomField {
+    key: 1583,
+    value: string
 }
 
 interface Plan {
@@ -48,7 +60,7 @@ interface Plan {
 }
 
 interface PlanDetails {
-    price: 60 | 50 | 30;
+    price: 53 | 47 | 44;
     planCode: string;
     registrationFee: 5;
     remittanceFee: null;
@@ -65,7 +77,7 @@ interface PlanDetails {
 }
 
 const wedstrijdlidPlan: PlanDetails = {
-    price: 60,
+    price: 53,
     planCode: "12",
     registrationFee: 5,
     remittanceFee: null,
@@ -82,7 +94,7 @@ const wedstrijdlidPlan: PlanDetails = {
 };
 
 const recreantPlan: PlanDetails = {
-    price: 50,
+    price: 47,
     planCode: "13",
     registrationFee: 5,
     remittanceFee: null,
@@ -95,11 +107,11 @@ const recreantPlan: PlanDetails = {
     referenceDate: null,
     organisationTypeIds: [],
     id: 11287,
-    name: "Recreant lid"
+    name: "Recreantlid"
 };
 
 const gastPlan: PlanDetails = {
-    price: 30,
+    price: 44,
     planCode: "14",
     registrationFee: 5,
     remittanceFee: null,
@@ -127,10 +139,11 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         throw new Error(`Unknown plan ${registerState.plan}!`)
     }
 
-    // FIXME make next quarter
-    const planAssignmentStartDate = "2025-01-01T00:00:00.001Z"
-    const planStartDate = "2024-10-01T00:00:00"
-    const planEndDate = "2025-09-30T00:00:00"
+    // Better way to determine this? Maybe wanting to make this accurate would be good reason to call Volta on the server...
+    // const now = new Date()
+    const planAssignmentStartDate = "2025-01-01T00:00:00"
+    const planStartDate = "2024-09-01T00:00:00"
+    const planEndDate = "2025-08-31T00:00:00"
 
     const plan: Plan = {
         selectedPlan: {
@@ -160,6 +173,18 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         throw new Error("Invalid language!")
     }
 
+    const photos: PhotoCustomField = {
+        key: 1582,
+        value: registerState.photos
+    }
+
+    const student: StudentCustomField = {
+        key: 1583,
+        value: registerState.student
+    }
+
+    const CustomFieldValues: VoltaRegistration["CustomFieldValues"] = [photos, student]
+
     return {
         ...plan,
         AddressInfo: {
@@ -175,6 +200,7 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
             bankAccountName: registerState.iban_name
         },
         FirstName: registerState.firstname,
+        NameInfix: registerState.nameinfix,
         LastName: registerState.lastname,
         Initials: registerState.initials,
         Gender: gender,
@@ -185,7 +211,8 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         MobilePhone: {
             Number: registerState.phone
         },
-        LanguageCode: language
+        LanguageCode: language,
+        CustomFieldValues
     }
 }
 
@@ -232,27 +259,35 @@ export async function clientRegister(registerState: RegisterState) {
 
     await doVoltaRegister(voltaRegistration)
 
+    let lastname = registerState.nameinfix
+    if (registerState.nameinfix.length > 0) {
+        lastname += ` ${registerState.lastname}`
+    } else {
+        lastname = registerState.lastname
+    }
+
     try {
         const state = client_register_wasm(registerState.password)
 
         const register_start = {
             email: registerState.email,
             firstname: registerState.firstname,
-            lastname: registerState.lastname,
+            lastname,
             client_request: state.message,
         }
         const res = await back_post("onboard/register/", register_start)
         const {server_message, auth_id} = OpaqueResponse.parse(res)
 
         const client_request = client_register_finish_wasm(state, registerState.password, server_message)
- 
+
+
         const register_finish = {
             firstname: registerState.firstname,
-            lastname: registerState.lastname,
+            lastname,
             client_request,
             auth_id,
             birthdate: registerState.date_of_birth,
-            joined: "2025-01-01",
+            joined: "2025-01-15",
             age_privacy: registerState.birthday_check
         }
         await back_post("onboard/finish/", register_finish)
