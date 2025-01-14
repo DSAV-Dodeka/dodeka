@@ -37,14 +37,14 @@ async def start_login(
     check flow."""
 
     # TODO do this in a better, non-hacky way
-    async with data.get_conn(dsrc) as conn:
-        user = await data.ud.get_userdata_by_email(conn, login_start.email)
-        if user is not None and not user.confirmed:
-            raise ErrorResponse(
-                status_code=400,
-                err_type="bad_login",
-                err_desc="User must be confirmed by board before login.",
-            )
+    # async with data.get_conn(dsrc) as conn:
+    #     user = await data.ud.get_userdata_by_email(conn, login_start.email)
+    #     if user is not None and not user.confirmed:
+    #         raise ErrorResponse(
+    #             status_code=400,
+    #             err_type="bad_login",
+    #             err_desc="User must be confirmed by board before login.",
+    #         )
 
     return await auth_start_login(
         dsrc.store, schema.UserOps, auth_context.login_ctx, login_start

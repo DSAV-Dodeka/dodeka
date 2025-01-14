@@ -20,7 +20,7 @@ dependencies = [
     "pydantic==2.5.2",
     "redis==5.0.1",
     "sqlalchemy[asyncio]==2.0.23",
-    "opaquepy==0.3.5",
+    "opaquepy==0.6.0",
     "jinja2>=3.1.2,<4.0.0",
     "anyio>=3.7.1,<4.0.0",
     "regex>=2023.10.3,<2024.0.0",

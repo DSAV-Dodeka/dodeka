@@ -86,7 +86,7 @@ requires-dist = [
     { name = "gunicorn", specifier = "==21.2.0" },
     { name = "jinja2", specifier = ">=3.1.2,<4.0.0" },
     { name = "loguru", specifier = ">=0.7.2,<1.0.0" },
-    { name = "opaquepy", specifier = "==0.3.5" },
+    { name = "opaquepy", specifier = "==0.6.0" },
     { name = "orjson", specifier = ">=3.9.5,<4.0.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.0,<4.0.0" },
     { name = "pydantic", specifier = "==2.5.2" },
@@ -612,12 +612,15 @@ wheels = [
 
 [[package]]
 name = "opaquepy"
-version = "0.3.5"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/c4/b601c95e4d9d0ff185acedf0c50196b5a37f209b8210c39b931e92fce495/opaquepy-0.3.5-cp312-cp312-macosx_10_9_x86_64.macosx_11_0_arm64.macosx_10_9_universal2.whl", hash = "sha256:f43ee0f3b0db23fb3ad5b2e1ff8e014b968705d3214d42579e34e60b14706ca0", size = 706334 },
-    { url = "https://files.pythonhosted.org/packages/e3/41/be095d0fd2abc1c81b7dd435d0a3349cf5b8eb6eb9978b65b1fb9191e8df/opaquepy-0.3.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e6ab3b748829206eb7d3a4aaaa2ce7ef457156bd05f5c7659e508dc671071c60", size = 1253423 },
-    { url = "https://files.pythonhosted.org/packages/a1/db/ce36fdff9ca15ae7608b76cf48c11d5e00aed4d363962eb424716449c528/opaquepy-0.3.5-cp312-none-win_amd64.whl", hash = "sha256:1f5fbf962846b7536b1c1798f33e208f6443d9296df0f83c4a062b79e3633a80", size = 216302 },
+    { url = "https://files.pythonhosted.org/packages/81/62/9a4f49454f2625cd5e2ef6797cb5466c47cedb23f752ab3dd3564ed356c4/opaquepy-0.6.0-cp312-cp312-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:bdd454c8ada9928b69a5fc728c528a8f857f337ca1b54b9e7b30d7e988a1bcb5", size = 630126 },
+    { url = "https://files.pythonhosted.org/packages/4a/50/706bb504c901829a1c35d76db8ccf3f07890ad4a9a3aa69fbaa5e873fb10/opaquepy-0.6.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b80c01fbedaf9c250205df2d194b2b5b470196e9a240376e68e6388733554bd9", size = 357792 },
+    { url = "https://files.pythonhosted.org/packages/e3/7f/a6250156a0ee34cd603f987367ee7f8fbefeea69659f7c4d83ca79093550/opaquepy-0.6.0-cp312-cp312-win_amd64.whl", hash = "sha256:05421c03fd4a22bc372f4efe70f3cdd22245d5b39c3515e1e4ca816532f0a08f", size = 216961 },
+    { url = "https://files.pythonhosted.org/packages/82/b4/d5ea9d335aee64d8f609c9d7043697bf96f74de27ee7c9f1c43e465405a7/opaquepy-0.6.0-cp313-cp313-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:92e01539bcc19f185542db9304a8ab44ccde80971f65220cf8abf4fe881277c5", size = 630180 },
+    { url = "https://files.pythonhosted.org/packages/77/09/894caf5fb3b7273f07d936d28b62a900639821de2b5bcfaae9baa854b57d/opaquepy-0.6.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5c2946d0fdc031b1bd5fa88c800ea1fe3a0411a2dee2fefdf7e9a93824c7a23c", size = 357889 },
+    { url = "https://files.pythonhosted.org/packages/6f/93/081d46aaf3c72ae7583dc4d13db98013386731c82d4ef2a6646a74f6c084/opaquepy-0.6.0-cp313-cp313-win_amd64.whl", hash = "sha256:fe582d442d4b4c0701feb3aef087d27d79f8ddacd6fd325997207431aedccf5f", size = 217238 },
 ]
 
 [[package]]
