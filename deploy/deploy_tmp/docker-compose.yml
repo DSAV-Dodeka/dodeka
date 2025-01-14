@@ -9,7 +9,7 @@ services:
       # <volume name in volumes below>:<container destination directory>
       # This means the volume will be accessible from the container in the dest. directory in the container
       - dodeka-db-volume:/dodeka-db
-    command: -c config_file=/dodeka-conf/postgresql.conf
+    command: -c config_file=/dodeka_conf/postgresql.conf
     # Some environment variables depend on deployment variables, so we load those in manually
     environment:
       - PGDATA=/dodeka-db
@@ -30,7 +30,7 @@ services:
         timeout: 10s
   kv:
     container_name: "dodeka-kv-production"
-    image: "ghcr.io/dsav-dodeka/kv:v3.0.0"
+    image: "ghcr.io/dsav-dodeka/redis:v3.0.0"
     environment:
       - REDIS_PASSWORD
     ports:
