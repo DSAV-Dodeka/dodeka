@@ -270,9 +270,9 @@ const Register = () => {
                     <label>Soort lidmaatschap:</label>
                     <select id="plan" name="plan" value={state.plan}
                             onChange={handleSelectChange}>
-                        <option value="Wedstrijdlid">Wedstrijdlid (€53 per kwartaal)</option>
-                        <option value="Recreantlid">Recreantlid (€47 per kwartaal)</option>
-                        <option value="Gastlid">Gastlid (€44 per kwartaal)</option>
+                        <option value="Wedstrijdlid">Wedstrijdlid (€53,50 per kwartaal)</option>
+                        <option value="Recreantlid">Recreantlid (€47,00 per kwartaal)</option>
+                        <option value="Gastlid">Gastlid (€44,00 per kwartaal)</option>
                     </select>
                 </div>
                 <div className="checkbox">

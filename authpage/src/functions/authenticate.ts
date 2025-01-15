@@ -60,7 +60,7 @@ interface Plan {
 }
 
 interface PlanDetails {
-    price: 53 | 47 | 44;
+    price: 53.5 | 47 | 44;
     planCode: string;
     registrationFee: 5;
     remittanceFee: null;
@@ -77,7 +77,7 @@ interface PlanDetails {
 }
 
 const wedstrijdlidPlan: PlanDetails = {
-    price: 53,
+    price: 53.5,
     planCode: "12",
     registrationFee: 5,
     remittanceFee: null,

@@ -4,7 +4,7 @@ api_root = "https://api.dsavdodeka.nl"
 issuer = "https://api.dsavdodeka.nl"
 frontend_client_id = "dodekaweb_client"
 backend_client_id = "dodekabackend_client"
-valid_redirects = ["https://demo.tipten.nl/auth/callback"]
+valid_redirects = ["https://dsavdodeka.nl/auth/callback"]
 
 credentials_url = "https://api.dsavdodeka.nl/credentials/"
 onboard_email = "comcom@dsavdodeka.nl"
