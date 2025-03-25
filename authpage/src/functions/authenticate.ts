@@ -20,6 +20,7 @@ interface VoltaRegistration {
     },
     BillingInfoDto: {
         debtCollection: true,
+        contributionTermId: 506,
         iban: string,
         bankAccountName: string
     },
@@ -196,6 +197,7 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         },
         BillingInfoDto: {
             debtCollection: true,
+            contributionTermId: 506,
             iban: registerState.iban,
             bankAccountName: registerState.iban_name
         },
