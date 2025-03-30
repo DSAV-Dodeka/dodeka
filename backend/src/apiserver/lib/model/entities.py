@@ -13,7 +13,7 @@ class User(AuthUser):
     id_name: str
     # Computed in the database
     user_id: str = ""
-    scope: str = "member"
+    scope: str
 
 
 class Key(BaseModel):
@@ -37,8 +37,6 @@ class IdInfo(BaseModel):
     name: str
     given_name: str
     family_name: str
-    nickname: str
-    preferred_username: str
     birthdate: str
 
 
@@ -46,8 +44,6 @@ class SignedUp(BaseModel):
     firstname: str
     lastname: str
     email: str
-    phone: str
-    confirmed: bool = False
 
 
 class UserData(BaseModel):
@@ -55,16 +51,11 @@ class UserData(BaseModel):
     active: bool
     firstname: str
     lastname: str
-    callname: str = ""
     email: str
-    phone: str
-    av40id: int
     joined: date
-    eduinstitution: str = ""
-    birthdate: date = date.min
-    registerid: str = ""
-    registered: bool
+    birthdate: date
     showage: bool
+    confirmed: bool = False
 
     # Coerces null in database to false
     @field_validator("showage")
@@ -223,6 +214,12 @@ class UserPointsNames(BaseModel):
 UserPointsNamesList = TypeAdapter(List[UserPointsNames])
 
 
+class RankingInfo(BaseModel):
+    last_updated: date
+    frozen: bool
+    points: list[UserPointsNames]
+
+
 # class PointsData(BaseModel):
 #     points: int
 
@@ -280,3 +277,22 @@ class PRRecordData(BaseModel):
     date: date
     place: str
     valid: bool
+
+
+class EventDate(BaseModel):
+    date: date
+
+
+class ClassMeta(ClassView):
+    type: Literal["points", "training"]
+    end_date: date
+
+
+class ClassUpdate(BaseModel):
+    classification_id: int
+    start_date: date
+    hidden_date: date
+    end_date: date
+
+
+ClassMetaList = TypeAdapter(List[ClassMeta])

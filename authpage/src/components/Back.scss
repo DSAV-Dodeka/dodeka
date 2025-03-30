@@ -1,4 +1,4 @@
-@import "../variables";
+@use "../variables";
 
 .back {
     position: absolute;
@@ -6,7 +6,7 @@
     left: 2rem;
     display: flex;
     cursor: pointer;
-    @include respond(mobile) {
+    @include variables.respond(mobile) {
         top: 1rem;
         left: 1rem;
     }
@@ -16,12 +16,12 @@
     margin: 0;
     margin-left: 1rem;
     display: inline;
-    font-size: $font_medium;
+    font-size: variables.$font_medium;
     line-height: 2rem;
     vertical-align: middle;
     color: white;
-    @include respond(mobile) {
-        font-size: $font_small;
+    @include variables.respond(mobile) {
+        font-size: variables.$font_small;
         margin-left: 0.5rem;
         line-height: 1.5rem;
     }
@@ -34,7 +34,7 @@
     height: 2rem;
     line-height: 2rem;
     vertical-align: middle;
-    @include respond(mobile) {
+    @include variables.respond(mobile) {
         height: 1.5rem;
         line-height: 1.5rem;
     }

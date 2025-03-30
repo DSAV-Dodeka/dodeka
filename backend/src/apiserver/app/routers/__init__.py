@@ -4,8 +4,8 @@ from apiserver.app.routers.admin import admin_router
 from apiserver.app.routers.personalrecord import personal_record_router
 
 __all__ = [
+    "admin_router",
     "auth_router",
     "members_router",
-    "admin_router",
     "personal_record_router"
 ]

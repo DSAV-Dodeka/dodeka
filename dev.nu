@@ -10,7 +10,7 @@ def pull [envnmt: string, env_file: string, profile: string] {
 }
 
 def up [envnmt: string, env_file: string, profile: string] {
-    pull $envnmt $env_file $profile
+    # pull $envnmt $env_file $profile
     docker compose -f $"($deploy_dir)/use/($envnmt)/docker-compose.yml" --env-file $"($deploy_dir)/use/($envnmt)/($env_file).env" --profile $profile up -d
 }
 
@@ -43,7 +43,7 @@ def "main upp" [] {
 # Start development databases when not running Docker directly in your OS (i.e. WSL)
 def "main backend" [] {
     cd $backend_dir
-    poetry run backend
+    uv run backend
 }
 
 # important for the command to be exposed to the outside

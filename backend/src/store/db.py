@@ -227,6 +227,25 @@ async def upsert_by_unique(
     return row_cnt(res)
 
 
+async def update_by_unique(
+    conn: AsyncConnection,
+    table: LiteralString,
+    set_dict: LiteralDict,
+    unique_column: LiteralString,
+    value: Any,
+) -> int:
+    """Note that while the values are safe from injection, the column names are not."""
+
+    _, _, row_keys_set = _row_keys_vars_set(set_dict)
+
+    query = text(f"UPDATE {table} SET {row_keys_set} WHERE {unique_column} = :val;")
+    val_dict: LiteralDict = {"val": value}
+    params = set_dict | val_dict
+
+    res = await execute_catch(conn, query, parameters=params)
+    return row_cnt(res)
+
+
 async def update_column_by_unique(
     conn: AsyncConnection,
     table: LiteralString,

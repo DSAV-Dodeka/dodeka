@@ -1,6 +1,0 @@
-# Ignore everything in this directory
-.gitignore
-# Line above does nothing :( Line below ignores all python files. That was the plan right?
-*.py
-# Except this file
-!.gitignore

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 from apiserver.lib.hazmat.tokens import BadVerification, get_kid, verify_access_token
 from apiserver.lib.model.entities import AccessToken
 from apiserver.lib.resource.error import ResourceError
@@ -22,9 +23,12 @@ def extract_token_and_kid(authorization: str) -> tuple[str, str]:
             err_type="invalid_request",
             err_desc="Authorization must follow 'Bearer' scheme",
         )
-
     token = authorization.removeprefix("Bearer ")
-
+    if token.startswith("Bearer "):
+        raise ResourceError(
+            err_type="invalid_request",
+            err_desc="Authorization includes 'Bearer' twice.",
+        )
     try:
         kid = get_kid(token)
     except BadVerification as e:

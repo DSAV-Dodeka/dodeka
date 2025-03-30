@@ -14,30 +14,24 @@ config = context.config
 # the following is necessary because we want to be able to call this from the deploy server
 # we don't want any dependencies on apiserver or other things as a result in the schema package
 try:
-    from apiserver.env import load_config
-    from apiserver.resources import project_path
+    raise ImportError
+    # from apiserver.env import load_config
+    # from apiserver.resources import project_path
 
-    api_config = load_config(project_path.joinpath("devenv.toml"))
-    db_cluster = f"postgresql+psycopg://{api_config.DB_USER}:{api_config.DB_PASS}@{api_config.DB_HOST}:{api_config.DB_PORT}"
-    db_url = f"{db_cluster}/{api_config.DB_NAME}"
+    # api_config = load_config(project_path.joinpath("devenv.toml"))
+    # db_cluster = f"postgresql+psycopg://{api_config.DB_USER}:{api_config.DB_PASS}@{api_config.DB_HOST}:{api_config.DB_PORT}"
+    # db_url = f"{db_cluster}/{api_config.DB_NAME}"
 except ImportError:
-    # we use json so we don't have to worry about tomli/tomllib
-    # when server uses 3.11 we can switch to TOML
-    import json
-    import getpass
+    import os
 
-    # relative to where the alembic command is run
-    with open("connect.json", "rb") as f:
-        db_config = json.load(f)
+    # This should be the part after ://
+    env_db_url = os.environ.get("DATABASE_URL")
 
-    db_pass = getpass.getpass("Input the DB password (press enter to use default):\n")
-    if not db_pass:
-        db_pass = db_config["DB_PASS"]
-    db_cluster = (
-        f"postgresql+psycopg://{db_config['DB_USER']}:{db_pass}"
-        + f"@{db_config['DB_HOST']}:{db_config['DB_PORT']}"
-    )
-    db_url = f"{db_cluster}/{db_config['DB_NAME']}"
+    if env_db_url is None:
+        raise ValueError(
+            "DATABASE_URL environment variable must be defined to connect to database!"
+        )
+    db_url = f"postgresql+psycopg://{env_db_url}"
 
 
 config.set_main_option("sqlalchemy.url", db_url)

@@ -16,7 +16,6 @@ class Define(BaseModel):
     issuer: str
     backend_client_id: str
     credentials_url: str
-    signup_url: str
     onboard_email: str
     # realm as in the realm for WWW-Authenticate
     realm: str

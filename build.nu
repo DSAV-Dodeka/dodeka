@@ -6,10 +6,10 @@ let deploy_dir = root deploy_dir
 
 def build_deploy [] {
     cd $deploy_dir
-    poetry run confrecipe -r build/deploy/dev/dev.toml -e localdev
-    poetry run confrecipe -r build/deploy/staging/staging.toml -e staging
-    poetry run confrecipe -r build/deploy/production/production.toml -e production
-    poetry run confrecipe -r build/data_sync/data_sync.toml -e production
+    uv run confrecipe -r build/deploy/dev/dev.toml -e localdev
+    uv run confrecipe -r build/deploy/staging/staging.toml -e staging
+    uv run confrecipe -r build/deploy/production/production.toml -e production
+    uv run confrecipe -r build/data_sync/data_sync.toml -e production
 }
 
 # Generate deployment configuration using confspawn for all environments

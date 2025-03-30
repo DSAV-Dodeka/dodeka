@@ -1,17 +1,16 @@
-[tool.poetry]
+[project]
 name = "dodeka"
-version = "2.1.1"
+version = "2.3.0"
 description = ""
-authors = ["Tip ten Brink <75669206+tiptenbrink@users.noreply.github.com>"]
-
-[tool.poetry.dependencies]
-python = ">=3.10, <3.12"
-confspawn = "^0.6.0"
-psqlsync = { version = "^0.2.3", extras = ["dirgh"] }
-dirgh = "^0.3.1"
-alembic = "^1.12.0"
-psycopg = { extras = ["binary"], version="^3.1.0" }
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+authors = [
+    { name = "Tip ten Brink", email = "75669206+tiptenbrink@users.noreply.github.com" }
+]
+readme = "README.md"
+requires-python = ">=3.10, <3.12"
+dependencies = [
+    "confspawn>=0.6.0,<0.7.0",
+    "psqlsync[dirgh]>=0.2.3,<0.3.0",
+    "dirgh>=0.3.1,<0.4.0",
+    "alembic>=1.12.0,<2.0.0",
+    "psycopg[binary]>=3.1.0,<4.0.0"
+]

@@ -1,4 +1,5 @@
 from apiserver.app.error import AppError, ErrorKeys
+from apiserver.data.special import update_class_points
 from loguru import logger
 from asyncio import sleep
 from datetime import date
@@ -28,7 +29,7 @@ from apiserver.lib.hazmat.keys import ed448_private_to_pem
 from apiserver.data.api.classifications import insert_classification
 from apiserver.data.source import KeyState
 from apiserver import data
-from apiserver.data import Source
+from apiserver.data import Source, get_kv
 from apiserver.data.admin import drop_recreate_database
 
 
@@ -38,18 +39,9 @@ async def startup(dsrc: Source, config: Config, recreate: bool = False) -> None:
     attempting this, it uses a simple lock mechanism by letting the first process set a value in the KV.
     """
 
-    try:
-        # Store startup (tests connection)
-        await dsrc.store.startup()
-    except StoreObjectError as e:
-        raise AppError(
-            ErrorKeys.STARTUP,
-            "<magenta>Failed to start store! Did you start the databases?</magenta>",
-            "startup_store_failure",
-        ) from e
-
     # Checks lock: returns True if it is the first lock since at least 25 seconds (lock expire time)
     is_first_process = await wait_for_lock_is_first(dsrc)
+    
     logger.debug(f"Unlocked startup, first={is_first_process}")
     # Only recreates if it is also the first lock since at least 25 seconds (lock expire time)
     logger.debug(f"Startup with recreate={recreate and is_first_process}")
@@ -70,6 +62,17 @@ async def startup(dsrc: Source, config: Config, recreate: bool = False) -> None:
         logger.warning("Initial population...")
         await initial_population(dsrc, config)
 
+    # We do this after to ensure the main database exists
+    try:
+        # Store startup (tests connection)
+        await dsrc.store.startup()
+    except StoreObjectError as e:
+        raise AppError(
+            ErrorKeys.STARTUP,
+            "<magenta>Failed to start store! Did you start the databases?</magenta>",
+            "startup_store_failure",
+        ) from e
+
     # Load keys
     logger.debug("Loading keys.")
     key_state = await load_keys(dsrc, config)
@@ -87,8 +90,8 @@ async def wait_for_lock_is_first(dsrc: Source) -> bool:
     true if it is the first lock since at least 25 seconds (lock expire time)."""
     # We sleep for a shor time to increase the distribution in startup times, hopefully reducing race conditions
     await sleep(random() + 0.1)
-    # was_locked = await data.trs.startup.startup_is_locked(dsrc)
-    was_locked = None
+    was_locked = await data.trs.startup.startup_is_locked(dsrc)
+
     if was_locked is None:
         lock_msg = "First process."
         return_val = True
@@ -180,17 +183,13 @@ async def initial_population(dsrc: Source, config: Config) -> None:
     admin_userdata = UserData(
         user_id="0_admin",
         active=False,
-        registerid="",
         firstname="admin",
         lastname="admin",
-        callname="admin",
         email="admin",
-        phone="admin",
-        av40id=0,
         joined=date.today(),
         birthdate=date.today(),
-        registered=True,
         showage=False,
+        confirmed=True
     )
 
     async with data.get_conn(dsrc) as conn:
@@ -199,8 +198,11 @@ async def initial_population(dsrc: Source, config: Config) -> None:
         user_id = await data.user.insert_return_user_id(conn, fake_user)
         assert user_id == "1_fakerecord"
 
-        await insert_classification(conn, "training")
-        await insert_classification(conn, "points")
+        new_training_id = await insert_classification(conn, "training")
+        new_points_id = await insert_classification(conn, "points")
+
+        await update_class_points(conn, new_training_id, False)
+        await update_class_points(conn, new_points_id, False)
 
 
 async def get_keystate(dsrc: Source) -> KeyState:
