@@ -141,7 +141,7 @@ const Register = () => {
     }, [handled]);
 
     const somethingWrong = () => {
-        setStatus("Er is iets misgegaan!")
+        setStatus("Er is iets misgegaan, controleer je gegevens, probeer het opnieuw. Werkt het nog steeds niet? Neem contact op met het bestuur via bestuur@dsavdodeka.nl of via onze sociale media accounts.")
     }
 
     const formIsValid = () => {

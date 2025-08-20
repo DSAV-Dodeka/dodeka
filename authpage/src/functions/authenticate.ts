@@ -61,7 +61,7 @@ interface Plan {
 }
 
 interface PlanDetails {
-    price: 53.5 | 47 | 44;
+    price: 214 | 188 | 176;
     planCode: string;
     registrationFee: 5;
     remittanceFee: null;
@@ -78,7 +78,7 @@ interface PlanDetails {
 }
 
 const wedstrijdlidPlan: PlanDetails = {
-    price: 53.5,
+    price: 214,
     planCode: "12",
     registrationFee: 5,
     remittanceFee: null,
@@ -90,12 +90,12 @@ const wedstrijdlidPlan: PlanDetails = {
     toAge: 99,
     referenceDate: null,
     organisationTypeIds: [],
-    id: 11286,
+    id: 14616,
     name: "Wedstrijdlid"
 };
 
 const recreantPlan: PlanDetails = {
-    price: 47,
+    price: 188,
     planCode: "13",
     registrationFee: 5,
     remittanceFee: null,
@@ -107,12 +107,12 @@ const recreantPlan: PlanDetails = {
     toAge: 99,
     referenceDate: null,
     organisationTypeIds: [],
-    id: 11287,
+    id: 14617,
     name: "Recreantlid"
 };
 
 const gastPlan: PlanDetails = {
-    price: 44,
+    price: 176,
     planCode: "14",
     registrationFee: 5,
     remittanceFee: null,
@@ -124,7 +124,7 @@ const gastPlan: PlanDetails = {
     toAge: 99,
     referenceDate: null,
     organisationTypeIds: [],
-    id: 11288,
+    id: 14618,
     name: "Gastlid"
 };
 
@@ -143,8 +143,8 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
     // Better way to determine this? Maybe wanting to make this accurate would be good reason to call Volta on the server...
     // const now = new Date()
     const planAssignmentStartDate = "2025-01-01T00:00:00"
-    const planStartDate = "2024-09-01T00:00:00"
-    const planEndDate = "2025-08-31T00:00:00"
+    const planStartDate = "2025-09-01T00:00:00"
+    const planEndDate = "2026-08-31T00:00:00"
 
     const plan: Plan = {
         selectedPlan: {

@@ -34,7 +34,7 @@ const Auth = () => {
         if (flow_id == null) {
 
             console.log(new_err("bad_auth", "Flow ID not set!", "auth_flow_missing").j())
-            setStatus("Er is iets mis met de link, probeer het nogmaals via deze ")
+            setStatus("Er is iets mis met de link, probeer het nogmaals via https://dsavdodeka.nl.")
             setShowLink(true)
             return
         }
@@ -50,7 +50,7 @@ const Auth = () => {
 
         // Is set to zero if not valid on load, see below
         if (redirect === "0") {
-            setStatus("Er is iets mis met de link, probeer het nogmaals via deze ")
+            setStatus("Er is iets mis met de link, probeer het nogmaals via https://dsavdodeka.nl")
             setShowLink(true)
             return
         } else {
