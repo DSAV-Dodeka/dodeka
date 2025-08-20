@@ -125,6 +125,7 @@ const Auth = () => {
             <Back />
             <Title title="Inloggen" />
             <div className="form_container">
+                {<p className="largeText">{"Momenteel zijn er problemen met het inlogsysteem. Deze worden binnenkort verholpen."}</p>}
                 {info &&
                     <p className="largeText">{info}</p>
                 }   
