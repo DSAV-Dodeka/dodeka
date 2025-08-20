@@ -77,6 +77,8 @@ interface PlanDetails {
     name: string;
 }
 
+// IMPORTANT: these id's change every year, so every year has to be updated!
+
 const wedstrijdlidPlan: PlanDetails = {
     price: 214,
     planCode: "12",
@@ -140,9 +142,7 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         throw new Error(`Unknown plan ${registerState.plan}!`)
     }
 
-    // Better way to determine this? Maybe wanting to make this accurate would be good reason to call Volta on the server...
-    // const now = new Date()
-    const planAssignmentStartDate = "2025-01-01T00:00:00"
+    const planAssignmentStartDate = "2025-09-01T00:00:00Z"
     const planStartDate = "2025-09-01T00:00:00"
     const planEndDate = "2026-08-31T00:00:00"
 
@@ -154,7 +154,6 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         },
         PlanAssignment: {
             planId: planDetails.id,
-            // FIXME check if this is indeed supposed to be different
             startDate: planAssignmentStartDate
         }
     }
@@ -206,7 +205,7 @@ function registerStateToVolta(registerState: RegisterState): VoltaRegistration {
         LastName: registerState.lastname,
         Initials: registerState.initials,
         Gender: gender,
-        Birthdate: registerState.date_of_birth,
+        Birthdate: `${registerState.date_of_birth}T00:00:00.000Z`,
         Email: {
             Email: registerState.email
         },
