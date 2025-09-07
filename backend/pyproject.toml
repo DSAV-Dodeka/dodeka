@@ -1,6 +1,6 @@
 [project]
 name = "apiserver"
-version = "2.3.0"
+version = "4.0.0"
 description = "D.S.A.V. Dodeka backend"
 authors = [
     { name = "Tip ten Brink", email = "75669206+tiptenbrink@users.noreply.github.com" },
@@ -8,24 +8,12 @@ authors = [
     { name = "Leander Bindt", email = "leander.bindt@ziggo.nl" },
     { name = "Senne Drent", email = "sennedrent@gmail.com" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
-    "cryptography==44.0.0",
-    "PyJWT==2.8.0",
-    "fastapi==0.105.0",
-    "gunicorn==23.0.0",
-    "uvicorn[standard]==0.24.0",
-    "asyncpg==0.29.0",
-    "psycopg[binary]>=3.1.0,<4.0.0",
-    "pydantic==2.5.2",
-    "redis==5.0.1",
-    "sqlalchemy[asyncio]==2.0.23",
-    "opaquepy==0.6.0",
+    "fastapi==0.116.1",
+    "pydantic==2.11.7",
+    "sqlalchemy==2.0.43",
     "jinja2>=3.1.2,<4.0.0",
-    "anyio>=3.7.1,<4.0.0",
-    "regex>=2023.10.3,<2024.0.0",
-    "orjson>=3.9.5,<4.0.0",
-    "yarl>=1.9.2,<2.0.0",
     "loguru>=0.7.2,<1.0.0"
 ]
 
@@ -34,54 +22,56 @@ backend = "apiserver.dev:run"
 
 [dependency-groups]
 dev = [
-    "pytest>=7.0.1,<8.0.0",
-    "pytest-asyncio>=0.23.2,<0.24.0",
-    "pytest-mock>=3.7.0,<4.0.0",
-    "pre-commit>=2.20.0,<3.0.0",
-    "httpx>=0.24.1,<0.25.0",
-    "alembic>=1.12.0,<2.0.0",
-    "coverage>=7.3.2,<8.0.0",
-    "black==23.11.0",
-    "mypy>=1.5.1,<2.0.0",
-    "faker>=19.3.1,<20.0.0",
-    "ruff>=0.1.5,<1.0.0",
-    "types-regex>=2023.10.3.0,<2024.0.0",
+    "pytest>=8.4.2,<9.0.0",
+    # "pytest-asyncio>=0.23.2,<0.24.0",
+    # "pytest-mock>=3.7.0,<4.0.0",
+    # "pre-commit>=2.20.0,<3.0.0",
+    "httpx>=0.28.1,<0.29.0",
+    # "alembic>=1.12.0,<2.0.0",
+    # "coverage>=7.3.2,<8.0.0",
+    # "black==23.11.0",
+    # "mypy>=1.5.1,<2.0.0",
+    # "faker>=19.3.1,<20.0.0",
+    "ruff>=0.12.12,<0.13.0",
+    # "types-regex>=2023.10.3.0,<2024.0.0",
 ]
 
-[tool.hatch.build.targets.wheel]
-only-packages = true
-packages = ["src/apiserver", "src/auth", "src/datacontext", "src/schema", "src/store"]
+# [tool.hatch.build.targets.wheel]
+# only-packages = true
+# packages = ["src/apiserver", "src/auth", "src/datacontext", "src/schema", "src/store"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.black]
-target-version = ['py311']
-preview = true
+# [tool.black]
+# target-version = ['py311']
+# preview = true
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-files = ["src"]
-plugins = [
-    "pydantic.mypy",
-]
+# [tool.mypy]
+# python_version = "3.11"
+# strict = true
+# files = ["src"]
+# plugins = [
+#     "pydantic.mypy",
+# ]
 
-[[tool.mypy.overrides]]
-module = [
-    "schema.model.env",
-    "schema.model.versions.*"
-]
-ignore_errors = true
+# [[tool.mypy.overrides]]
+# module = [
+#     "schema.model.env",
+#     "schema.model.versions.*"
+# ]
+# ignore_errors = true
 
 [tool.ruff.lint]
 select = ["F", "PL", "E", "W", "RUF"]
 # We ignore too-many-arguments and line length, as black fixes line length for code
-ignore = ["PLR0913", "E501"]
+# TODO: check if we need this
+# ignore = ["PLR0913", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F403"]
+# TODO: check if we need this
+# "__init__.py" = ["F403"]
 
 [tool.ruff.lint.pycodestyle]
 # We allow docs and comments to be long
