@@ -4,9 +4,9 @@ from typing import Optional, Any, TypedDict
 from fastapi import BackgroundTasks
 from loguru import logger
 
-from apiserver.env import Config
+from apiserver.settings import Settings
 from apiserver.lib.actions.mail import send_email_vars
-from apiserver.define import template_env, loc_dict, DEFINE
+# from apiserver.define import template_env, loc_dict, DEFINE
 
 
 __all__ = [
@@ -24,7 +24,7 @@ class MailServer(TypedDict):
     smtp_port: int
 
 
-def mail_from_config(config: Config) -> Optional[MailServer]:
+def mail_from_config(config: Settings) -> Optional[MailServer]:
     if not config.MAIL_ENABLED:
         logger.debug("Mail disabled, not sending email.")
         return None

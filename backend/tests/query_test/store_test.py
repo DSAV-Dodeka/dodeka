@@ -8,7 +8,7 @@ from sqlalchemy import text
 from apiserver.app.ops.startup import drop_create_database
 
 
-from apiserver.env import Config, load_config
+from apiserver.settings import Config, load_config
 import uvloop
 from tests.test_util import Fixture, AsyncFixture
 from store.conn import get_conn

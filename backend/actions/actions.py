@@ -15,7 +15,7 @@ import apiserver.lib.utilities as util
 import auth.core.util
 from apiserver.app.ops.startup import get_keystate
 from apiserver.define import DEFINE
-from apiserver.env import load_config
+from apiserver.settings import load_config
 from auth.data.authentication import get_apake_setup
 from auth.data.keys import get_keys
 from auth.data.relational.user import EmptyIdUserData

@@ -8,7 +8,7 @@ from loguru import logger
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
-from apiserver.env import Config
+from apiserver.settings import Config
 from auth.core.util import random_time_hash_hex
 
 

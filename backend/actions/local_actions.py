@@ -15,7 +15,7 @@ from apiserver.data.api.classifications import insert_classification, UserPoints
 from apiserver.data.api.ud.userdata import new_userdata
 from apiserver.data.special import update_class_points
 from apiserver.define import DEFINE
-from apiserver.env import load_config
+from apiserver.settings import load_config
 from apiserver.lib.model.entities import NewEvent, SignedUp, UserNames
 from auth.data.authentication import get_apake_setup
 from auth.data.keys import get_keys

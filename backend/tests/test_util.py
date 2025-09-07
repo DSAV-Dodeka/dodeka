@@ -11,7 +11,7 @@ from apiserver.app_lifespan import State, safe_startup
 from apiserver.data.context.app_context import Code
 from apiserver.data.source import Source
 from apiserver.define import DEFINE
-from apiserver.env import Config
+from apiserver.settings import Config
 
 from apiserver.lib.model.entities import AccessToken, IdInfo, UserData, User
 from apiserver.lib.utilities import gen_id_name

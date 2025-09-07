@@ -9,7 +9,7 @@ from sqlalchemy import Engine, create_engine, text
 from apiserver.data.api.classifications import insert_classification
 
 
-from apiserver.env import Config, load_config
+from apiserver.settings import Config, load_config
 from schema.model import metadata as db_model
 from schema.model.model import (
     CLASS_END_DATE,

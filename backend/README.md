@@ -1,0 +1,1 @@
+New command: uv run fastapi dev src/apiserver/app_inst.py

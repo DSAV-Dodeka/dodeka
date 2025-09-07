@@ -6,7 +6,7 @@ from apiserver.app_def import create_app
 from apiserver.app_lifespan import register_and_define_code
 from apiserver.data import Source
 from apiserver.data.context import Code
-from apiserver.env import load_config
+from apiserver.settings import load_config
 from tests.test_resources import res_path
 from tests.test_util import mock_lifespan, setup_fake_dsrc
 

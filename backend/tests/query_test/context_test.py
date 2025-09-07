@@ -7,7 +7,7 @@ import pytest_asyncio
 from sqlalchemy import Engine, create_engine, text
 
 
-from apiserver.env import Config, load_config
+from apiserver.settings import Config, load_config
 from schema.model import metadata as db_model
 from tests.test_util import Fixture
 from store.store import Store
