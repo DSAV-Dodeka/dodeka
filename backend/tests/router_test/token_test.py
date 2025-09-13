@@ -60,18 +60,24 @@ pytest_plugins = [
 
 @pytest.fixture
 def user_mock_flow_user(
-    gen_ext_user: tuple[GenUser, IdInfo]
+    gen_ext_user: tuple[GenUser, IdInfo],
 ) -> Fixture[tuple[FlowUser, str, str, GenUser, IdInfo]]:
     mock_flow_id = "abcdmock"
     test_token_scope = "doone"
     gen_user, id_info = gen_ext_user
 
-    yield FlowUser(
-        auth_time=utc_timestamp() - 20,
-        flow_id=mock_flow_id,
-        scope=test_token_scope,
-        user_id=gen_user.user_id,
-    ), test_token_scope, mock_flow_id, gen_user, id_info
+    yield (
+        FlowUser(
+            auth_time=utc_timestamp() - 20,
+            flow_id=mock_flow_id,
+            scope=test_token_scope,
+            user_id=gen_user.user_id,
+        ),
+        test_token_scope,
+        mock_flow_id,
+        gen_user,
+        id_info,
+    )
 
 
 @pytest.fixture(scope="module")

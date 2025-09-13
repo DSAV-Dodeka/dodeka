@@ -41,7 +41,7 @@ from sqlalchemy import create_engine
 
 #     # Checks lock: returns True if it is the first lock since at least 25 seconds (lock expire time)
 #     is_first_process = await wait_for_lock_is_first(dsrc)
-    
+
 #     logger.debug(f"Unlocked startup, first={is_first_process}")
 #     # Only recreates if it is also the first lock since at least 25 seconds (lock expire time)
 #     logger.debug(f"Startup with recreate={recreate and is_first_process}")

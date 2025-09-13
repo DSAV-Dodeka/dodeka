@@ -15,9 +15,7 @@ async def get_register_state(dsrc: Source, auth_id: str) -> SavedRegisterState:
 async def store_email_confirmation(
     dsrc: Source, confirm_id: str, email: str, email_expiration: int
 ) -> None:
-    await store_string(
-        get_kv(dsrc), email, confirm_id, expire=email_expiration
-    )
+    await store_string(get_kv(dsrc), email, confirm_id, expire=email_expiration)
 
 
 async def get_email_confirmation(dsrc: Source, email: str) -> str:

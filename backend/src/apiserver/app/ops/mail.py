@@ -73,7 +73,9 @@ def send_signup_email(
     mail_server: Optional[MailServer],
     registration_url: str,
 ) -> None:
-    add_vars = {"registration_url": registration_url,}
+    add_vars = {
+        "registration_url": registration_url,
+    }
 
     def send_lam() -> None:
         send_email(

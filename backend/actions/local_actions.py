@@ -4,7 +4,7 @@ import opaquepy as opq
 import pytest
 import pytest_asyncio
 from faker import Faker
-from apiserver.data.context.ranking import add_new_event
+from apiserver.data.ranking import add_new_event
 
 import apiserver.lib.utilities as util
 import auth.core.util
@@ -25,8 +25,6 @@ from auth.define import refresh_exp, access_exp, id_exp
 from auth.token.build import create_tokens, finish_tokens
 from datacontext.context import DontReplaceContext
 from store import Store
-
-
 
 
 @pytest.fixture(scope="session")
@@ -166,12 +164,12 @@ async def test_add_classification(local_dsrc):
 @pytest.mark.asyncio
 async def test_update_points(local_dsrc):
     async with get_conn(local_dsrc) as conn:
-        training_class = (await data.classifications.most_recent_class_of_type(
-            conn, "training"
-        ))[0]
-        points_class = (await data.classifications.most_recent_class_of_type(
-            conn, "points"
-        ))[0]
+        training_class = (
+            await data.classifications.most_recent_class_of_type(conn, "training")
+        )[0]
+        points_class = (
+            await data.classifications.most_recent_class_of_type(conn, "points")
+        )[0]
         await update_class_points(conn, training_class.classification_id)
         await update_class_points(conn, points_class.classification_id)
 

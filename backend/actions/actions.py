@@ -25,7 +25,6 @@ from datacontext.context import DontReplaceContext
 from store import Store
 
 
-
 def get_api_config():
     test_config_path = Path(__file__).parent.joinpath("localdead.toml")
     return load_config(test_config_path)
@@ -129,7 +128,7 @@ async def generate_dummies():
                 # av40id=av40id,
                 # joined=joined,
             )
-            
+
             cl_req, cl_state = opq.register_client(admin_password)
             serv_resp = opq.register(setup, cl_req, uid)
             cl_fin = opq.register_client_finish(cl_state, admin_password, serv_resp)
@@ -142,9 +141,10 @@ async def generate_dummies():
 
 
 async def run_function(func_name):
-    module = sys.modules['__main__']
+    module = sys.modules["__main__"]
     func = getattr(module, func_name)
     await func()
+
 
 if __name__ == "__main__":
     function_to_run = sys.argv[1]

@@ -37,7 +37,7 @@ def ignore_admin_member(scope: str) -> str:
 
 
 def parse_users_scopes_data(
-    users_scope_dict: Optional[dict[str, Any]]
+    users_scope_dict: Optional[dict[str, Any]],
 ) -> UserScopeData:
     if users_scope_dict is None:
         raise NoDataError("UserScopeData does not exist.", "user_scope_data_empty")

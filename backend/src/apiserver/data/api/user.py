@@ -60,7 +60,7 @@ async def no_user_or_not_registered(conn: AsyncConnection, email: str) -> bool:
 
     if user_row is None:
         return True
-    
+
     user = parse_user(user_row)
 
     return not user.password_file
@@ -72,10 +72,11 @@ async def get_user_by_email(conn: AsyncConnection, email: str) -> User | None:
 
     if user_row is None:
         return None
-    
+
     user = parse_user(user_row)
 
     return user
+
 
 async def get_user_by_id(conn: AsyncConnection, user_id: str) -> User | None:
     """Returns True if a user does not exist or has not completed registration."""
@@ -83,7 +84,7 @@ async def get_user_by_id(conn: AsyncConnection, user_id: str) -> User | None:
 
     if user_row is None:
         return None
-    
+
     user = parse_user(user_row)
 
     return user
@@ -116,7 +117,9 @@ async def insert_user(conn: AsyncConnection, user: User) -> None:
     except DbError as e:
         raise DataError(f"{e.err_desc} from internal: {e.err_internal}", e.key)
 
+
 EMAIL_EXISTS = "email_exists"
+
 
 async def insert_return_user_id(conn: AsyncConnection, user: User) -> str:
     user_row = lit_dict(user.model_dump(exclude={"id", "user_id"}))
@@ -124,7 +127,10 @@ async def insert_return_user_id(conn: AsyncConnection, user: User) -> str:
         user_id: str = await insert_return_col(conn, USER_TABLE, user_row, USER_ID)
     except DbError as e:
         if e.key == DbErrors.INTEGRITY:
-            raise DataError(f"Integrity violation: {e.err_desc} from internal: {e.err_internal}.\nE-mail most likely already exists", EMAIL_EXISTS)
+            raise DataError(
+                f"Integrity violation: {e.err_desc} from internal: {e.err_internal}.\nE-mail most likely already exists",
+                EMAIL_EXISTS,
+            )
 
         raise DataError(f"{e.err_desc} from internal: {e.err_internal}", e.key)
     return user_id

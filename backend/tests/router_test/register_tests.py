@@ -44,12 +44,17 @@ def user_mock_flow_user(gen_user: GenUser):
     mock_flow_id = "abcdmock"
     test_token_scope = "doone"
 
-    yield FlowUser(
-        auth_time=utc_timestamp() - 20,
-        flow_id=mock_flow_id,
-        scope=test_token_scope,
-        user_id=gen_user.user_id,
-    ), test_token_scope, mock_flow_id, gen_user
+    yield (
+        FlowUser(
+            auth_time=utc_timestamp() - 20,
+            flow_id=mock_flow_id,
+            scope=test_token_scope,
+            user_id=gen_user.user_id,
+        ),
+        test_token_scope,
+        mock_flow_id,
+        gen_user,
+    )
 
 
 @pytest.fixture(scope="module")

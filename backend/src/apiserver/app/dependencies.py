@@ -82,15 +82,15 @@ from apiserver.app.error import ErrorResponse
 
 
 def require_admin():
-#     if not has_scope(acc.scope, {"admin"}):
-#         raise ErrorResponse(
-#             403,
-#             err_type="insufficient_scope",
-#             err_desc="Insufficient permissions to access this resource.",
-#             debug_key="low_perms",
-#         )
+    #     if not has_scope(acc.scope, {"admin"}):
+    #         raise ErrorResponse(
+    #             403,
+    #             err_type="insufficient_scope",
+    #             err_desc="Insufficient permissions to access this resource.",
+    #             debug_key="low_perms",
+    #         )
 
-#     return acc
+    #     return acc
     raise Exception("not implemented!")
 
 
@@ -103,6 +103,8 @@ def require_member():
     #         debug_key="low_perms",
     #     )
     raise Exception("not implemented!")
+
+
 #     return acc
 
 

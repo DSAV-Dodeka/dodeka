@@ -5,7 +5,7 @@ from apiserver.app.error import ErrorKeys, AppError
 from apiserver.data import Source
 from apiserver.data.api.classifications import events_in_class
 from apiserver.data.context.app_context import RankingContext, conn_wrap
-from apiserver.data.context.ranking import context_most_recent_class_id_of_type
+from apiserver.data.ranking import context_most_recent_class_id_of_type
 from apiserver.data.source import source_session
 from apiserver.data.special import user_events_in_class
 from apiserver.lib.logic.ranking import is_rank_type

@@ -37,7 +37,7 @@ class RegisterRequest(BaseModel):
 #             err_desc=reason,
 #             debug_key="bad_registration_start",
 #         )
-    
+
 #     if register_start.confirm_id != stored_confirm:
 #         logger.debug("Confirm IDs do not match.")
 #         reason = "Bad registration."
@@ -47,27 +47,27 @@ class RegisterRequest(BaseModel):
 #             debug_key="bad_registration_start",
 #         )
 
-    # ud, u = await get_registration(context, dsrc, register_start.register_id)
+# ud, u = await get_registration(context, dsrc, register_start.register_id)
 
-    # if ud.registered or len(u.password_file) > 0:
-    #     logger.debug("Already registered.")
-    #     reason = "Bad registration."
-    #     raise AppError(
-    #         err_type=ErrorKeys.REGISTER,
-    #         err_desc=reason,
-    #         debug_key="bad_registration_start",
-    #     )
+# if ud.registered or len(u.password_file) > 0:
+#     logger.debug("Already registered.")
+#     reason = "Bad registration."
+#     raise AppError(
+#         err_type=ErrorKeys.REGISTER,
+#         err_desc=reason,
+#         debug_key="bad_registration_start",
+#     )
 
-    # if u.email != register_start.email.lower():
-    #     logger.debug("Registration start does not match e-mail")
-    #     reason = "Bad registration."
-    #     raise AppError(
-    #         err_type=ErrorKeys.REGISTER,
-    #         err_desc=reason,
-    #         debug_key="bad_registration_start",
-    #     )
+# if u.email != register_start.email.lower():
+#     logger.debug("Registration start does not match e-mail")
+#     reason = "Bad registration."
+#     raise AppError(
+#         err_type=ErrorKeys.REGISTER,
+#         err_desc=reason,
+#         debug_key="bad_registration_start",
+#     )
 
-    # return ud.user_id
+# return ud.user_id
 
 
 class FinishRequest(BaseModel):
@@ -110,17 +110,19 @@ async def finalize_save_register(
                 err_desc="Invalid user state before registration.",
                 debug_key="bad_registration_bad_user_state",
             )
-        
+
         id_name = gen_id_name(register_finish.firstname, register_finish.lastname)
 
         if id_name != user.id_name:
-            logger.debug(f"id_name mismatch: id_name={user.id_name}; firstname={register_finish.firstname}; lastname={register_finish.lastname}")
+            logger.debug(
+                f"id_name mismatch: id_name={user.id_name}; firstname={register_finish.firstname}; lastname={register_finish.lastname}"
+            )
             raise AppError(
                 err_type=ErrorKeys.REGISTER,
                 err_desc="Invalid user state before registration.",
                 debug_key="bad_registration_bad_user_state",
             )
-        
+
         userdata = UserData(
             user_id=saved_state.user_id,
             active=True,
@@ -129,7 +131,7 @@ async def finalize_save_register(
             email=user.email,
             joined=register_finish.joined,
             birthdate=register_finish.birthdate,
-            showage=register_finish.age_privacy
+            showage=register_finish.age_privacy,
         )
 
         await ops.user.update_password_file(conn, user_id, password_file)

@@ -1,17 +1,29 @@
 from loguru import logger
-from typing import Annotated, Any, AsyncIterator, Callable, Coroutine, Type, TypeAlias, TypedDict
+from typing import (
+    Annotated,
+    Any,
+    AsyncIterator,
+    Callable,
+    Coroutine,
+    Type,
+    TypeAlias,
+    TypedDict,
+)
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
+
 # from fastapi.middleware import Middleware
 # from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import Mount
 from fastapi.staticfiles import StaticFiles
+
 # from apiserver.app.app_logging import LoggerMiddleware
 from apiserver.data import Db
 
 from apiserver.settings import settings
 from starlette.types import StatefulLifespan
+
 # Import types separately to make it clear in what line the module is first loaded and
 # its top-level run
 from apiserver.resources import res_path
@@ -34,42 +46,24 @@ from apiserver.app.routers import (
 )
 
 
-ExceptionHandler: TypeAlias = Callable[[Request, Any], Coroutine[Any, Any, Response]]
+# ExceptionHandler: TypeAlias = Callable[[Request, Any], Coroutine[Any, Any, Response]]
 
 
-def define_exception_handlers(
-    exc: int | Type[Exception], handler: ExceptionHandler
-) -> dict[int | Type[Exception], ExceptionHandler]:
-    return {exc: handler}
+# def define_exception_handlers(
+#     exc: int | Type[Exception], handler: ExceptionHandler
+# ) -> dict[int | Type[Exception], ExceptionHandler]:
+#     return {exc: handler}
 
 
-async def validation_exception_handler(
-    _request: Any, exc: RequestValidationError | int
-) -> Response:
-    # Also show debug if there is an error in the request
-    exc_str = str(exc)
-    logger.debug(str(exc))
-    return error_response_return(
-        err_status_code=400, err_type="bad_request_validation", err_desc=exc_str
-    )
-
-
-def define_static_routes() -> list[Mount]:
-    static_credential_path = res_path.joinpath("static/credentials")
-    if not static_credential_path.exists():
-        raise AppEnvironmentError(
-            f"Could not find the static HTML files at {static_credential_path}. Did you"
-            " build "
-            + "the files for the authpage?"
-        )
-
-    credential_mount = Mount(
-        "/credentials",
-        app=StaticFiles(directory=res_path.joinpath("static/credentials"), html=True),
-        name="credentials",
-    )
-
-    return [credential_mount]
+# async def validation_exception_handler(
+#     _request: Any, exc: RequestValidationError | int
+# ) -> Response:
+#     # Also show debug if there is an error in the request
+#     exc_str = str(exc)
+#     logger.debug(str(exc))
+#     return error_response_return(
+#         err_status_code=400, err_type="bad_request_validation", err_desc=exc_str
+#     )
 
 
 # def define_middleware(routes_to_trace_log: set[str]) -> list[Middleware]:
@@ -101,30 +95,32 @@ def add_routers(new_app: FastAPI) -> FastAPI:
 
     return new_app
 
+
 # db_depends = Annotated[Db, Depends()]
+
 
 class State(TypedDict):
     db: Db
 
+
 AppLifespan = StatefulLifespan[FastAPI]
+
 
 def create_lifespan() -> AppLifespan:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[State]:
         db = Db(settings.db_file)
 
-        yield { "db": db }
+        yield {"db": db}
 
         db.engine.dispose()
 
     return lifespan
 
+
 def create_app(app_lifespan: AppLifespan) -> FastAPI:
     """App entrypoint."""
 
-    # static_routes = define_static_routes()
-    # # We need the top-level route names because we don't want the logs to be spammed with them
-    # static_paths = set(map(lambda r: r.path.removeprefix("/"), static_routes))
     # middleware = define_middleware(routes_to_trace_log=static_paths)
 
     # exception_handlers = define_exception_handlers(
@@ -133,12 +129,11 @@ def create_app(app_lifespan: AppLifespan) -> FastAPI:
 
     new_app = FastAPI(
         title="apiserver",
-        # Types don't work because BaseRoute is not covariant, which we can't control
-        # routes=static_routes,  # type: ignore
         # middleware=middleware,
         lifespan=app_lifespan,
         # exception_handlers=exception_handlers,
     )
+
     new_app = add_routers(new_app)
     # new_app.add_exception_handler(ErrorResponse, handler=error_response_handler)
     # new_app.add_exception_handler(AppError, handler=unexpected_error_handler)

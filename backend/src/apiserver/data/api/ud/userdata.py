@@ -35,9 +35,7 @@ def parse_userdata(user_dict: Optional[dict[str, Any]]) -> UserData:
     return UserData.model_validate(user_dict)
 
 
-def new_userdata(
-    su: SignedUp, user_id: str, joined: date, birthdate: date
-) -> UserData:
+def new_userdata(su: SignedUp, user_id: str, joined: date, birthdate: date) -> UserData:
     return UserData(
         user_id=user_id,
         active=True,

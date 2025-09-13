@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["settings", "Settings"]
 
+
 # https://docs.pydantic.dev/latest/concepts/pydantic_settings
 class Settings(BaseSettings):
     model_config = SettingsConfigDict()
@@ -110,7 +111,9 @@ class Settings(BaseSettings):
 
 #     return config
 
+
 def define_settings():
     return Settings()
+
 
 settings = define_settings()
