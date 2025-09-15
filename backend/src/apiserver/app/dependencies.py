@@ -1,6 +1,7 @@
-from typing import Annotated
+from typing import Annotated, Any
 from fastapi import Depends, Request
-from apiserver.app.error import ErrorResponse
+from apiserver.data import Db
+# from apiserver.app.error import ErrorResponse
 # from apiserver.app.ops.header import auth_header, verify_token_header
 # from apiserver.data.context.app_context import Code, SourceContexts
 
@@ -11,10 +12,12 @@ from apiserver.app.error import ErrorResponse
 # Due to some internal stuff in FastAPI/Starlette, it's important to make all dependencies async. https://github.com/tiangolo/fastapi/discussions/5999
 
 
-# async def dep_source(request: Request) -> Source:
-#     dsrc: Source = request.state.dsrc
-#     return dsrc
+async def dep_db(request: Request) -> Db:
+    db: Db = request.state.db
+    return db
 
+async def dep_json(request: Request) -> Any:
+    return await request.json()
 
 # async def dep_app_context(request: Request) -> SourceContexts:
 #     cd: Code = request.state.cd
@@ -26,7 +29,8 @@ from apiserver.app.error import ErrorResponse
 #     return cd.auth_context
 
 
-# SourceDep = Annotated[Source, Depends(dep_source)]
+DbDep = Annotated[Db, Depends(dep_db)]
+JsonDep = Annotated[Any, Depends(dep_json)]
 # AppContext = Annotated[SourceContexts, Depends(dep_app_context)]
 # AuthContext = Annotated[AuthContexts, Depends(dep_auth_context)]
 
@@ -106,6 +110,8 @@ def require_member():
 
 
 #     return acc
+
+
 
 
 RequireMember = Annotated[None, Depends(require_member)]

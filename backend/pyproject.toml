@@ -12,7 +12,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard-no-fastapi-cloud-cli]==0.116.1",
     "pydantic==2.11.7",
-    "sqlalchemy==2.0.43",
+    "sqlalchemy",
     "jinja2>=3.1.6,<4.0.0",
     "loguru>=0.7.2,<1.0.0",
     "pydantic-settings>=2.10.1",
@@ -21,6 +21,8 @@ dependencies = [
 
 [tool.uv.sources]
 "tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server" }
+sqlalchemy = { git = "https://github.com/tiptenbrink/sqlalchemy.git", rev = "80a68214e42782ff4f4f6979a113238ee89a8dd5" }
+# sqlalchemy = { git = "https://github.com/tiptenbrink/sqlalchemy.git", rev = "13f569fd615485c50e07f211e37e45d749ccc40d" }
 
 [project.scripts]
 backend = "apiserver.dev:run"
@@ -46,8 +48,8 @@ dev = [
 # packages = ["src/apiserver", "src/auth", "src/datacontext", "src/schema", "src/store"]
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.8.15,<0.9.0"]
+build-backend = "uv_build"
 
 # [tool.black]
 # target-version = ['py311']
@@ -164,4 +166,3 @@ prepend_sys_path = [
 # type = "exec"
 # executable = "ruff"
 # options = "check --fix REVISION_SCRIPT_FILENAME"
-

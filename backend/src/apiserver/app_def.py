@@ -37,13 +37,7 @@ from apiserver.app.error import (
 )
 
 # Router modules, each router has its own API endpoints
-from apiserver.app.routers import (
-    admin_router,
-    basic,
-    members_router,
-    profile,
-    ranking,
-)
+import apiserver.app.routers as routers
 
 
 # ExceptionHandler: TypeAlias = Callable[[Request, Any], Coroutine[Any, Any, Response]]
@@ -84,6 +78,7 @@ from apiserver.app.routers import (
 
 
 def add_routers(new_app: FastAPI) -> FastAPI:
+    new_app.include_router(routers.auth)
     # new_app.include_router(basic.router)
     # new_app.include_router(profile.router)
 

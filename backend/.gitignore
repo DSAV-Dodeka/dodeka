@@ -1,2 +1,6 @@
 localenv.toml
 *.local
+
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
