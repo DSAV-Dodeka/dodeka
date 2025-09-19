@@ -1,6 +1,4 @@
-import secrets
-import sqlalchemy as sqla
-import sqlite3
+from typing import override
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from tiauth_faroe.user_server import (
@@ -19,6 +17,7 @@ from tiauth_faroe.user_server import (
 )
 from .model import UserTable, NewUserTable
 from .db import Db
+from .error import check_integrity_error
 
 def create_user(db: Db, effect: CreateUserEffect) -> EffectResult:
     try:
@@ -67,13 +66,14 @@ def create_user(db: Db, effect: CreateUserEffect) -> EffectResult:
                     {UserTable.PASSWORD_HASH}, {UserTable.PASSWORD_HASH_ALGORITHM_ID},
                     {UserTable.PASSWORD_SALT}, {UserTable.DISABLED},
                     {UserTable.EMAIL_ADDRESS_COUNTER}, {UserTable.PASSWORD_HASH_COUNTER},
-                    {UserTable.DISABLED_COUNTER}, {UserTable.SESSIONS_COUNTER}
+                    {UserTable.DISABLED_COUNTER}, {UserTable.SESSIONS_COUNTER},
+                    {UserTable.PERMISSIONS}
                 ) VALUES (
                     :int_id, :name_id, :email_address,
                     :firstname, :lastname,
                     :password_hash, :password_hash_algorithm_id, :password_salt,
                     :disabled, :email_address_counter, :password_hash_counter,
-                    :disabled_counter, :sessions_counter
+                    :disabled_counter, :sessions_counter, :permissions
                 )
             """)
 
@@ -91,6 +91,7 @@ def create_user(db: Db, effect: CreateUserEffect) -> EffectResult:
                 "password_hash_counter": 0,
                 "disabled_counter": 0,
                 "sessions_counter": 0,
+                "permissions": ""
             })
 
             # Remove the newuser row after successful user creation
@@ -101,11 +102,7 @@ def create_user(db: Db, effect: CreateUserEffect) -> EffectResult:
             conn.execute(delete_newuser_stmt, {"email_address": effect.email_address})
 
     except IntegrityError as e:
-        # Wish there was a better way to do this...
-        orig = e.orig
-        assert isinstance(orig, sqlite3.IntegrityError)
-        assert isinstance(orig.args[0], str)
-        if 'user.email' in orig.args[0] and 'unique' in orig.args[0].lower():
+        if check_integrity_error(e, 'user.email', 'unique'):
             return ActionError("email_address_already_used")
         else:
             return ActionError("unexpected_error")
@@ -309,10 +306,14 @@ def delete_user(db: Db, effect: DeleteUserEffect) -> EffectResult:
     return None
 
 
+
 class SqliteSyncServer(SyncServer):
+    db: Db
+
     def __init__(self, db: Db):
         self.db = db
 
+    @override
     def execute_effect(self, effect: Effect) -> EffectResult:
         print(f"effect:\n{effect}\n")
         if isinstance(effect, CreateUserEffect):

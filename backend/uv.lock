@@ -49,6 +49,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
+    { name = "tiauth-faroe-client" },
     { name = "tiauth-faroe-user-server" },
 ]
 
@@ -67,8 +68,9 @@ requires-dist = [
     { name = "loguru", specifier = ">=0.7.2,<1.0.0" },
     { name = "pydantic", specifier = "==2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
-    { name = "sqlalchemy", git = "https://github.com/tiptenbrink/sqlalchemy.git?rev=80a68214e42782ff4f4f6979a113238ee89a8dd5" },
-    { name = "tiauth-faroe-user-server", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server" },
+    { name = "sqlalchemy", git = "https://github.com/sqlalchemy/sqlalchemy.git?rev=8bb8c1a6d6439380f682a57b92e3d1b0092250eb" },
+    { name = "tiauth-faroe-client", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient" },
+    { name = "tiauth-faroe-user-server", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Flib" },
 ]
 
 [package.metadata.requires-dev]
@@ -539,7 +541,7 @@ wheels = [
 [[package]]
 name = "sqlalchemy"
 version = "2.1.0b1.dev0"
-source = { git = "https://github.com/tiptenbrink/sqlalchemy.git?rev=80a68214e42782ff4f4f6979a113238ee89a8dd5#80a68214e42782ff4f4f6979a113238ee89a8dd5" }
+source = { git = "https://github.com/sqlalchemy/sqlalchemy.git?rev=8bb8c1a6d6439380f682a57b92e3d1b0092250eb#8bb8c1a6d6439380f682a57b92e3d1b0092250eb" }
 dependencies = [
     { name = "typing-extensions" },
 ]
@@ -557,9 +559,14 @@ wheels = [
 ]
 
 [[package]]
+name = "tiauth-faroe-client"
+version = "0.1.0"
+source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient#ea5b0aff11a5bdf2918b27b15a23a6d78b3509bb" }
+
+[[package]]
 name = "tiauth-faroe-user-server"
 version = "0.1.0"
-source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server#99a9773db1e9d24409a5caceba5519a7b33a18b7" }
+source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Flib#ea5b0aff11a5bdf2918b27b15a23a6d78b3509bb" }
 
 [[package]]
 name = "typer"

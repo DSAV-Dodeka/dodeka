@@ -16,12 +16,14 @@ dependencies = [
     "jinja2>=3.1.6,<4.0.0",
     "loguru>=0.7.2,<1.0.0",
     "pydantic-settings>=2.10.1",
-    "tiauth_faroe.user_server"
+    "tiauth_faroe.user_server",
+    "tiauth_faroe.client"
 ]
 
 [tool.uv.sources]
-"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server" }
-sqlalchemy = { git = "https://github.com/tiptenbrink/sqlalchemy.git", rev = "80a68214e42782ff4f4f6979a113238ee89a8dd5" }
+"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/lib" }
+"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/client" }
+sqlalchemy = { git = "https://github.com/sqlalchemy/sqlalchemy.git", rev = "8bb8c1a6d6439380f682a57b92e3d1b0092250eb" }
 # sqlalchemy = { git = "https://github.com/tiptenbrink/sqlalchemy.git", rev = "13f569fd615485c50e07f211e37e45d749ccc40d" }
 
 [project.scripts]

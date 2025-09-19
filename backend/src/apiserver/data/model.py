@@ -1,6 +1,6 @@
 
 import sqlalchemy as sqla
-from typing import TypedDict
+from typing import final
 from dataclasses import dataclass
 
 # Helps name constraints
@@ -14,6 +14,7 @@ convention = {
 
 metadata = sqla.MetaData(naming_convention=convention)
 
+@final
 @dataclass(frozen=True)
 class UserTable:
     NAME = "user"
@@ -31,8 +32,9 @@ class UserTable:
     PASSWORD_HASH_COUNTER = "password_hash_counter"
     DISABLED_COUNTER = "disabled_counter"
     SESSIONS_COUNTER = "sessions_counter"
+    PERMISSIONS = "permissions"
 
-
+@final
 @dataclass(frozen=True)
 class NewUserTable:
     NAME = "newuser"
@@ -69,6 +71,7 @@ users = sqla.Table(
     sqla.Column(UserTable.PASSWORD_HASH_COUNTER, sqla.Integer, nullable=False, default=0),
     sqla.Column(UserTable.DISABLED_COUNTER, sqla.Integer, nullable=False, default=0),
     sqla.Column(UserTable.SESSIONS_COUNTER, sqla.Integer, nullable=False, default=0),
+    sqla.Column(UserTable.PERMISSIONS, sqla.Text, nullable=False, default=""),
     sqlite_with_rowid=False,
     sqlite_strict=True
 )
