@@ -11,6 +11,8 @@ class Settings(BaseSettings):
 
     db_file: Path = Path("./db.sqlite")
 
+    auth_server_url: str = "http://localhost:3777"
+
     # APISERVER_ENV: str
 
     # # All 'envless' PASSWORDS MUST BE DUMMY

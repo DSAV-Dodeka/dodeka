@@ -44,11 +44,13 @@ version = "4.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard-no-fastapi-cloud-cli"] },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "loguru" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
+    { name = "starlette" },
     { name = "tiauth-faroe-client" },
     { name = "tiauth-faroe-user-server" },
 ]
@@ -56,7 +58,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "alembic" },
-    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -64,19 +65,20 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard-no-fastapi-cloud-cli"], specifier = "==0.116.1" },
+    { name = "httpx", specifier = ">=0.28.1,<0.29.0" },
     { name = "jinja2", specifier = ">=3.1.6,<4.0.0" },
     { name = "loguru", specifier = ">=0.7.2,<1.0.0" },
     { name = "pydantic", specifier = "==2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
     { name = "sqlalchemy", git = "https://github.com/sqlalchemy/sqlalchemy.git?rev=8bb8c1a6d6439380f682a57b92e3d1b0092250eb" },
-    { name = "tiauth-faroe-client", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient" },
+    { name = "starlette", specifier = "==0.47.3" },
+    { name = "tiauth-faroe-client", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient&rev=6ca1bfffc6fe9cb7f2f6a34c6c7316ab2f62965d" },
     { name = "tiauth-faroe-user-server", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Flib" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "alembic", specifier = ">=1.12.0,<2.0.0" },
-    { name = "httpx", specifier = ">=0.28.1,<0.29.0" },
     { name = "pytest", specifier = ">=8.4.2,<9.0.0" },
     { name = "ruff", specifier = ">=0.12.12,<0.13.0" },
 ]
@@ -561,7 +563,7 @@ wheels = [
 [[package]]
 name = "tiauth-faroe-client"
 version = "0.1.0"
-source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient#ea5b0aff11a5bdf2918b27b15a23a6d78b3509bb" }
+source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient&rev=6ca1bfffc6fe9cb7f2f6a34c6c7316ab2f62965d#6ca1bfffc6fe9cb7f2f6a34c6c7316ab2f62965d" }
 
 [[package]]
 name = "tiauth-faroe-user-server"

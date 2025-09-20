@@ -1,6 +1,12 @@
+
+from datetime import datetime, timezone
 from typing import Annotated, Any
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Cookie
+from pydantic import BaseModel
 from apiserver.data import Db
+from apiserver.data.client import AuthClient
+
+from apiserver.data.permissions import UserSession, get_session
 # from apiserver.app.error import ErrorResponse
 # from apiserver.app.ops.header import auth_header, verify_token_header
 # from apiserver.data.context.app_context import Code, SourceContexts
@@ -16,43 +22,29 @@ async def dep_db(request: Request) -> Db:
     db: Db = request.state.db
     return db
 
+async def dep_auth_client(request: Request) -> AuthClient:
+    client: AuthClient = request.state.auth_client
+    return client
+
 async def dep_json(request: Request) -> Any:
     return await request.json()
 
-# async def dep_app_context(request: Request) -> SourceContexts:
-#     cd: Code = request.state.cd
-#     return cd.app_context
-
-
-# async def dep_auth_context(request: Request) -> AuthContexts:
-#     cd: Code = request.state.cd
-#     return cd.auth_context
+async def dep_time() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 DbDep = Annotated[Db, Depends(dep_db)]
 JsonDep = Annotated[Any, Depends(dep_json)]
-# AppContext = Annotated[SourceContexts, Depends(dep_app_context)]
-# AuthContext = Annotated[AuthContexts, Depends(dep_auth_context)]
-
+AuthClientDep = Annotated[AuthClient, Depends(dep_auth_client)]
+TimeDep = Annotated[int, Depends(dep_time)]
 # Authorization = Annotated[str, Depends(auth_header)]
+#
+#
 
+async def dep_session(db: DbDep, auth_client: AuthClientDep, timestamp: TimeDep, session_token: Annotated[str, Cookie()]) -> UserSession:
+    return await get_session(db, auth_client, timestamp, session_token)
 
-# async def dep_header_token(
-#     authorization: Authorization, dsrc: SourceDep, app_ctx: AppContext
-# ) -> AccessToken:
-#     try:
-#         return await ctxlize(verify_token_header)(
-#             app_ctx.authrz_ctx, authorization, dsrc
-#         )
-#     except ResourceError as e:
-#         code = resource_error_code(e.err_type)
-
-#         raise ErrorResponse(
-#             code,
-#             err_type=e.err_type,
-#             err_desc=e.err_desc,
-#             debug_key=e.debug_key,
-#         )
+SessionDep = Annotated[UserSession, Depends(dep_session)]
 
 
 # AccessDep = Annotated[AccessToken, Depends(dep_header_token)]
@@ -98,21 +90,17 @@ def require_admin():
     raise Exception("not implemented!")
 
 
-def require_member():
-    # if not has_scope(acc.scope, {"member"}):
-    #     raise ErrorResponse(
-    #         403,
-    #         err_type="insufficient_scope",
-    #         err_desc="Insufficient permissions to access this resource.",
-    #         debug_key="low_perms",
-    #     )
-    raise Exception("not implemented!")
+class Member(BaseModel):
+    user_id: str
 
+async def require_member(session: SessionDep) -> Member:
+    if "member" not in session.permissions:
+        raise ValueError("Insufficient permissions!")
 
-#     return acc
+    return Member(user_id=session.user_id)
 
 
 
 
-RequireMember = Annotated[None, Depends(require_member)]
+RequireMember = Annotated[Member, Depends(require_member)]
 RequireAdmin = Annotated[None, Depends(require_admin)]

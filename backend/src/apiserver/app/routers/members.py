@@ -2,8 +2,9 @@ from typing import List
 
 from fastapi import APIRouter, Depends
 from loguru import logger
-from pydantic import TypeAdapter
-from apiserver.app.dependencies import require_member
+from pydantic import TypeAdapter, BaseModel
+from apiserver.data.members import get_member, MemberData
+from apiserver.app.dependencies import require_member, Member, DbDep, RequireMember
 
 # from apiserver.app.error import ErrorResponse
 # from apiserver.data.api.content import get_content_data
@@ -30,14 +31,10 @@ members_router = APIRouter(
 #     return RawJSONResponse(BirthdayList.dump_json(birthday_data))
 
 
-# @members_router.get("/profile/")
-# async def get_profile(dsrc: SourceDep, member: RequireMember) -> UserData:
-#     async with data.get_conn(dsrc) as conn:
-#         user_data = await get_userdata_by_id(conn, member.sub)
-#     logger.debug(f"{member.sub} requested profile")
 
-#     return user_data
-
+@members_router.get("/profile/")
+def get_profile(db: DbDep, member: RequireMember) -> MemberData:
+    return get_member(db, member.user_id)
 
 # @members_router.get("/content/{category}/{content_id}")
 # async def get_content(

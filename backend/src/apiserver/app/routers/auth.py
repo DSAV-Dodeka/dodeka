@@ -53,8 +53,12 @@ def clear_tables(db: DbDep) -> None:
     clear_all_users(db)
     clear_all_newusers(db)
 
+    print(f"cleared!\n")
+
 @router.post("/prepare_user")
 def prepare_user(db: DbDep, prepare: PrepareUserRequest) -> None:
     """Prepare a user in the newuser store so they can be created via standard auth actions."""
 
     prepare_user_store(db, prepare.email, prepare.names)
+
+    print(f"prepared {prepare.email}\n")

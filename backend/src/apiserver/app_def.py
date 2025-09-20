@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 # from apiserver.app.app_logging import LoggerMiddleware
 from apiserver.data import Db
 
+from apiserver.data.client import AuthClient
 from apiserver.settings import settings
 from starlette.types import StatefulLifespan
 
@@ -86,7 +87,7 @@ def add_routers(new_app: FastAPI) -> FastAPI:
     # members_router.include_router(ranking.ranking_members_router)
 
     # new_app.include_router(admin_router)
-    # new_app.include_router(members_router)
+    new_app.include_router(routers.members)
 
     return new_app
 
@@ -96,6 +97,7 @@ def add_routers(new_app: FastAPI) -> FastAPI:
 
 class State(TypedDict):
     db: Db
+    auth_client: AuthClient
 
 
 AppLifespan = StatefulLifespan[FastAPI]
@@ -105,8 +107,9 @@ def create_lifespan() -> AppLifespan:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[State]:
         db = Db(settings.db_file)
+        client = AuthClient(settings.auth_server_url)
 
-        yield {"db": db}
+        yield {"db": db, "auth_client": client }
 
         db.engine.dispose()
 
