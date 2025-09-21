@@ -1,9 +1,8 @@
-from loguru import logger
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel
-from apiserver.app.dependencies import require_admin
+from apiserver.app.dependencies import DbDep, TimeDep, require_admin
+from apiserver.data.permissions import add_permission, allowed_permission
 
 # import apiserver.data.api.scope
 # import apiserver.data.api.ud.userdata
@@ -15,6 +14,18 @@ from apiserver.app.dependencies import require_admin
 admin_router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)]
 )
+
+class PermissionAdd(BaseModel):
+    user_id: str
+    permission: str
+
+@admin_router.post(f"/add_permission/")
+def add_user_permission(db: DbDep, timestamp: TimeDep, add: PermissionAdd):
+    if not allowed_permission(add.permission):
+        raise ValueError(f"invalid permission: {add.permission}")
+
+    add_permission(db, timestamp, add.user_id, add.permission)
+
 
 
 # @admin_router.get("/users/", response_model=list[UserData])

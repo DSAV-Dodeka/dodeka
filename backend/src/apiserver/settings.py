@@ -13,6 +13,8 @@ class Settings(BaseSettings):
 
     auth_server_url: str = "http://localhost:3777"
 
+    frontend_origin: str = "https://dsavdodeka.nl"
+
     # APISERVER_ENV: str
 
     # # All 'envless' PASSWORDS MUST BE DUMMY

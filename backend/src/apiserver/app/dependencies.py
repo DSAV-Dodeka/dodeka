@@ -1,12 +1,13 @@
 
 from datetime import datetime, timezone
 from typing import Annotated, Any
-from fastapi import Depends, Request, Cookie
+from fastapi import Depends, Request, Cookie, Header
 from pydantic import BaseModel
 from apiserver.data import Db
 from apiserver.data.client import AuthClient
 
-from apiserver.data.permissions import UserSession, get_session
+from apiserver.data.user import SessionUser, get_session, SessionInfo, InvalidSession
+from apiserver.settings import settings
 # from apiserver.app.error import ErrorResponse
 # from apiserver.app.ops.header import auth_header, verify_token_header
 # from apiserver.data.context.app_context import Code, SourceContexts
@@ -40,11 +41,16 @@ TimeDep = Annotated[int, Depends(dep_time)]
 # Authorization = Annotated[str, Depends(auth_header)]
 #
 #
+#
 
-async def dep_session(db: DbDep, auth_client: AuthClientDep, timestamp: TimeDep, session_token: Annotated[str, Cookie()]) -> UserSession:
+async def dep_session(db: DbDep, auth_client: AuthClientDep, timestamp: TimeDep, origin: Annotated[str, Header()], session_token: Annotated[str | None, Cookie()]) -> SessionInfo | InvalidSession | None:
+    if session_token is None:
+        return None
+    if origin != settings.frontend_origin:
+        raise ValueError("Invalid origin!")
     return await get_session(db, auth_client, timestamp, session_token)
 
-SessionDep = Annotated[UserSession, Depends(dep_session)]
+SessionDep = Annotated[SessionInfo | InvalidSession | None, Depends(dep_session)]
 
 
 # AccessDep = Annotated[AccessToken, Depends(dep_header_token)]
@@ -87,17 +93,23 @@ def require_admin():
     #         )
 
     #     return acc
-    raise Exception("not implemented!")
+    # raise Exception("not implemented!")
+    return None
 
 
 class Member(BaseModel):
     user_id: str
 
 async def require_member(session: SessionDep) -> Member:
-    if "member" not in session.permissions:
+    if session is None:
+        raise ValueError("Please log in, this resource requires member permissions.")
+    if isinstance(session, InvalidSession):
+        raise ValueError("Invalid session!")
+
+    if "member" not in session.user.permissions:
         raise ValueError("Insufficient permissions!")
 
-    return Member(user_id=session.user_id)
+    return Member(user_id=session.user.user_id)
 
 
 

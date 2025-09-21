@@ -24,7 +24,7 @@ dependencies = [
 
 [tool.uv.sources]
 "tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/lib" }
-"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/client", rev="6ca1bfffc6fe9cb7f2f6a34c6c7316ab2f62965d" }
+"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/client", rev="61731ef0f257ee8cb95a68624e04f231495353ce" }
 sqlalchemy = { git = "https://github.com/sqlalchemy/sqlalchemy.git", rev = "8bb8c1a6d6439380f682a57b92e3d1b0092250eb" }
 # sqlalchemy = { git = "https://github.com/tiptenbrink/sqlalchemy.git", rev = "13f569fd615485c50e07f211e37e45d749ccc40d" }
 

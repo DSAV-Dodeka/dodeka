@@ -72,7 +72,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.10.1" },
     { name = "sqlalchemy", git = "https://github.com/sqlalchemy/sqlalchemy.git?rev=8bb8c1a6d6439380f682a57b92e3d1b0092250eb" },
     { name = "starlette", specifier = "==0.47.3" },
-    { name = "tiauth-faroe-client", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient&rev=6ca1bfffc6fe9cb7f2f6a34c6c7316ab2f62965d" },
+    { name = "tiauth-faroe-client", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient&rev=61731ef0f257ee8cb95a68624e04f231495353ce" },
     { name = "tiauth-faroe-user-server", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Flib" },
 ]
 
@@ -563,7 +563,7 @@ wheels = [
 [[package]]
 name = "tiauth-faroe-client"
 version = "0.1.0"
-source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient&rev=6ca1bfffc6fe9cb7f2f6a34c6c7316ab2f62965d#6ca1bfffc6fe9cb7f2f6a34c6c7316ab2f62965d" }
+source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=py-user-server%2Fclient&rev=61731ef0f257ee8cb95a68624e04f231495353ce#61731ef0f257ee8cb95a68624e04f231495353ce" }
 
 [[package]]
 name = "tiauth-faroe-user-server"

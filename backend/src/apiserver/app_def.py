@@ -86,7 +86,7 @@ def add_routers(new_app: FastAPI) -> FastAPI:
     # admin_router.include_router(ranking.ranking_admin_router)
     # members_router.include_router(ranking.ranking_members_router)
 
-    # new_app.include_router(admin_router)
+    new_app.include_router(routers.admin)
     new_app.include_router(routers.members)
 
     return new_app

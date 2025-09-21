@@ -1,9 +1,11 @@
-from typing import Mapping, Any
-from fastapi import APIRouter, Request, Response
+from typing import Literal, Mapping, Any, Annotated
+from fastapi import APIRouter, Request, Response, Header
 from pydantic import BaseModel
 
 from tiauth_faroe.user_server import handle_request_sync
-from apiserver.app.dependencies import DbDep, JsonDep
+from apiserver.settings import settings
+from apiserver.app.dependencies import DbDep, JsonDep, SessionDep, TimeDep
+from apiserver.data.user import InvalidSession, SessionInfo
 from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.newuser import clear_all_users, clear_all_newusers, prepare_user_store
 
@@ -62,3 +64,29 @@ def prepare_user(db: DbDep, prepare: PrepareUserRequest) -> None:
     prepare_user_store(db, prepare.email, prepare.names)
 
     print(f"prepared {prepare.email}\n")
+
+class SetSession(BaseModel):
+    session_token: str
+
+max_session_age = 86400 * 365
+
+@router.post("/set_session/")
+def set_session(origin: Annotated[str, Header()], set: SetSession, response: Response):
+    if origin != settings.frontend_origin:
+        raise ValueError("Invalid origin!")
+    response.set_cookie("session_token", set.session_token, httponly=True, samesite='none', secure=True, path = "/", max_age=max_session_age)
+
+    return None
+
+
+class InvalidSessionResponse(BaseModel):
+    error: Literal["invalid_session"] | Literal["no_session"]
+
+@router.get("/session_info/")
+def session_info(session: SessionDep) -> SessionInfo | InvalidSessionResponse:
+    if session is None:
+        return InvalidSessionResponse(error="no_session")
+    if isinstance(session, InvalidSession):
+        return InvalidSessionResponse(error="invalid_session")
+
+    return session
