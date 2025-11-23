@@ -1,9 +1,7 @@
+import json
 from dataclasses import dataclass
-from typing import Union
 
-from .db import Db
-from .error import check_integrity_error
-from .model import NewUserTable, UserTable
+from hfree import EntryAlreadyExists, StorageConnection
 
 
 @dataclass
@@ -14,120 +12,104 @@ class NewUser:
     accepted: bool
 
 
-def add_new_user(db: Db, email: str, firstname: str, lastname: str):
+def _serialize_newuser(
+    email: str, firstname: str, lastname: str, accepted: bool
+) -> bytes:
+    """Serialize newuser data to bytes."""
+    data = {
+        "email": email,
+        "firstname": firstname,
+        "lastname": lastname,
+        "accepted": accepted,
+    }
+    return json.dumps(data).encode("utf-8")
+
+
+def _deserialize_newuser(data: bytes) -> dict:
+    """Deserialize newuser data from bytes."""
+    return json.loads(data.decode("utf-8"))
+
+
+def add_new_user(conn: StorageConnection, email: str, firstname: str, lastname: str):
     """
     Add a new user to the newuser table.
     Returns error if email already exists in either newuser or user table.
     """
+    # Check if email already exists in user table
+    user_data = conn.get("users", email)
+    if user_data is not None:
+        raise ValueError("User with e-mail already exists in user table.")
+
+    # Add to newuser table
     try:
-        with db.engine.begin() as conn:
-            # Check if email already exists in user table
-            user_check_stmt = text(f"""
-                SELECT COUNT(*) FROM {UserTable.NAME}
-                WHERE {UserTable.EMAIL} = :email
-            """)
-            user_result = conn.execute(user_check_stmt, {"email": email})
-            user_row = user_result.first()
-            user_count = user_row[0] if user_row is not None else 0
-
-            if user_count > 0:
-                raise ValueError("User with e-mail already exists in user table.")
-
-            # Insert new user into newuser table
-            insert_stmt = text(f"""
-                INSERT INTO {NewUserTable.NAME} (
-                    {NewUserTable.EMAIL}, {NewUserTable.FIRSTNAME},
-                    {NewUserTable.LASTNAME}, {NewUserTable.ACCEPTED}
-                ) VALUES (
-                    :email, :firstname, :lastname, :accepted
-                )
-            """)
-
-            conn.execute(
-                insert_stmt,
-                {
-                    "email": email,
-                    "firstname": firstname,
-                    "lastname": lastname,
-                    "accepted": 0,  # Default to not accepted
-                },
-            )
-
-    except IntegrityError as e:
-        if check_integrity_error(e, "newuser.email", "unique"):
-            raise ValueError("User with e-mail already exists in newuser table.")
+        data = _serialize_newuser(email, firstname, lastname, False)
+        # expires_at = 0 means no expiration
+        conn.add("newusers", email, data, expires_at=0)
+    except EntryAlreadyExists:
+        raise ValueError("User with e-mail already exists in newuser table.")
 
 
-def update_accepted_flag(db: Db, email: str, accepted: bool):
+def update_accepted_flag(conn: StorageConnection, email: str, accepted: bool):
     """
     Update the accepted flag for a user in the newuser table.
     Returns error if user not found.
     """
-    with db.engine.begin() as conn:
-        update_stmt = text(f"""
-            UPDATE {NewUserTable.NAME}
-            SET {NewUserTable.ACCEPTED} = :accepted
-            WHERE {NewUserTable.EMAIL} = :email
-        """)
+    result = conn.get("newusers", email)
+    if result is None:
+        raise ValueError("User with e-mail does not exist.")
 
-        result = conn.execute(
-            update_stmt,
-            {
-                "email": email,
-                "accepted": 1 if accepted else 0,
-            },
-        )
+    data_bytes, counter = result
+    user_data = _deserialize_newuser(data_bytes)
 
-        if result.rowcount == 0:
-            raise ValueError("User with e-mail does not exist.")
+    # Update the accepted flag
+    user_data["accepted"] = accepted
+    updated_data = json.dumps(user_data).encode("utf-8")
+
+    success = conn.update(
+        "newusers", email, updated_data, expires_at=0, counter=counter
+    )
+    if not success:
+        raise ValueError("Failed to update user (concurrent modification).")
 
 
-def list_new_users(db: Db) -> list[NewUser]:
-    with db.engine.connect() as conn:
-        select_stmt = text(f"""
-            SELECT {NewUserTable.EMAIL}, {NewUserTable.FIRSTNAME},
-                    {NewUserTable.LASTNAME}, {NewUserTable.ACCEPTED}
-            FROM {NewUserTable.NAME}
-        """)
-        result = conn.execute(select_stmt)
-
-        rows = result.all()
-
+def list_new_users(conn: StorageConnection) -> list[NewUser]:
+    """List all new users."""
+    keys = conn.list_keys("newusers")
     users = []
-    for row in rows:
-        users.append(
-            NewUser(
-                email=getattr(row, NewUserTable.EMAIL),
-                firstname=getattr(row, NewUserTable.FIRSTNAME),
-                lastname=getattr(row, NewUserTable.LASTNAME),
-                accepted=bool(getattr(row, NewUserTable.ACCEPTED)),
+
+    for key in keys:
+        result = conn.get("newusers", key)
+        if result is not None:
+            data_bytes, _ = result
+            user_data = _deserialize_newuser(data_bytes)
+            users.append(
+                NewUser(
+                    email=user_data["email"],
+                    firstname=user_data["firstname"],
+                    lastname=user_data["lastname"],
+                    accepted=user_data["accepted"],
+                )
             )
-        )
 
     return users
 
 
-def clear_all_users(db: Db):
-    with db.engine.begin() as conn:
-        delete_stmt = text(f"""
-            DELETE FROM {UserTable.NAME}
-        """)
-        conn.execute(delete_stmt)
+def clear_all_users(conn: StorageConnection):
+    """Clear all users from the users table."""
+    conn.clear("users")
 
 
-def clear_all_newusers(db: Db):
-    with db.engine.begin() as conn:
-        delete_stmt = text(f"""
-            DELETE FROM {NewUserTable.NAME}
-        """)
-        conn.execute(delete_stmt)
+def clear_all_newusers(conn: StorageConnection):
+    """Clear all new users from the newusers table."""
+    conn.clear("newusers")
 
 
-def prepare_user_store(db: Db, email: str, names: list[str]):
+def prepare_user_store(conn: StorageConnection, email: str, names: list[str]):
+    """Prepare a user entry in the newuser table with accepted=True."""
     # Validate names list length
-    if len(names) > 2:
+    if len(names) > 2:  # noqa: PLR2004
         raise ValueError("Only accepts two names.")
-    elif len(names) == 2:
+    elif len(names) == 2:  # noqa: PLR2004
         firstname = names[0]
         lastname = names[1]
     elif len(names) == 1:
@@ -140,26 +122,7 @@ def prepare_user_store(db: Db, email: str, names: list[str]):
         lastname = ""
 
     try:
-        with db.engine.begin() as conn:
-            insert_stmt = text(f"""
-                INSERT INTO {NewUserTable.NAME} (
-                    {NewUserTable.EMAIL}, {NewUserTable.FIRSTNAME},
-                    {NewUserTable.LASTNAME}, {NewUserTable.ACCEPTED}
-                ) VALUES (
-                    :email, :firstname, :lastname, :accepted
-                )
-            """)
-
-            conn.execute(
-                insert_stmt,
-                {
-                    "email": email,
-                    "firstname": firstname,
-                    "lastname": lastname,
-                    "accepted": 1,  # Set to accepted
-                },
-            )
-
-    except IntegrityError as e:
-        if check_integrity_error(e, "newuser.email", "unique"):
-            raise ValueError("User with e-mail already exists in newuser table.")
+        data = _serialize_newuser(email, firstname, lastname, True)
+        conn.add("newusers", email, data, expires_at=0)
+    except EntryAlreadyExists:
+        raise ValueError("User with e-mail already exists in newuser table.")

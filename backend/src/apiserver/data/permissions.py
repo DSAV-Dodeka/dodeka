@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 from typing import final
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
-from .model import UserTable
-from .db import Db
+from hfree import StorageConnection
+
 
 @final
 @dataclass(frozen=True)
@@ -12,15 +10,17 @@ class Permissions:
     MEMBER = "member"
     ADMIN = "admin"
 
+
 def allowed_permission(permission: str) -> bool:
-    return permission == Permissions.MEMBER or permission == Permissions.ADMIN
+    return permission in {Permissions.MEMBER, Permissions.ADMIN}
+
 
 def parse_permissions(timestamp: int, permissions: str) -> dict[str, int]:
-    perms_split = permissions.split(' ')
+    perms_split = permissions.split(" ")
     perms_dict: dict[str, int] = {}
     for perm in perms_split:
-        spl = perm.split(':')
-        if len(spl) != 2:
+        spl = perm.split(":")
+        if len(spl) != 2:  # noqa: PLR2004
             continue
         perm_name = spl[0]
         try:
@@ -37,57 +37,58 @@ def parse_permissions(timestamp: int, permissions: str) -> dict[str, int]:
 
 
 def serialize_permissions(permissions: dict[str, int]) -> str:
-    return " ".join([f"{perm_item[0]}:{perm_item[1]}" for perm_item in permissions.items()])
+    return " ".join(
+        [f"{perm_item[0]}:{perm_item[1]}" for perm_item in permissions.items()]
+    )
 
 
-def read_permissions(db: Db, timestamp: int, user_id: str) -> dict[str, int]:
+def read_permissions(
+    conn: StorageConnection, timestamp: int, user_id: str
+) -> dict[str, int]:
     """Read permissions string for a given user_id."""
-    try:
-        with db.engine.connect() as conn:
-            stmt = text(f"""
-                SELECT {UserTable.PERMISSIONS}
-                FROM {UserTable.NAME}
-                WHERE {UserTable.ID} = :user_id
-            """)
+    result = conn.get("users", f"{user_id}:permissions")
+    if result is None:
+        raise ValueError("User not found")
 
-            result = conn.execute(stmt, {"user_id": user_id})
-            row = result.first()
+    permissions_bytes, _ = result
+    permissions_str = permissions_bytes.decode("utf-8")
+    print(f"permissions={permissions_str}")
 
-            if row is None:
-                raise ValueError("User not found")
+    return parse_permissions(timestamp, permissions_str)
 
-            print(f"permissions={getattr(row, UserTable.PERMISSIONS)}")
-
-            return parse_permissions(timestamp, getattr(row, UserTable.PERMISSIONS))
-
-    except SQLAlchemyError:
-        raise ValueError("Database error occurred")
 
 year_time = 86400 * 365
 
 
-def add_permission(db: Db, now_timestamp: int, user_id: str, permission_name: str)  -> None:
+def add_permission(
+    conn: StorageConnection, now_timestamp: int, user_id: str, permission_name: str
+) -> None:
     """Add or update a permission for a user with the given timestamp."""
-    with db.engine.begin() as conn:
-        current_perms = read_permissions(db, now_timestamp, user_id)
+    # Get current permissions with counter
+    result = conn.get("users", f"{user_id}:permissions")
+    if result is None:
+        raise ValueError("User not found")
 
-        expires_timestamp = now_timestamp + year_time
+    permissions_bytes, counter = result
+    permissions_str = permissions_bytes.decode("utf-8")
 
-        # Update or add the new permission
-        new_perms_dict = current_perms | {permission_name: expires_timestamp}
+    # Read current permissions
+    current_perms = parse_permissions(now_timestamp, permissions_str)
 
-        new_perms = serialize_permissions(new_perms_dict)
+    expires_timestamp = now_timestamp + year_time
 
-        update_stmt = text(f"""
-            UPDATE {UserTable.NAME}
-            SET {UserTable.PERMISSIONS} = :permissions
-            WHERE {UserTable.ID} = :user_id
-        """)
+    # Update or add the new permission
+    new_perms_dict = current_perms | {permission_name: expires_timestamp}
+    new_perms = serialize_permissions(new_perms_dict)
 
-        result = conn.execute(update_stmt, {
-            "permissions": new_perms,
-            "user_id": user_id
-        })
+    # Update permissions key using hfree's native counter
+    success = conn.update(
+        "users",
+        f"{user_id}:permissions",
+        new_perms.encode("utf-8"),
+        expires_at=0,
+        counter=counter,
+    )
 
-        if result.rowcount == 0:
-            raise ValueError("User not found")
+    if not success:
+        raise ValueError("Failed to update permissions (concurrent modification)")

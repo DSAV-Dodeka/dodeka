@@ -1,5 +1,3 @@
-from apiserver.data.db import Db
-
 # # from apiserver.data.source import Source, get_kv, get_conn
 # # from apiserver.data.api import user
 # # from apiserver.data.api import key
@@ -17,7 +15,6 @@ from apiserver.data.db import Db
 # ops = schema.OPS
 
 __all__ = [
-    "Db"
     # "Source",
     # "birthday",
     # "classifications",

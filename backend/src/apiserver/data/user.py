@@ -1,13 +1,15 @@
-from pydantic import BaseModel
-from sqlalchemy import text
+import json
+from dataclasses import dataclass
+
+from hfree import StorageConnection
 from tiauth_faroe.client import ActionErrorResult
+
 from apiserver.data.client import AuthClient
-from starlette.concurrency import run_in_threadpool
-from apiserver.data import Db
-from apiserver.data.model import UserTable
 from apiserver.data.permissions import parse_permissions
 
-class SessionUser(BaseModel):
+
+@dataclass
+class SessionUser:
     user_id: str
     email: str
     firstname: str
@@ -15,52 +17,71 @@ class SessionUser(BaseModel):
     permissions: set[str]
 
 
-def get_session_user(db: Db, timestamp: int, user_id: str) -> SessionUser|None:
+def get_session_user(
+    conn: StorageConnection, timestamp: int, user_id: str
+) -> SessionUser | None:
     """Get member information for a given user_id."""
-    with db.engine.connect() as conn:
-        stmt = text(f"""
-            SELECT {UserTable.EMAIL}, {UserTable.FIRSTNAME}, {UserTable.LASTNAME}, {UserTable.PERMISSIONS}
-            FROM {UserTable.NAME}
-            WHERE {UserTable.ID} = :user_id
-        """)
+    # Read user data from separate keys
+    profile_result = conn.get("users", f"{user_id}:profile")
+    email_result = conn.get("users", f"{user_id}:email")
+    permissions_result = conn.get("users", f"{user_id}:permissions")
 
-        result = conn.execute(stmt, {"user_id": user_id})
-        row = result.first()
+    if profile_result is None or email_result is None:
+        return None
 
-        if row is None:
-            return None
+    # Parse profile
+    profile_bytes, _ = profile_result
+    profile_data = json.loads(profile_bytes.decode("utf-8"))
+    firstname = profile_data["firstname"]
+    lastname = profile_data["lastname"]
 
-        permissions_str = getattr(row, UserTable.PERMISSIONS)
-        permissions = parse_permissions(timestamp, permissions_str)
+    # Parse email
+    email_bytes, _ = email_result
+    email = email_bytes.decode("utf-8")
 
-        return SessionUser(
-            user_id=user_id,
-            email=getattr(row, UserTable.EMAIL),
-            firstname=getattr(row, UserTable.FIRSTNAME),
-            lastname=getattr(row, UserTable.LASTNAME),
-            permissions=set(permissions.keys())
-        )
+    # Parse permissions
+    permissions_bytes, _ = permissions_result if permissions_result else (b"", 0)
+    permissions_str = permissions_bytes.decode("utf-8")
+    permissions = parse_permissions(timestamp, permissions_str)
 
-class SessionInfo(BaseModel):
+    return SessionUser(
+        user_id=user_id,
+        email=email,
+        firstname=firstname,
+        lastname=lastname,
+        permissions=set(permissions.keys()),
+    )
+
+
+@dataclass
+class SessionInfo:
     user: SessionUser
     created_at: int
     expires_at: int | None
 
+
 class InvalidSession:
     pass
 
-# Async version for use in dependencies
-async def get_session(db: Db, client: AuthClient, timestamp: int, session_token: str) -> SessionInfo | InvalidSession:
+
+def get_session(
+    conn: StorageConnection, client: AuthClient, timestamp: int, session_token: str
+) -> SessionInfo | InvalidSession:
     """Get session info and return non-expired permissions set."""
-    session_result = await client.get_session(session_token)
+    session_result = client.get_session(session_token)
 
     if isinstance(session_result, ActionErrorResult):
-        if session_result.error_code != 'invalid_session_token':
-            raise ValueError(f"Error getting session from auth server (invocation {session_result.action_invocation_id}): {session_result.error_code}.")
+        if session_result.error_code != "invalid_session_token":
+            invocation_id = session_result.action_invocation_id
+            error_code = session_result.error_code
+            raise ValueError(
+                f"Error getting session from auth server "
+                f"(invocation {invocation_id}): {error_code}."
+            )
         return InvalidSession()
 
     user_id = session_result.session.user_id
-    user = await run_in_threadpool(get_session_user, db, timestamp, user_id)
+    user = get_session_user(conn, timestamp, user_id)
 
     if user is None:
         return InvalidSession()
@@ -68,5 +89,5 @@ async def get_session(db: Db, client: AuthClient, timestamp: int, session_token:
     return SessionInfo(
         user=user,
         created_at=session_result.session.created_at,
-        expires_at=session_result.session.expires_at
+        expires_at=session_result.session.expires_at,
     )

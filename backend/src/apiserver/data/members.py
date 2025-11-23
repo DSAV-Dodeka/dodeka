@@ -1,39 +1,37 @@
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
-from pydantic import BaseModel
-from .model import UserTable
-from .db import Db
+import json
+from dataclasses import dataclass
+
+from hfree import StorageConnection
 
 
-class MemberData(BaseModel):
+@dataclass
+class MemberData:
     user_id: str
     email: str
     firstname: str
     lastname: str
 
 
-def get_member(db: Db, user_id: str) -> MemberData:
+def get_member(conn: StorageConnection, user_id: str) -> MemberData:
     """Get member information for a given user_id."""
-    try:
-        with db.engine.connect() as conn:
-            stmt = text(f"""
-                SELECT {UserTable.EMAIL}, {UserTable.FIRSTNAME}, {UserTable.LASTNAME}
-                FROM {UserTable.NAME}
-                WHERE {UserTable.ID} = :user_id
-            """)
+    # Read user data from separate keys
+    profile_result = conn.get("users", f"{user_id}:profile")
+    email_result = conn.get("users", f"{user_id}:email")
 
-            result = conn.execute(stmt, {"user_id": user_id})
-            row = result.first()
+    if profile_result is None or email_result is None:
+        raise ValueError("User not found")
 
-            if row is None:
-                raise ValueError("User not found")
+    # Parse profile
+    profile_bytes, _ = profile_result
+    profile_data = json.loads(profile_bytes.decode("utf-8"))
 
-            return MemberData(
-                user_id=user_id,
-                email=getattr(row, UserTable.EMAIL),
-                firstname=getattr(row, UserTable.FIRSTNAME),
-                lastname=getattr(row, UserTable.LASTNAME)
-            )
+    # Parse email
+    email_bytes, _ = email_result
+    email = email_bytes.decode("utf-8")
 
-    except SQLAlchemyError:
-        raise ValueError("Database error occurred")
+    return MemberData(
+        user_id=user_id,
+        email=email,
+        firstname=profile_data["firstname"],
+        lastname=profile_data["lastname"],
+    )
