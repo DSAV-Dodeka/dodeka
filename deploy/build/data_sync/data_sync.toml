@@ -1,8 +1,0 @@
-# confspawn recipe file
-
-config = "config.toml"
-
-[[sources]]
-source = "build/data_sync"
-target = "use/data_sync"
-

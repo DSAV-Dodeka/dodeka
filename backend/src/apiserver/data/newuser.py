@@ -1,13 +1,13 @@
+from dataclasses import dataclass
 from typing import Union
-import sqlalchemy as sqla
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from pydantic import BaseModel
-from .model import UserTable, NewUserTable
+
 from .db import Db
 from .error import check_integrity_error
+from .model import NewUserTable, UserTable
 
-class NewUser(BaseModel):
+
+@dataclass
+class NewUser:
     email: str
     firstname: str
     lastname: str
@@ -43,15 +43,18 @@ def add_new_user(db: Db, email: str, firstname: str, lastname: str):
                 )
             """)
 
-            conn.execute(insert_stmt, {
-                "email": email,
-                "firstname": firstname,
-                "lastname": lastname,
-                "accepted": 0,  # Default to not accepted
-            })
+            conn.execute(
+                insert_stmt,
+                {
+                    "email": email,
+                    "firstname": firstname,
+                    "lastname": lastname,
+                    "accepted": 0,  # Default to not accepted
+                },
+            )
 
     except IntegrityError as e:
-        if check_integrity_error(e, 'newuser.email', 'unique'):
+        if check_integrity_error(e, "newuser.email", "unique"):
             raise ValueError("User with e-mail already exists in newuser table.")
 
 
@@ -67,10 +70,13 @@ def update_accepted_flag(db: Db, email: str, accepted: bool):
             WHERE {NewUserTable.EMAIL} = :email
         """)
 
-        result = conn.execute(update_stmt, {
-            "email": email,
-            "accepted": 1 if accepted else 0,
-        })
+        result = conn.execute(
+            update_stmt,
+            {
+                "email": email,
+                "accepted": 1 if accepted else 0,
+            },
+        )
 
         if result.rowcount == 0:
             raise ValueError("User with e-mail does not exist.")
@@ -89,12 +95,14 @@ def list_new_users(db: Db) -> list[NewUser]:
 
     users = []
     for row in rows:
-        users.append(NewUser(
-            email=getattr(row, NewUserTable.EMAIL),
-            firstname=getattr(row, NewUserTable.FIRSTNAME),
-            lastname=getattr(row, NewUserTable.LASTNAME),
-            accepted=bool(getattr(row, NewUserTable.ACCEPTED)),
-        ))
+        users.append(
+            NewUser(
+                email=getattr(row, NewUserTable.EMAIL),
+                firstname=getattr(row, NewUserTable.FIRSTNAME),
+                lastname=getattr(row, NewUserTable.LASTNAME),
+                accepted=bool(getattr(row, NewUserTable.ACCEPTED)),
+            )
+        )
 
     return users
 
@@ -105,7 +113,6 @@ def clear_all_users(db: Db):
             DELETE FROM {UserTable.NAME}
         """)
         conn.execute(delete_stmt)
-
 
 
 def clear_all_newusers(db: Db):
@@ -128,7 +135,7 @@ def prepare_user_store(db: Db, email: str, names: list[str]):
         lastname = ""
     else:
         # If no names provided, use email prefix as firstname
-        email_prefix = email.split('@')[0]
+        email_prefix = email.split("@")[0]
         firstname = email_prefix
         lastname = ""
 
@@ -143,13 +150,16 @@ def prepare_user_store(db: Db, email: str, names: list[str]):
                 )
             """)
 
-            conn.execute(insert_stmt, {
-                "email": email,
-                "firstname": firstname,
-                "lastname": lastname,
-                "accepted": 1,  # Set to accepted
-            })
+            conn.execute(
+                insert_stmt,
+                {
+                    "email": email,
+                    "firstname": firstname,
+                    "lastname": lastname,
+                    "accepted": 1,  # Set to accepted
+                },
+            )
 
     except IntegrityError as e:
-        if check_integrity_error(e, 'newuser.email', 'unique'):
+        if check_integrity_error(e, "newuser.email", "unique"):
             raise ValueError("User with e-mail already exists in newuser table.")

@@ -1,8 +1,0 @@
-{
-  "DB_USER": "{{ db.db_user }}",
-  "DB_PASS": "postpost",
-  "DB_HOST": "{{ db.host_host }}",
-  "DB_PORT": {{ db.host_port }},
-  "DB_NAME": "{{ db.db_name }}",
-  "DB_NAME_ADMIN": "{{ db.db_name_admin }}"
-}
