@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 
-from hfree import StorageConnection
+from hfree import Storage
 
 
 @dataclass
@@ -12,11 +12,11 @@ class MemberData:
     lastname: str
 
 
-def get_member(conn: StorageConnection, user_id: str) -> MemberData:
+def get_member(store: Storage, user_id: str) -> MemberData:
     """Get member information for a given user_id."""
     # Read user data from separate keys
-    profile_result = conn.get("users", f"{user_id}:profile")
-    email_result = conn.get("users", f"{user_id}:email")
+    profile_result = store.get("users", f"{user_id}:profile")
+    email_result = store.get("users", f"{user_id}:email")
 
     if profile_result is None or email_result is None:
         raise ValueError("User not found")

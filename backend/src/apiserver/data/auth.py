@@ -1,9 +1,8 @@
 import json
 import logging
-from collections.abc import Callable
 from typing import override
 
-from hfree import EntryAlreadyExists, StorageConnection
+from hfree import Storage
 from tiauth_faroe.user_server import (
     ActionError,
     CreateUserEffect,
@@ -21,86 +20,19 @@ from tiauth_faroe.user_server import (
 
 logger = logging.getLogger("apiserver.auth")
 
-MAX_RETRIES = 10
 
+def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
+    email = effect.email_address
 
-def get_and_update_with_retry(
-    conn: StorageConnection,
-    namespace: str,
-    key: str,
-    update_fn: Callable[[bytes], bytes],
-    expires_at: int = 0,
-) -> bytes | None:
-    """
-    Get a value and update it atomically with retry logic.
+    user_id_result = store.get("users_by_email", email)
+    if user_id_result is not None:
+        logger.info(f"User with email {email} already exists")
+        return ActionError("email_address_already_used")
 
-    Args:
-        conn: Storage connection
-        namespace: Namespace to operate in
-        key: Key to update
-        update_fn: Function that takes current value (bytes) and returns new
-            value (bytes)
-        max_retries: Maximum retry attempts (default 10)
-        expires_at: Expiration timestamp
-
-    Returns:
-        The current value (before update) if successful, None if failed
-    """
-    for attempt in range(MAX_RETRIES):
-        result = conn.get(namespace, key)
-        if result is None:
-            logger.warning(f"Key {namespace}:{key} not found during get_and_update")
-            return None
-
-        current_bytes, counter = result
-        new_bytes = update_fn(current_bytes)
-
-        success = conn.update(
-            namespace, key, new_bytes, expires_at=expires_at, counter=counter
-        )
-        if success:
-            return current_bytes
-
-        if attempt < MAX_RETRIES - 1:
-            logger.debug(
-                f"Update failed for {namespace}:{key}, retry {attempt + 1}/"
-                f"{MAX_RETRIES}"
-            )
-
-    logger.error(f"Failed to update {namespace}:{key} after {MAX_RETRIES} attempts")
-    return None
-
-
-def add_or_continue(
-    conn: StorageConnection, namespace: str, key: str, value: bytes, expires_at: int = 0
-) -> bool:
-    """
-    Add a key-value pair or just do nothing if it already exists.
-    """
-    try:
-        conn.add(namespace, key, value, expires_at=expires_at)
-        return True
-    except EntryAlreadyExists:
-        return False
-
-
-def create_user(conn: StorageConnection, effect: CreateUserEffect) -> EffectResult:
-    # Query newuser table to get user information and check if accepted
-    newuser_result = conn.get("newusers", effect.email_address)
+    # We only allow users that have been accepted through the newusers flow
+    newuser_result = store.get("newusers", email)
     if newuser_result is None:
-        # Check if user already exists in the email index
-        user_id_result = conn.get("users_by_email", effect.email_address)
-        if user_id_result is not None:
-            logger.info(
-                f"User with email={effect.email_address} already exists. "
-                "Cannot create user."
-            )
-            return ActionError("email_address_already_used")
-
-        logger.info(
-            f"Could not find user in newusers table with email={effect.email_address}. "
-            "Cannot create user."
-        )
+        logger.info(f"Could not find user in newusers table with email={email}")
         return ActionError("user_not_found")
 
     newuser_bytes, _ = newuser_result
@@ -111,82 +43,56 @@ def create_user(conn: StorageConnection, effect: CreateUserEffect) -> EffectResu
     accepted = newuser_data["accepted"]
 
     if not accepted:
-        logger.info(
-            f"User with name={firstname} {lastname} is not yet accepted. "
-            "Cannot create user."
-        )
+        logger.info(f"User {firstname} {lastname} is not yet accepted")
         return ActionError("user_not_accepted")
 
-    name_id = f"{firstname.lower()}_{lastname.lower()}"
-
-    user_id_result = conn.get("users_by_email", effect.email_address)
-    if user_id_result is None:
-        # Get next int_id using hfree's native counter with retry logic
-        counter_result = conn.get("users", "_id_counter")
-        if counter_result is None:
-            try:
-                conn.add("users", "_id_counter", b"0", expires_at=0)
-            except EntryAlreadyExists:
-                logger.warning(
-                    "Attempted to create user counter when it already exists. "
-                    "Continuing."
-                )
-
-        # Atomically get current counter and increment it
-        counter_bytes = get_and_update_with_retry(
-            conn,
-            "users",
-            "_id_counter",
-            lambda current: str(int(current.decode("utf-8")) + 1).encode("utf-8"),
-        )
-        if counter_bytes is None:
-            logger.error("Failed to increment user ID counter after retries")
-            return ActionError("unexpected_error")
-
-        int_id = int(counter_bytes.decode("utf-8"))
-        user_id = f"{int_id}_{name_id}"
-
-        try:
-            conn.add(
-                "users_by_email",
-                effect.email_address,
-                user_id.encode("utf-8"),
-                expires_at=0,
-            )
-        except EntryAlreadyExists:
-            return ActionError("unexpected_error")
+    # We store a global counter that tracks the max user_id
+    counter_result = store.get("metadata", "user_id_counter")
+    if counter_result is None:
+        store.add("metadata", "user_id_counter", b"0", expires_at=0)
+        int_id = 0
+        counter = 0
     else:
-        user_id_bytes, _ = user_id_result
-        user_id = user_id_bytes.decode("utf-8")
+        counter_bytes, counter = counter_result
+        int_id = int(counter_bytes.decode("utf-8"))
 
-    password_hash_hex = effect.password_hash.hex()
-    password_salt_hex = effect.password_salt.hex()
+    # Increment counter for next user
+    new_user_counter = str(int_id + 1).encode("utf-8")
+    store.update(
+        "metadata", "user_id_counter", new_user_counter, expires_at=0, counter=counter
+    )
 
+    # We construct a user_id from a unique integer and first name + last name
+    name_id = f"{firstname.lower()}_{lastname.lower()}"
+    user_id = f"{int_id}_{name_id}"
+
+    # Construct the rest of the user data
     profile_data = {"firstname": firstname, "lastname": lastname}
     profile_bytes = json.dumps(profile_data).encode("utf-8")
-
     password_data = {
-        "password_hash": password_hash_hex,
-        "password_salt": password_salt_hex,
+        "password_hash": effect.password_hash.hex(),
+        "password_salt": effect.password_salt.hex(),
         "password_hash_algorithm_id": effect.password_hash_algorithm_id,
     }
     password_bytes = json.dumps(password_data).encode("utf-8")
 
-    # Add all user keys (or continue if they already exist)
-    add_or_continue(conn, "users", f"{user_id}:profile", profile_bytes)
-    email_bytes = effect.email_address.encode("utf-8")
-    add_or_continue(conn, "users", f"{user_id}:email", email_bytes)
-    add_or_continue(conn, "users", f"{user_id}:password", password_bytes)
-    add_or_continue(conn, "users", f"{user_id}:disabled", b"0")
-    add_or_continue(conn, "users", f"{user_id}:sessions_counter", b"0")
-    add_or_continue(conn, "users", f"{user_id}:permissions", b"")
+    # Add all user keys
+    store.add("users", f"{user_id}:profile", profile_bytes, expires_at=0)
+    store.add("users", f"{user_id}:email", email.encode("utf-8"), expires_at=0)
+    store.add("users", f"{user_id}:password", password_bytes, expires_at=0)
+    store.add("users", f"{user_id}:disabled", b"0", expires_at=0)
+    store.add("users", f"{user_id}:sessions_counter", b"0", expires_at=0)
+    store.add("users", f"{user_id}:permissions", b"", expires_at=0)
+    # This is used as an index to find a user_id by email
+    store.add("users_by_email", email, user_id.encode("utf-8"), expires_at=0)
 
-    # Remove the newuser entry after successful user creation
-    conn.delete("newusers", effect.email_address)
+    # Remove newuser entry
+    store.delete("newusers", email)
 
+    logger.info(f"Created user {user_id} with email {email}")
     return User(
         id=user_id,
-        email_address=effect.email_address,
+        email_address=email,
         password_hash=effect.password_hash,
         password_hash_algorithm_id=effect.password_hash_algorithm_id,
         password_salt=effect.password_salt,
@@ -199,44 +105,55 @@ def create_user(conn: StorageConnection, effect: CreateUserEffect) -> EffectResu
     )
 
 
-def get_user(conn: StorageConnection, effect: GetUserEffect) -> EffectResult:
+def get_user(store: Storage, effect: GetUserEffect) -> EffectResult:
     user_id = effect.user_id
 
     # Read all user data from separate keys
-    profile_result = conn.get("users", f"{user_id}:profile")
-    email_result = conn.get("users", f"{user_id}:email")
-    password_result = conn.get("users", f"{user_id}:password")
-    disabled_result = conn.get("users", f"{user_id}:disabled")
-    sessions_result = conn.get("users", f"{user_id}:sessions_counter")
+    profile_result = store.get("users", f"{user_id}:profile")
+    email_result = store.get("users", f"{user_id}:email")
+    password_result = store.get("users", f"{user_id}:password")
+    disabled_result = store.get("users", f"{user_id}:disabled")
+    sessions_result = store.get("users", f"{user_id}:sessions_counter")
+
+    # Assert consistency: profile, email, and password must all exist together
+    # or not at all
+    all_none = (
+        (profile_result is None) == (email_result is None) == (password_result is None)
+    )
+    assert all_none, (
+        f"Inconsistent user data for {user_id}: "
+        f"profile={profile_result is not None}, "
+        f"email={email_result is not None}, "
+        f"password={password_result is not None}"
+    )
 
     # Check if user exists
-    if profile_result is None or email_result is None or password_result is None:
+    if profile_result is None:
+        logger.info(f"User {user_id} not found")
         return ActionError("user_not_found")
 
-    # Parse profile
+    # At this point, due to the consistency assertion above,
+    # email_result and password_result must also be not None
+    assert email_result is not None
+    assert password_result is not None
+
+    # Now we parse and get all of the data
     profile_bytes, _ = profile_result
     profile_data = json.loads(profile_bytes.decode("utf-8"))
     firstname = profile_data["firstname"]
     lastname = profile_data["lastname"]
-
-    # Parse email
     email_bytes, email_counter = email_result
     email = email_bytes.decode("utf-8")
-
-    # Parse password data
     password_bytes, password_counter = password_result
     password_data = json.loads(password_bytes.decode("utf-8"))
     password_hash = bytes.fromhex(password_data["password_hash"])
     password_salt = bytes.fromhex(password_data["password_salt"])
     password_hash_algorithm_id = password_data["password_hash_algorithm_id"]
-
-    # Parse disabled
     disabled_bytes, disabled_counter = disabled_result if disabled_result else (b"0", 0)
     disabled = int(disabled_bytes.decode("utf-8")) != 0
-
-    # Parse sessions counter
     _, sessions_counter = sessions_result if sessions_result else (b"0", 0)
 
+    logger.info(f"Retrieved user {user_id}")
     return User(
         id=user_id,
         email_address=email,
@@ -253,19 +170,19 @@ def get_user(conn: StorageConnection, effect: GetUserEffect) -> EffectResult:
 
 
 def get_user_by_email_address(
-    conn: StorageConnection, effect: GetUserByEmailAddressEffect
+    store: Storage, effect: GetUserByEmailAddressEffect
 ) -> EffectResult:
-    # Look up user_id from email index
-    email_index_result = conn.get("users_by_email", effect.email_address)
+    email_index_result = store.get("users_by_email", effect.email_address)
     if email_index_result is None:
+        logger.info(f"User with email {effect.email_address} not found")
         return ActionError("user_not_found")
 
     user_id_bytes, _ = email_index_result
     user_id = user_id_bytes.decode("utf-8")
 
-    # Use get_user to fetch the full user data
+    logger.info(f"Found user_id {user_id} for email {effect.email_address}")
     return get_user(
-        conn,
+        store,
         GetUserEffect(
             action_invocation_id=effect.action_invocation_id, user_id=user_id
         ),
@@ -273,32 +190,35 @@ def get_user_by_email_address(
 
 
 def update_user_email_address(
-    conn: StorageConnection, effect: UpdateUserEmailAddressEffect
+    store: Storage, effect: UpdateUserEmailAddressEffect
 ) -> EffectResult:
+    """Update user email address. Runs atomically."""
     user_id = effect.user_id
+    new_email = effect.email_address
 
-    # Get current email to delete from index later
-    email_result = conn.get("users", f"{user_id}:email")
-    if email_result is None:
+    # Get current email
+    old_email_result = store.get("users", f"{user_id}:email")
+    if old_email_result is None:
+        logger.info(f"User {user_id} not found for email update")
         return ActionError("user_not_found")
 
-    old_email_bytes, _ = email_result
+    old_email_bytes, _ = old_email_result
     old_email = old_email_bytes.decode("utf-8")
 
-    # Update email index first (add new, remove old)
-    try:
-        conn.add(
-            "users_by_email",
-            effect.email_address,
-            user_id.encode("utf-8"),
-            expires_at=0,
-        )
-    except EntryAlreadyExists:
+    # Check if already the same
+    if old_email == new_email:
+        logger.info(f"Email already set to {new_email} for user {user_id}")
+        return None
+
+    # Check if new email already in use
+    new_email_check = store.get("users_by_email", new_email)
+    if new_email_check is not None:
+        logger.info(f"Email {new_email} already in use")
         return ActionError("email_address_already_used")
 
-    # Update email key with counter check (no retry, single attempt)
-    new_email_bytes = effect.email_address.encode("utf-8")
-    success = conn.update(
+    # Update email (assert_updated=True by default - will assert on counter mismatch)
+    new_email_bytes = new_email.encode("utf-8")
+    store.update(
         "users",
         f"{user_id}:email",
         new_email_bytes,
@@ -306,34 +226,29 @@ def update_user_email_address(
         counter=effect.user_email_address_counter,
     )
 
-    if not success:
-        # Clean up new email index
-        conn.delete("users_by_email", effect.email_address)
-        logger.debug(f"Failed to update email for user {user_id} - counter mismatch")
-        return ActionError("user_not_found")
+    # Update email index
+    store.add("users_by_email", new_email, user_id.encode("utf-8"), expires_at=0)
+    store.delete("users_by_email", old_email)
 
-    # Remove old email index
-    conn.delete("users_by_email", old_email)
-
+    logger.info(f"Updated email for user {user_id} from {old_email} to {new_email}")
     return None
 
 
 def update_user_password_hash(
-    conn: StorageConnection, effect: UpdateUserPasswordHashEffect
+    store: Storage, effect: UpdateUserPasswordHashEffect
 ) -> EffectResult:
+    """Update user password hash."""
     user_id = effect.user_id
 
-    password_hash_hex = effect.password_hash.hex()
-    password_salt_hex = effect.password_salt.hex()
     password_data = {
-        "password_hash": password_hash_hex,
-        "password_salt": password_salt_hex,
+        "password_hash": effect.password_hash.hex(),
+        "password_salt": effect.password_salt.hex(),
         "password_hash_algorithm_id": effect.password_hash_algorithm_id,
     }
     new_password_bytes = json.dumps(password_data).encode("utf-8")
 
-    # Update password with counter check (no retry, single attempt)
-    success = conn.update(
+    # Update password (assert_updated=True by default - will assert on counter mismatch)
+    store.update(
         "users",
         f"{user_id}:password",
         new_password_bytes,
@@ -341,31 +256,28 @@ def update_user_password_hash(
         counter=effect.user_password_hash_counter,
     )
 
-    if not success:
-        logger.debug(
-            f"Failed to update password hash for user {user_id} - counter mismatch"
-        )
-        return ActionError("user_not_found")
-
+    logger.info(f"Updated password hash for user {user_id}")
     return None
 
 
 def increment_user_sessions_counter(
-    conn: StorageConnection, effect: IncrementUserSessionsCounterEffect
+    store: Storage, effect: IncrementUserSessionsCounterEffect
 ) -> EffectResult:
+    """Increment user sessions counter."""
     user_id = effect.user_id
 
     # Get current sessions counter value
-    sessions_result = conn.get("users", f"{user_id}:sessions_counter")
+    sessions_result = store.get("users", f"{user_id}:sessions_counter")
     if sessions_result is None:
+        logger.info(f"User {user_id} not found for sessions counter increment")
         return ActionError("user_not_found")
 
     sessions_bytes, _ = sessions_result
     current_count = int(sessions_bytes.decode("utf-8"))
 
-    # Increment sessions counter with counter check (no retry, single attempt)
+    # Increment sessions counter (assert_updated=True by default)
     new_count_bytes = str(current_count + 1).encode("utf-8")
-    success = conn.update(
+    store.update(
         "users",
         f"{user_id}:sessions_counter",
         new_count_bytes,
@@ -373,63 +285,64 @@ def increment_user_sessions_counter(
         counter=effect.user_sessions_counter,
     )
 
-    if not success:
-        logger.debug(
-            f"Failed to increment sessions counter for user {user_id} - "
-            "counter mismatch"
-        )
-        return ActionError("user_not_found")
-
+    logger.info(
+        f"Incremented sessions counter for user {user_id} to {current_count + 1}"
+    )
     return None
 
 
-def delete_user(conn: StorageConnection, effect: DeleteUserEffect) -> EffectResult:
+def delete_user(store: Storage, effect: DeleteUserEffect) -> EffectResult:
+    """Delete a user."""
     user_id = effect.user_id
 
     # Get email to delete from index
-    email_result = conn.get("users", f"{user_id}:email")
+    email_result = store.get("users", f"{user_id}:email")
     if email_result is None:
+        logger.info(f"User {user_id} not found for deletion")
         return ActionError("user_not_found")
 
     email_bytes, _ = email_result
     email = email_bytes.decode("utf-8")
 
     # Delete all user keys
-    conn.delete("users", f"{user_id}:profile")
-    conn.delete("users", f"{user_id}:email")
-    conn.delete("users", f"{user_id}:password")
-    conn.delete("users", f"{user_id}:disabled")
-    conn.delete("users", f"{user_id}:sessions_counter")
-    conn.delete("users", f"{user_id}:permissions")
+    store.delete("users", f"{user_id}:profile")
+    store.delete("users", f"{user_id}:password")
+    store.delete("users", f"{user_id}:disabled")
+    store.delete("users", f"{user_id}:sessions_counter")
+    store.delete("users", f"{user_id}:permissions")
+    store.delete("users_by_email", email)
+    store.delete("users", f"{user_id}:email")
 
-    # Delete email index
-    conn.delete("users_by_email", email)
-
+    logger.info(f"Deleted user {user_id} with email {email}")
     return None
 
 
 class SqliteSyncServer(SyncServer):
-    conn: StorageConnection
+    """Sync server that executes effects using hfree Storage."""
 
-    def __init__(self, conn: StorageConnection):
-        self.conn = conn
+    store: Storage
+
+    def __init__(self, store: Storage):
+        self.store = store
 
     @override
     def execute_effect(self, effect: Effect) -> EffectResult:  # noqa: PLR0911
-        print(f"effect:\n{effect}\n")
+        """Execute an effect atomically."""
+        logger.info(f"Executing effect: {type(effect).__name__}")
+
         if isinstance(effect, CreateUserEffect):
-            return create_user(self.conn, effect)
+            return create_user(self.store, effect)
         elif isinstance(effect, GetUserEffect):
-            return get_user(self.conn, effect)
+            return get_user(self.store, effect)
         elif isinstance(effect, GetUserByEmailAddressEffect):
-            return get_user_by_email_address(self.conn, effect)
+            return get_user_by_email_address(self.store, effect)
         elif isinstance(effect, UpdateUserEmailAddressEffect):
-            return update_user_email_address(self.conn, effect)
+            return update_user_email_address(self.store, effect)
         elif isinstance(effect, UpdateUserPasswordHashEffect):
-            return update_user_password_hash(self.conn, effect)
+            return update_user_password_hash(self.store, effect)
         elif isinstance(effect, IncrementUserSessionsCounterEffect):
-            return increment_user_sessions_counter(self.conn, effect)
+            return increment_user_sessions_counter(self.store, effect)
         elif isinstance(effect, DeleteUserEffect):
-            return delete_user(self.conn, effect)
+            return delete_user(self.store, effect)
         else:
             raise ValueError(f"Unknown effect type: {type(effect)}")

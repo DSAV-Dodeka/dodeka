@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import final
 
-from hfree import StorageConnection
+from hfree import Storage
 
 
 @final
@@ -42,11 +42,9 @@ def serialize_permissions(permissions: dict[str, int]) -> str:
     )
 
 
-def read_permissions(
-    conn: StorageConnection, timestamp: int, user_id: str
-) -> dict[str, int]:
+def read_permissions(store: Storage, timestamp: int, user_id: str) -> dict[str, int]:
     """Read permissions string for a given user_id."""
-    result = conn.get("users", f"{user_id}:permissions")
+    result = store.get("users", f"{user_id}:permissions")
     if result is None:
         raise ValueError("User not found")
 
@@ -61,11 +59,11 @@ year_time = 86400 * 365
 
 
 def add_permission(
-    conn: StorageConnection, now_timestamp: int, user_id: str, permission_name: str
+    store: Storage, now_timestamp: int, user_id: str, permission_name: str
 ) -> None:
     """Add or update a permission for a user with the given timestamp."""
     # Get current permissions with counter
-    result = conn.get("users", f"{user_id}:permissions")
+    result = store.get("users", f"{user_id}:permissions")
     if result is None:
         raise ValueError("User not found")
 
@@ -82,13 +80,11 @@ def add_permission(
     new_perms = serialize_permissions(new_perms_dict)
 
     # Update permissions key using hfree's native counter
-    success = conn.update(
+    # assert_updated=True by default - will assert on concurrent modification
+    store.update(
         "users",
         f"{user_id}:permissions",
         new_perms.encode("utf-8"),
         expires_at=0,
         counter=counter,
     )
-
-    if not success:
-        raise ValueError("Failed to update permissions (concurrent modification)")

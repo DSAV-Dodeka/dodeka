@@ -1,124 +1,86 @@
+import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, FilePath
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from apiserver.resources import res_path
 
-__all__ = ["settings", "Settings"]
+__all__ = ["Settings", "settings"]
 
 
-# https://docs.pydantic.dev/latest/concepts/pydantic_settings
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict()
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Settings:
+    """Application settings loaded from TOML configuration file."""
 
     db_file: Path = Path("./db.sqlite")
-
     auth_server_url: str = "http://localhost:3777"
-
     frontend_origin: str = "https://dsavdodeka.nl"
 
-    # APISERVER_ENV: str
 
-    # # All 'envless' PASSWORDS MUST BE DUMMY
+def find_config_file() -> Path | None:
+    """
+    Searches in order:
+    1. config.toml in resources folder
+    2. devenv.toml.local
+    3. devenv.toml
+    """
+    candidates = [
+        res_path.joinpath("config.toml"),
+        Path("./devenv.toml.local"),
+        Path("./devenv.toml"),
+    ]
 
-    # # 'envless' MUST BE DUMMY
-    # # RECOMMENDED TO LOAD AS ENVIRON
-    # KEY_PASS: str
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
 
-    # MAIL_ENABLED: bool
-
-    # # 'envless' MUST BE DUMMY
-    # # RECOMMENDED TO LOAD AS ENVIRON
-    # MAIL_PASS: str
-
-    # SMTP_SERVER: str
-    # SMTP_PORT: int
-
-    # RECREATE: str = "no"
-
-    # DB_NAME_ADMIN: str
-
-
-# def get_config_path(config_path_name: Optional[os.PathLike[Any]] = None) -> Path:
-#     """Gets path to load onfig from. Environment variable APISERVER_CONFIG takes precedence.
-
-#     Args:
-#         config_path_name: Optional path to load config from. If neither env var or argument is given, it will first
-#         look for:
-#             - env.toml in `resources` (empty by default)
-#             - devenv.toml.local in the project path
-#             - devenv.toml in the project path
-#     Returns:
-#         Path for config to load."""
-#     env_config_path = os.environ.get("APISERVER_CONFIG")
-#     if env_config_path is not None:
-#         return Path(env_config_path)
-#     elif config_path_name is not None:
-#         return Path(config_path_name)
-
-#     try_paths = [
-#         res_path.joinpath("env.toml"),
-#         project_path.joinpath("devenv.toml.local"),
-#         project_path.joinpath("devenv.toml"),
-#     ]
-
-#     for path in try_paths:
-#         if path.exists():
-#             return path
-
-#     raise AppEnvironmentError(
-#         "No env.toml found! If you are in development, did you remove `devenv.toml`? If"
-#         " you are in production, was `env.toml` not added to resources?"
-#     )
+    return None
 
 
-# def load_config_with_message(
-#     config_path_name: Optional[os.PathLike[Any]] = None,
-# ) -> tuple[Config, str]:
-#     """Loads and validates config using `get_config_path`. It overrides values in the config with
-#     environment variables.
-
-#     Raises:
-#         AppEnvironmentError: If failed to validate config."""
-#     config_path = get_config_path(config_path_name)
-
-#     with open(config_path, "rb") as f:
-#         config = tomllib.load(f)
-
-#     keys_in_environ = set(config.keys()).intersection(os.environ.keys())
-#     override_message = (
-#         f" with overriding environment variables: {keys_in_environ}"
-#         if keys_in_environ
-#         else ""
-#     )
-
-#     config |= os.environ  # override loaded values with environment variables
-
-#     config_message = f"config from {config_path}{override_message}"
-
-#     try:
-#         return Config.model_validate(config), config_message
-#     except ValidationError as e:
-#         err = ""
-#         for err_detail in e.errors():
-#             err_ctx = f". context: {err_detail['ctx']}" if "ctx" in err_detail else ""
-#             err += (
-#                 f"\n\t- Err: {err_detail['loc']} with type={err_detail['type']}:"
-#                 f" {err_detail['msg']}{err_ctx}"
-#             )
-
-#         raise AppEnvironmentError(
-#             f"<magenta>Failed to load {config_message}:{err}</magenta>"
-#         )
+def validate_path(name: str, value: object) -> Path:
+    """Validate and convert a path setting."""
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Setting '{name}' must be a string, got {type(value).__name__}"
+        )
+    return Path(value)
 
 
-# def load_config(config_path_name: Optional[os.PathLike[Any]] = None) -> Config:
-#     config, _ = load_config_with_message(config_path_name)
+def validate_str(name: str, value: object) -> str:
+    """Validate a string setting."""
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Setting '{name}' must be a string, got {type(value).__name__}"
+        )
+    return value
 
-#     return config
+
+def load_settings() -> Settings:
+    config_file = find_config_file()
+
+    # Start with empty config
+    config = {}
+
+    # Load and validate TOML config if found
+    if config_file is not None:
+        with open(config_file, "rb") as f:
+            toml_data = tomllib.load(f)
+
+        # Validate and convert each setting
+        if "db_file" in toml_data:
+            config["db_file"] = validate_path("db_file", toml_data["db_file"])
+
+        if "auth_server_url" in toml_data:
+            config["auth_server_url"] = validate_str(
+                "auth_server_url", toml_data["auth_server_url"]
+            )
+
+        if "frontend_origin" in toml_data:
+            config["frontend_origin"] = validate_str(
+                "frontend_origin", toml_data["frontend_origin"]
+            )
+
+    return Settings(**config)
 
 
-def define_settings():
-    return Settings()
-
-
-settings = define_settings()
+# Global settings instance
+settings = load_settings()

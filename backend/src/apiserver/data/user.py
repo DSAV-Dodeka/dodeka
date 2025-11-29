@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 
-from hfree import StorageConnection
+from hfree import Storage
 from tiauth_faroe.client import ActionErrorResult
 
 from apiserver.data.client import AuthClient
@@ -18,13 +18,13 @@ class SessionUser:
 
 
 def get_session_user(
-    conn: StorageConnection, timestamp: int, user_id: str
+    store: Storage, timestamp: int, user_id: str
 ) -> SessionUser | None:
     """Get member information for a given user_id."""
     # Read user data from separate keys
-    profile_result = conn.get("users", f"{user_id}:profile")
-    email_result = conn.get("users", f"{user_id}:email")
-    permissions_result = conn.get("users", f"{user_id}:permissions")
+    profile_result = store.get("users", f"{user_id}:profile")
+    email_result = store.get("users", f"{user_id}:email")
+    permissions_result = store.get("users", f"{user_id}:permissions")
 
     if profile_result is None or email_result is None:
         return None
@@ -40,7 +40,10 @@ def get_session_user(
     email = email_bytes.decode("utf-8")
 
     # Parse permissions
-    permissions_bytes, _ = permissions_result if permissions_result else (b"", 0)
+    if permissions_result:
+        permissions_bytes, _ = permissions_result
+    else:
+        permissions_bytes = b""
     permissions_str = permissions_bytes.decode("utf-8")
     permissions = parse_permissions(timestamp, permissions_str)
 
@@ -65,7 +68,7 @@ class InvalidSession:
 
 
 def get_session(
-    conn: StorageConnection, client: AuthClient, timestamp: int, session_token: str
+    store: Storage, client: AuthClient, timestamp: int, session_token: str
 ) -> SessionInfo | InvalidSession:
     """Get session info and return non-expired permissions set."""
     session_result = client.get_session(session_token)
@@ -81,7 +84,7 @@ def get_session(
         return InvalidSession()
 
     user_id = session_result.session.user_id
-    user = get_session_user(conn, timestamp, user_id)
+    user = get_session_user(store, timestamp, user_id)
 
     if user is None:
         return InvalidSession()
