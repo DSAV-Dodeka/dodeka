@@ -2,9 +2,8 @@ import json
 from dataclasses import dataclass
 
 from hfree import Storage
-from tiauth_faroe.client import ActionErrorResult
+from tiauth_faroe.client.logic import GetSessionActionSuccessResult
 
-from apiserver.data.client import AuthClient
 from apiserver.data.permissions import parse_permissions
 
 
@@ -68,21 +67,9 @@ class InvalidSession:
 
 
 def get_session(
-    store: Storage, client: AuthClient, timestamp: int, session_token: str
+    store: Storage, session_result: GetSessionActionSuccessResult, timestamp: int
 ) -> SessionInfo | InvalidSession:
-    """Get session info and return non-expired permissions set."""
-    session_result = client.get_session(session_token)
-
-    if isinstance(session_result, ActionErrorResult):
-        if session_result.error_code != "invalid_session_token":
-            invocation_id = session_result.action_invocation_id
-            error_code = session_result.error_code
-            raise ValueError(
-                f"Error getting session from auth server "
-                f"(invocation {invocation_id}): {error_code}."
-            )
-        return InvalidSession()
-
+    """Get session info from database. Runs on the database thread."""
     user_id = session_result.session.user_id
     user = get_session_user(store, timestamp, user_id)
 

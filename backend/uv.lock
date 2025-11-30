@@ -104,7 +104,7 @@ wheels = [
 [[package]]
 name = "hfree"
 version = "0.1.0"
-source = { git = "https://github.com/tiptenbrink/pyht#316fe4c51284c2658cce9eed5706c49800c37b06" }
+source = { git = "https://github.com/tiptenbrink/pyht#fbc383e3a1ddecfe6858d45bc0aff9bd9ca383c0" }
 dependencies = [
     { name = "h11" },
 ]

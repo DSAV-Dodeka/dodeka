@@ -14,6 +14,7 @@ class Settings:
     db_file: Path = Path("./db.sqlite")
     auth_server_url: str = "http://localhost:3777"
     frontend_origin: str = "https://dsavdodeka.nl"
+    debug_logs: bool = False
 
 
 def find_config_file() -> Path | None:
@@ -54,6 +55,15 @@ def validate_str(name: str, value: object) -> str:
     return value
 
 
+def validate_bool(name: str, value: object) -> bool:
+    """Validate a boolean setting."""
+    if not isinstance(value, bool):
+        raise ValueError(
+            f"Setting '{name}' must be a boolean, got {type(value).__name__}"
+        )
+    return value
+
+
 def load_settings() -> Settings:
     config_file = find_config_file()
 
@@ -78,6 +88,9 @@ def load_settings() -> Settings:
             config["frontend_origin"] = validate_str(
                 "frontend_origin", toml_data["frontend_origin"]
             )
+
+        if "debug_logs" in toml_data:
+            config["debug_logs"] = validate_bool("debug_logs", toml_data["debug_logs"])
 
     return Settings(**config)
 
