@@ -12,14 +12,19 @@ class MemberData:
     lastname: str
 
 
-def get_member(store: Storage, user_id: str) -> MemberData:
+@dataclass
+class MemberNotFound:
+    user_id: str
+
+
+def get_member(store: Storage, user_id: str) -> MemberData | MemberNotFound:
     """Get member information for a given user_id."""
     # Read user data from separate keys
     profile_result = store.get("users", f"{user_id}:profile")
     email_result = store.get("users", f"{user_id}:email")
 
     if profile_result is None or email_result is None:
-        raise ValueError("User not found")
+        return MemberNotFound(user_id=user_id)
 
     # Parse profile
     profile_bytes, _ = profile_result

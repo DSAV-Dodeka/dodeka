@@ -12,6 +12,26 @@ class NewUser:
     accepted: bool
 
 
+@dataclass
+class EmailExistsInUserTable:
+    email: str
+
+
+@dataclass
+class EmailExistsInNewUserTable:
+    email: str
+
+
+@dataclass
+class EmailNotFoundInNewUserTable:
+    email: str
+
+
+@dataclass
+class InvalidNamesCount:
+    names_count: int
+
+
 def _serialize_newuser(
     email: str, firstname: str, lastname: str, accepted: bool
 ) -> bytes:
@@ -30,7 +50,9 @@ def _deserialize_newuser(data: bytes) -> dict:
     return json.loads(data.decode("utf-8"))
 
 
-def add_new_user(store: Storage, email: str, firstname: str, lastname: str):
+def add_new_user(
+    store: Storage, email: str, firstname: str, lastname: str
+) -> None | EmailExistsInUserTable | EmailExistsInNewUserTable:
     """
     Add a new user to the newuser table.
     Returns error if email already exists in either newuser or user table.
@@ -38,7 +60,7 @@ def add_new_user(store: Storage, email: str, firstname: str, lastname: str):
     # Check if email already exists in user table
     user_data = store.get("users", email)
     if user_data is not None:
-        raise ValueError("User with e-mail already exists in user table.")
+        return EmailExistsInUserTable(email=email)
 
     # Add to newuser table
     try:
@@ -46,17 +68,21 @@ def add_new_user(store: Storage, email: str, firstname: str, lastname: str):
         # expires_at = 0 means no expiration
         store.add("newusers", email, data, expires_at=0)
     except EntryAlreadyExists:
-        raise ValueError("User with e-mail already exists in newuser table.")
+        return EmailExistsInNewUserTable(email=email)
+
+    return None
 
 
-def update_accepted_flag(store: Storage, email: str, accepted: bool):
+def update_accepted_flag(
+    store: Storage, email: str, accepted: bool
+) -> None | EmailNotFoundInNewUserTable:
     """
     Update the accepted flag for a user in the newuser table.
     Returns error if user not found.
     """
     result = store.get("newusers", email)
     if result is None:
-        raise ValueError("User with e-mail does not exist.")
+        return EmailNotFoundInNewUserTable(email=email)
 
     data_bytes, counter = result
     user_data = _deserialize_newuser(data_bytes)
@@ -67,6 +93,7 @@ def update_accepted_flag(store: Storage, email: str, accepted: bool):
 
     # assert_updated=True by default - will assert on concurrent modification
     store.update("newusers", email, updated_data, expires_at=0, counter=counter)
+    return None
 
 
 def list_new_users(store: Storage) -> list[NewUser]:
@@ -91,11 +118,13 @@ def list_new_users(store: Storage) -> list[NewUser]:
     return users
 
 
-def prepare_user_store(store: Storage, email: str, names: list[str]):
+def prepare_user_store(
+    store: Storage, email: str, names: list[str]
+) -> None | InvalidNamesCount | EmailExistsInNewUserTable:
     """Prepare a user entry in the newuser table with accepted=True."""
     # Validate names list length
     if len(names) > 2:  # noqa: PLR2004
-        raise ValueError("Only accepts two names.")
+        return InvalidNamesCount(names_count=len(names))
     elif len(names) == 2:  # noqa: PLR2004
         firstname = names[0]
         lastname = names[1]
@@ -112,4 +141,6 @@ def prepare_user_store(store: Storage, email: str, names: list[str]):
         data = _serialize_newuser(email, firstname, lastname, True)
         store.add("newusers", email, data, expires_at=0)
     except EntryAlreadyExists:
-        raise ValueError("User with e-mail already exists in newuser table.")
+        return EmailExistsInNewUserTable(email=email)
+
+    return None

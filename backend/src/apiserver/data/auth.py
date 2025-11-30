@@ -345,4 +345,5 @@ class SqliteSyncServer(SyncServer):
         elif isinstance(effect, DeleteUserEffect):
             return delete_user(self.store, effect)
         else:
-            raise ValueError(f"Unknown effect type: {type(effect)}")
+            logger.error(f"Unknown effect type: {type(effect)}")
+            return ActionError("unknown_effect_type")

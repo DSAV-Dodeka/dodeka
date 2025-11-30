@@ -11,6 +11,11 @@ class Permissions:
     ADMIN = "admin"
 
 
+@dataclass
+class UserNotFoundError:
+    user_id: str
+
+
 def allowed_permission(permission: str) -> bool:
     return permission in {Permissions.MEMBER, Permissions.ADMIN}
 
@@ -42,11 +47,13 @@ def serialize_permissions(permissions: dict[str, int]) -> str:
     )
 
 
-def read_permissions(store: Storage, timestamp: int, user_id: str) -> dict[str, int]:
+def read_permissions(
+    store: Storage, timestamp: int, user_id: str
+) -> dict[str, int] | UserNotFoundError:
     """Read permissions string for a given user_id."""
     result = store.get("users", f"{user_id}:permissions")
     if result is None:
-        raise ValueError("User not found")
+        return UserNotFoundError(user_id=user_id)
 
     permissions_bytes, _ = result
     permissions_str = permissions_bytes.decode("utf-8")
@@ -60,12 +67,12 @@ year_time = 86400 * 365
 
 def add_permission(
     store: Storage, now_timestamp: int, user_id: str, permission_name: str
-) -> None:
+) -> None | UserNotFoundError:
     """Add or update a permission for a user with the given timestamp."""
     # Get current permissions with counter
     result = store.get("users", f"{user_id}:permissions")
     if result is None:
-        raise ValueError("User not found")
+        return UserNotFoundError(user_id=user_id)
 
     permissions_bytes, counter = result
     permissions_str = permissions_bytes.decode("utf-8")
@@ -88,3 +95,4 @@ def add_permission(
         expires_at=0,
         counter=counter,
     )
+    return None

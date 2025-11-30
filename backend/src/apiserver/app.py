@@ -12,8 +12,27 @@ from tiauth_faroe.user_server import handle_request_sync
 
 from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.client import AuthClient
-from apiserver.data.newuser import prepare_user_store
-from apiserver.data.permissions import add_permission, allowed_permission
+from apiserver.data.newuser import (
+    EmailExistsInNewUserTable,
+    EmailExistsInUserTable,
+    EmailNotFoundInNewUserTable,
+    InvalidNamesCount,
+    add_new_user,
+    list_new_users,
+    prepare_user_store,
+    update_accepted_flag,
+)
+from apiserver.data.permissions import (
+    UserNotFoundError,
+    add_permission,
+    allowed_permission,
+)
+from apiserver.data.registration_state import (
+    RegistrationStateNotFoundForEmail,
+    create_registration_state,
+    get_registration_state,
+    update_registration_state_accepted,
+)
 from apiserver.data.user import InvalidSession, SessionInfo, get_session
 from apiserver.settings import Settings, settings
 
@@ -44,6 +63,9 @@ def handler_with_client(
     def prepare():
         return prepare_user(req, store_queue)
 
+    def register():
+        return register_user(req, store_queue)
+
     def set_sess():
         return set_session(req)
 
@@ -56,10 +78,26 @@ def handler_with_client(
     def add_perm():
         return add_user_permission(req, store_queue)
 
+    def list_newusers():
+        return list_newusers_handler(store_queue)
+
+    def accept_user():
+        return accept_user_handler(auth_client, req, store_queue)
+
+    def get_reg_status():
+        return get_registration_status_handler(req, store_queue)
+
+    def get_sess_token():
+        return get_session_token_handler(req)
+
+    def del_account():
+        return delete_account_handler(auth_client, req, store_queue)
+
     route_table = {
         "/auth/invoke_user_action": {"POST": RouteEntry(invoke_action)},
         "/auth/clear_tables": {"POST": RouteEntry(clear)},
-        "/auth/prepare_user": {"POST": RouteEntry(prepare)},
+        "/auth/register_user": {"POST": RouteEntry(register)},
+        "/auth/registration_status": {"POST": RouteEntry(get_reg_status)},
         "/auth/set_session/": {"POST": RouteEntry(set_sess, requires_credentials=True)},
         "/auth/clear_session/": {
             "POST": RouteEntry(clear_sess, requires_credentials=True)
@@ -67,7 +105,16 @@ def handler_with_client(
         "/auth/session_info/": {
             "GET": RouteEntry(sess_info, requires_credentials=True)
         },
+        "/auth/get_session_token/": {
+            "GET": RouteEntry(get_sess_token, requires_credentials=True)
+        },
+        "/auth/delete_account/": {
+            "POST": RouteEntry(del_account, requires_credentials=True)
+        },
+        "/test/prepare_user": {"POST": RouteEntry(prepare)},
         "/admin/add_permission/": {"POST": RouteEntry(add_perm)},
+        "/admin/list_newusers/": {"GET": RouteEntry(list_newusers)},
+        "/admin/accept_user/": {"POST": RouteEntry(accept_user)},
     }
 
     # Check if path exists
@@ -173,12 +220,17 @@ def invoke_user_action(req: Request, store_queue: StorageQueue) -> Response:
 
 
 def clear_tables(store_queue: StorageQueue) -> Response:
-    """Handle /auth/clear_tables - clears user and newuser tables."""
+    """
+    Handle /auth/clear_tables.
+
+    Clears user, newuser, and registration_state tables.
+    """
 
     def clear(store: Storage) -> str:
         store.clear("users_by_email")
         store.clear("users")
         store.clear("newusers")
+        store.clear("registration_state")
         store.clear("metadata")
         return "cleared!\n"
 
@@ -188,7 +240,11 @@ def clear_tables(store_queue: StorageQueue) -> Response:
 
 
 def prepare_user(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /auth/prepare_user - prepares a user in the newuser store."""
+    """
+    Handle /test/prepare_user.
+
+    Prepares a user in the newuser store with accepted=True (for testing).
+    """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         email = body_data.get("email")
@@ -198,13 +254,191 @@ def prepare_user(req: Request, store_queue: StorageQueue) -> Response:
     except (json.JSONDecodeError, ValueError) as e:
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    def prepare(store: Storage) -> str:
-        prepare_user_store(store, email, names)
+    def prepare(
+        store: Storage,
+    ) -> str | InvalidNamesCount | EmailExistsInNewUserTable:
+        result = prepare_user_store(store, email, names)
+        if result is not None:
+            return result
         return f"prepared {email}\n"
 
     result = store_queue.execute(prepare)
-    logger.info(result.strip())
-    return Response.text(result)
+    if isinstance(result, InvalidNamesCount):
+        return Response.text(
+            f"Invalid names count: {result.names_count}", status_code=400
+        )
+    elif isinstance(result, EmailExistsInNewUserTable):
+        return Response.text(
+            "User with e-mail already exists in newuser table", status_code=400
+        )
+    else:
+        logger.info(result.strip())
+        return Response.text(result)
+
+
+def register_user(req: Request, store_queue: StorageQueue) -> Response:
+    """
+    Handle /auth/register_user.
+
+    Creates a new user registration request with accepted=False.
+    Returns a registration_token that can be used to check status.
+    """
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        email = body_data.get("email")
+        firstname = body_data.get("firstname", "")
+        lastname = body_data.get("lastname", "")
+        if not email:
+            return Response.text("Missing email", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    def register(
+        store: Storage,
+    ) -> str | EmailExistsInUserTable | EmailExistsInNewUserTable:
+        result = add_new_user(store, email, firstname, lastname)
+        if result is not None:
+            return result
+        registration_token = create_registration_state(store, email)
+        return registration_token
+
+    result = store_queue.execute(register)
+    if isinstance(result, EmailExistsInUserTable):
+        return Response.text(
+            "User with e-mail already exists in user table", status_code=400
+        )
+    elif isinstance(result, EmailExistsInNewUserTable):
+        return Response.text(
+            "User with e-mail already exists in newuser table", status_code=400
+        )
+    else:
+        registration_token = result
+        logger.info(f"registered {email} with token {registration_token}")
+        return Response.json(
+            {
+                "success": True,
+                "message": f"Registration request submitted for {email}",
+                "registration_token": registration_token,
+            }
+        )
+
+
+def get_registration_status_handler(
+    req: Request, store_queue: StorageQueue
+) -> Response:
+    """
+    Handle /auth/registration_status.
+
+    Get registration status by token.
+    """
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        registration_token = body_data.get("registration_token")
+        if not registration_token:
+            return Response.text("Missing registration_token", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    def get_status(store: Storage) -> dict | None:
+        state = get_registration_state(store, registration_token)
+        if state is None:
+            return None
+
+        return {
+            "email": state.email,
+            "accepted": state.accepted,
+            "signup_token": state.signup_token,
+        }
+
+    result = store_queue.execute(get_status)
+    if result is None:
+        return Response.text("Registration token not found", status_code=404)
+
+    return Response.json(result)
+
+
+def list_newusers_handler(store_queue: StorageQueue) -> Response:
+    """Handle /admin/list_newusers/ - lists all pending user registrations."""
+
+    def list_users(store: Storage) -> list:
+        users = list_new_users(store)
+        return [
+            {
+                "email": user.email,
+                "firstname": user.firstname,
+                "lastname": user.lastname,
+                "accepted": user.accepted,
+            }
+            for user in users
+        ]
+
+    result = store_queue.execute(list_users)
+    return Response.json(result)
+
+
+def accept_user_handler(  # noqa: PLR0911
+    auth_client: AuthClient, req: Request, store_queue: StorageQueue
+) -> Response:
+    """Handle /admin/accept_user/ - accepts a user and initiates Faroe signup flow."""
+    # Parse and validate request
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        email = body_data.get("email")
+        if not email:
+            return Response.text("Missing email", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    try:
+        # Initiate Faroe signup flow first
+        signup_result = auth_client.create_signup(email)
+
+        if isinstance(signup_result, ActionErrorResult):
+            return Response.json(
+                {
+                    "error": "Faroe signup failed",
+                    "error_code": signup_result.error_code,
+                },
+                status_code=500,
+            )
+
+        signup_token = signup_result.signup_token
+
+        # Update accepted flag and registration state in database
+        def accept(
+            store: Storage,
+        ) -> str | EmailNotFoundInNewUserTable | RegistrationStateNotFoundForEmail:
+            result = update_accepted_flag(store, email, True)
+            if result is not None:
+                return result
+            result = update_registration_state_accepted(store, email, signup_token)
+            if result is not None:
+                return result
+            return f"accepted {email}\n"
+
+        result = store_queue.execute(accept)
+        if isinstance(result, EmailNotFoundInNewUserTable):
+            return Response.text(
+                f"Email {email} not found in newuser table", status_code=400
+            )
+        elif isinstance(result, RegistrationStateNotFoundForEmail):
+            return Response.text(
+                f"No registration state found for email: {email}", status_code=400
+            )
+        else:
+            logger.info(result.strip())
+
+            # Return signup token from successful result
+            return Response.json(
+                {
+                    "success": True,
+                    "message": f"User {email} accepted and signup initiated",
+                    "signup_token": signup_token,
+                }
+            )
+    except Exception as e:
+        logger.error(f"Failed to create Faroe signup: {e}")
+        return Response.text(f"Failed to create signup: {e}", status_code=500)
 
 
 def set_session(req: Request) -> Response:
@@ -362,12 +596,107 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
 
     timestamp = int(time.time())
 
-    def add_perm(store: Storage) -> str:
-        add_permission(store, timestamp, user_id, permission)
+    def add_perm(store: Storage) -> str | UserNotFoundError:
+        result = add_permission(store, timestamp, user_id, permission)
+        if result is not None:
+            return result
         return f"Added permission {permission} to user {user_id}\n"
 
     result = store_queue.execute(add_perm)
-    return Response.text(result)
+    if isinstance(result, UserNotFoundError):
+        return Response.text(f"User {user_id} not found", status_code=404)
+    else:
+        return Response.text(result)
+
+
+def get_session_token_handler(req: Request) -> Response:
+    """Handle /auth/get_session_token/ - returns session token from cookie."""
+    # Parse session_token from Cookie header using http.cookies
+    session_token = None
+    for header_name, header_value in req.headers:
+        if header_name.lower() == b"cookie":
+            cookie_str = header_value.decode("utf-8")
+            cookie = SimpleCookie()
+            cookie.load(cookie_str)
+            if "session_token" in cookie:
+                session_token = cookie["session_token"].value
+            break
+
+    if session_token is None:
+        return Response.json({"error": "no_session"}, status_code=401)
+
+    return Response.json({"session_token": session_token})
+
+
+def delete_account_handler(
+    auth_client: AuthClient, req: Request, store_queue: StorageQueue
+) -> Response:
+    """Handle /auth/delete_account/ - deletes the current user's account."""
+    # Parse session_token from Cookie header
+    session_token = None
+    for header_name, header_value in req.headers:
+        if header_name.lower() == b"cookie":
+            cookie_str = header_value.decode("utf-8")
+            cookie = SimpleCookie()
+            cookie.load(cookie_str)
+            if "session_token" in cookie:
+                session_token = cookie["session_token"].value
+            break
+
+    if session_token is None:
+        return Response.text("No session", status_code=401)
+
+    # Get session info from Faroe
+    session_result = auth_client.get_session(session_token)
+
+    if isinstance(session_result, ActionErrorResult):
+        return Response.text("Invalid session", status_code=401)
+
+    user_id = session_result.user_id
+
+    # Delete user from database
+    def delete_user_from_db(store: Storage) -> str:
+        # Get email to delete from index
+        email_result = store.get("users", f"{user_id}:email")
+        if email_result is None:
+            return "user_not_found"
+
+        email_bytes, _ = email_result
+        email = email_bytes.decode("utf-8")
+
+        # Delete all user keys
+        store.delete("users", f"{user_id}:profile")
+        store.delete("users", f"{user_id}:password")
+        store.delete("users", f"{user_id}:disabled")
+        store.delete("users", f"{user_id}:sessions_counter")
+        store.delete("users", f"{user_id}:permissions")
+        store.delete("users_by_email", email)
+        store.delete("users", f"{user_id}:email")
+
+        logger.info(f"Deleted user {user_id} with email {email}")
+        return "success"
+
+    result = store_queue.execute(delete_user_from_db)
+
+    if result == "user_not_found":
+        return Response.text("User not found", status_code=404)
+
+    # Clear the session cookie
+    cookie = SimpleCookie()
+    cookie["session_token"] = ""
+    cookie["session_token"]["httponly"] = True
+    cookie["session_token"]["samesite"] = "None"
+    cookie["session_token"]["secure"] = True
+    cookie["session_token"]["path"] = "/"
+    cookie["session_token"]["max-age"] = 0
+
+    cookie_header = cookie["session_token"].OutputString()
+
+    return Response.empty(
+        headers=[
+            (b"Set-Cookie", cookie_header.encode("utf-8")),
+        ],
+    )
 
 
 def run_with_settings(settings: Settings):
@@ -391,7 +720,13 @@ def run_with_settings(settings: Settings):
 
     config = ServerConfig(
         db_file=str(settings.db_file),
-        db_tables=["users", "users_by_email", "newusers", "metadata"],
+        db_tables=[
+            "users",
+            "users_by_email",
+            "newusers",
+            "registration_state",
+            "metadata",
+        ],
     )
     try:
         start_server(config, handler)
