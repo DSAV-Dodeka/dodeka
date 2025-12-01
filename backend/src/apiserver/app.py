@@ -54,67 +54,70 @@ def handler_with_client(
     path = req.path
     method = req.method
 
-    def invoke_action():
+    def h_invoke_action():
         return invoke_user_action(req, store_queue)
 
-    def clear():
+    def h_clear():
         return clear_tables(store_queue)
 
-    def prepare():
+    def h_prepare():
         return prepare_user(req, store_queue)
 
-    def register():
-        return register_user(req, store_queue)
+    def h_request_registration():
+        return request_registration(req, store_queue)
 
-    def set_sess():
+    def h_set_sess():
         return set_session(req)
 
-    def clear_sess():
+    def h_clear_sess():
         return clear_session(req)
 
-    def sess_info():
+    def h_sess_info():
         return session_info(auth_client, req, store_queue)
 
-    def add_perm():
+    def h_add_perm():
         return add_user_permission(req, store_queue)
 
-    def list_newusers():
+    def h_list_newusers():
         return list_newusers_handler(store_queue)
 
-    def accept_user():
+    def h_accept_user():
         return accept_user_handler(auth_client, req, store_queue)
 
-    def get_reg_status():
+    def h_get_reg_status():
         return get_registration_status_handler(req, store_queue)
 
-    def get_sess_token():
+    def h_get_sess_token():
         return get_session_token_handler(req)
 
-    def del_account():
-        return delete_account_handler(auth_client, req, store_queue)
-
     route_table = {
-        "/auth/invoke_user_action": {"POST": RouteEntry(invoke_action)},
-        "/auth/clear_tables": {"POST": RouteEntry(clear)},
-        "/auth/register_user": {"POST": RouteEntry(register)},
-        "/auth/registration_status": {"POST": RouteEntry(get_reg_status)},
-        "/auth/set_session/": {"POST": RouteEntry(set_sess, requires_credentials=True)},
-        "/auth/clear_session/": {
-            "POST": RouteEntry(clear_sess, requires_credentials=True)
-        },
+        # Private endpoint, only accessible to the Go auth server
+        "/private/invoke_user_action": {"POST": RouteEntry(h_invoke_action)},
+        # Test endpoints used for the test suite and development
+        "/test/prepare_user": {"POST": RouteEntry(h_prepare)},
+        "/test/clear_tables": {"POST": RouteEntry(h_clear)},
+        # Dodeka-specific actions related to auth
+        "/auth/request_registration": {"POST": RouteEntry(h_request_registration)},
+        "/auth/registration_status": {"POST": RouteEntry(h_get_reg_status)},
+        # We prefix the next with 'admin' to make it clear it's only accessible to
+        # admins
+        "/admin/accept_user/": {"POST": RouteEntry(h_accept_user)},
+        # Admin-only functions
+        "/admin/add_permission/": {"POST": RouteEntry(h_add_perm)},
+        "/admin/list_newusers/": {"GET": RouteEntry(h_list_newusers)},
         "/auth/session_info/": {
-            "GET": RouteEntry(sess_info, requires_credentials=True)
+            "GET": RouteEntry(h_sess_info, requires_credentials=True)
         },
-        "/auth/get_session_token/": {
-            "GET": RouteEntry(get_sess_token, requires_credentials=True)
+        # Since we have HttpOnly cookies, we need server functions to modify them
+        "/cookies/session_token/": {
+            "GET": RouteEntry(h_get_sess_token, requires_credentials=True)
         },
-        "/auth/delete_account/": {
-            "POST": RouteEntry(del_account, requires_credentials=True)
+        "/cookies/set_session/": {
+            "POST": RouteEntry(h_set_sess, requires_credentials=True)
         },
-        "/test/prepare_user": {"POST": RouteEntry(prepare)},
-        "/admin/add_permission/": {"POST": RouteEntry(add_perm)},
-        "/admin/list_newusers/": {"GET": RouteEntry(list_newusers)},
-        "/admin/accept_user/": {"POST": RouteEntry(accept_user)},
+        "/cookies/clear_session/": {
+            "POST": RouteEntry(h_clear_sess, requires_credentials=True)
+        },
     }
 
     # Check if path exists
@@ -276,11 +279,10 @@ def prepare_user(req: Request, store_queue: StorageQueue) -> Response:
         return Response.text(result)
 
 
-def register_user(req: Request, store_queue: StorageQueue) -> Response:
+def request_registration(req: Request, store_queue: StorageQueue) -> Response:
     """
-    Handle /auth/register_user.
-
     Creates a new user registration request with accepted=False.
+    This is important for Dodeka because first the Volta process needs to succeed.
     Returns a registration_token that can be used to check status.
     """
     try:
@@ -626,77 +628,6 @@ def get_session_token_handler(req: Request) -> Response:
         return Response.json({"error": "no_session"}, status_code=401)
 
     return Response.json({"session_token": session_token})
-
-
-def delete_account_handler(
-    auth_client: AuthClient, req: Request, store_queue: StorageQueue
-) -> Response:
-    """Handle /auth/delete_account/ - deletes the current user's account."""
-    # Parse session_token from Cookie header
-    session_token = None
-    for header_name, header_value in req.headers:
-        if header_name.lower() == b"cookie":
-            cookie_str = header_value.decode("utf-8")
-            cookie = SimpleCookie()
-            cookie.load(cookie_str)
-            if "session_token" in cookie:
-                session_token = cookie["session_token"].value
-            break
-
-    if session_token is None:
-        return Response.text("No session", status_code=401)
-
-    # Get session info from Faroe
-    session_result = auth_client.get_session(session_token)
-
-    if isinstance(session_result, ActionErrorResult):
-        return Response.text("Invalid session", status_code=401)
-
-    user_id = session_result.user_id
-
-    # Delete user from database
-    def delete_user_from_db(store: Storage) -> str:
-        # Get email to delete from index
-        email_result = store.get("users", f"{user_id}:email")
-        if email_result is None:
-            return "user_not_found"
-
-        email_bytes, _ = email_result
-        email = email_bytes.decode("utf-8")
-
-        # Delete all user keys
-        store.delete("users", f"{user_id}:profile")
-        store.delete("users", f"{user_id}:password")
-        store.delete("users", f"{user_id}:disabled")
-        store.delete("users", f"{user_id}:sessions_counter")
-        store.delete("users", f"{user_id}:permissions")
-        store.delete("users_by_email", email)
-        store.delete("users", f"{user_id}:email")
-
-        logger.info(f"Deleted user {user_id} with email {email}")
-        return "success"
-
-    result = store_queue.execute(delete_user_from_db)
-
-    if result == "user_not_found":
-        return Response.text("User not found", status_code=404)
-
-    # Clear the session cookie
-    cookie = SimpleCookie()
-    cookie["session_token"] = ""
-    cookie["session_token"]["httponly"] = True
-    cookie["session_token"]["samesite"] = "None"
-    cookie["session_token"]["secure"] = True
-    cookie["session_token"]["path"] = "/"
-    cookie["session_token"]["max-age"] = 0
-
-    cookie_header = cookie["session_token"].OutputString()
-
-    return Response.empty(
-        headers=[
-            (b"Set-Cookie", cookie_header.encode("utf-8")),
-        ],
-    )
 
 
 def run_with_settings(settings: Settings):

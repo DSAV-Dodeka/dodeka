@@ -32,7 +32,7 @@ class InvalidNamesCount:
     names_count: int
 
 
-def _serialize_newuser(
+def serialize_newuser(
     email: str, firstname: str, lastname: str, accepted: bool
 ) -> bytes:
     """Serialize newuser data to bytes."""
@@ -45,7 +45,7 @@ def _serialize_newuser(
     return json.dumps(data).encode("utf-8")
 
 
-def _deserialize_newuser(data: bytes) -> dict:
+def deserialize_newuser(data: bytes) -> dict:
     """Deserialize newuser data from bytes."""
     return json.loads(data.decode("utf-8"))
 
@@ -64,7 +64,7 @@ def add_new_user(
 
     # Add to newuser table
     try:
-        data = _serialize_newuser(email, firstname, lastname, False)
+        data = serialize_newuser(email, firstname, lastname, False)
         # expires_at = 0 means no expiration
         store.add("newusers", email, data, expires_at=0)
     except EntryAlreadyExists:
@@ -85,7 +85,7 @@ def update_accepted_flag(
         return EmailNotFoundInNewUserTable(email=email)
 
     data_bytes, counter = result
-    user_data = _deserialize_newuser(data_bytes)
+    user_data = deserialize_newuser(data_bytes)
 
     # Update the accepted flag
     user_data["accepted"] = accepted
@@ -105,7 +105,7 @@ def list_new_users(store: Storage) -> list[NewUser]:
         result = store.get("newusers", key)
         if result is not None:
             data_bytes, _ = result
-            user_data = _deserialize_newuser(data_bytes)
+            user_data = deserialize_newuser(data_bytes)
             users.append(
                 NewUser(
                     email=user_data["email"],
@@ -138,7 +138,7 @@ def prepare_user_store(
         lastname = ""
 
     try:
-        data = _serialize_newuser(email, firstname, lastname, True)
+        data = serialize_newuser(email, firstname, lastname, True)
         store.add("newusers", email, data, expires_at=0)
     except EntryAlreadyExists:
         return EmailExistsInNewUserTable(email=email)

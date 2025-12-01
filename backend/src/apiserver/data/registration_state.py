@@ -49,13 +49,8 @@ def create_registration_state(store: Storage, email: str) -> str:
 
     # Create registration state entry
     data = _serialize_registration_state(email, accepted=False, signup_token=None)
-    try:
-        # expires_at = 0 means no expiration
-        store.add("registration_state", registration_token, data, expires_at=0)
-    except EntryAlreadyExists:
-        # Very unlikely with secure random tokens, but retry once if it happens
-        registration_token = generate_registration_token()
-        store.add("registration_state", registration_token, data, expires_at=0)
+    # expires_at = 0 means no expiration
+    store.add("registration_state", registration_token, data, expires_at=0)
 
     return registration_token
 
