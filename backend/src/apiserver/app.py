@@ -1,7 +1,10 @@
+import enum
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from http.cookies import SimpleCookie
 from typing import Callable
 
@@ -39,15 +42,84 @@ from apiserver.settings import Settings, settings
 logger = logging.getLogger("apiserver.app")
 
 
+class Visibility(enum.Enum):
+    PRIVATE = enum.auto()
+    ADMIN_ONLY = enum.auto()
+    PUBLIC = enum.auto()
+
+
 @dataclass
 class RouteEntry:
+    """
+    Stores the handler of a particular route and some other configuration.
+    """
+
     handler: Callable[[], Response]
+    # If yes, then we add special headers so that browsers are able to send things
+    # like cookies along
     requires_credentials: bool = False
+    visibility: Visibility = Visibility.PRIVATE
+
+
+def check_route_access(
+    path: str,
+    method: str,
+    route_entry: RouteEntry,
+    headers: dict[str, str],
+    private_key: str,
+    admin_key: str,
+) -> Response | None:
+    """Check private and admin route access, return error response or None if OK."""
+    # Check private route access
+    is_private = route_entry.visibility == Visibility.PRIVATE or path.startswith(
+        "/private"
+    )
+    req_private_key = headers.get("x-private-route-access-key")
+    if is_private and req_private_key != private_key:
+        return Response.text(f"Not Found: {method} {path}", status_code=404)
+
+    # Check admin route access
+    is_admin = route_entry.visibility == Visibility.ADMIN_ONLY or path.startswith(
+        "/admin"
+    )
+    req_admin_key = headers.get("x-admin-key")
+    if is_admin and req_admin_key != admin_key:
+        return Response.text(f"Unauthorized: {method} {path}", status_code=401)
+
+    return None
+
+
+def handle_options_request(
+    route: dict[str, RouteEntry],
+    route_entry: RouteEntry,
+    frontend_origin: str,
+) -> Response:
+    """Handle OPTIONS preflight requests for CORS."""
+    allowed_methods = ", ".join(sorted(route.keys()))
+    res_headers = [
+        (b"Access-Control-Allow-Methods", allowed_methods.encode("utf-8")),
+        (b"Allow", allowed_methods.encode("utf-8")),
+        (b"Access-Control-Allow-Origin", frontend_origin.encode("utf-8")),
+        (b"Access-Control-Allow-Headers", b"Content-Type"),
+    ]
+    if route_entry.requires_credentials:
+        res_headers.append((b"Access-Control-Allow-Credentials", b"true"))
+
+    return Response(status_code=204, headers=res_headers, body=b"")
 
 
 def handler_with_client(
-    auth_client: AuthClient, req: Request, store_queue: StorageQueue | None
+    auth_client: AuthClient,
+    admin_key: str,
+    private_route_access_key: str,
+    req: Request,
+    store_queue: StorageQueue | None,
 ) -> Response:
+    """
+    This function dispatches a request to a specific handler, based on the route. It
+    also handles things like CORS (browsers are careful when making requests that are
+    not the same 'origin', so different domain)
+    """
     if store_queue is None:
         return Response.text("Storage not available", status_code=500)
 
@@ -90,6 +162,7 @@ def handler_with_client(
     def h_get_sess_token():
         return get_session_token_handler(req)
 
+    # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
         # Private endpoint, only accessible to the Go auth server
         "/private/invoke_user_action": {"POST": RouteEntry(h_invoke_action)},
@@ -120,70 +193,47 @@ def handler_with_client(
         },
     }
 
-    # Check if path exists
     route = route_table.get(path)
     if route is None:
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
-    # Browsers generally only allow responses that have this set (this is a concept
-    # called CORS)
+    # We only use the last header with the same lower-case name, we don't care about any
+    # weird practices
+    headers: dict[str, str] = {}
+    try:
+        for header_name, header_value in req.headers:
+            headers[header_name.lower().decode("utf-8")] = header_value.decode("utf-8")
+    except ValueError:
+        # In case there is non-utf-8
+        return Response.text("Bad Request: Invalid Header", status_code=400)
+
+    # In order to get a useful method when the method is OPTIONS is sent for many other
+    # methods in a so-called pre-flight request during CORS), we get this special header
+    if method == "OPTIONS":
+        requested_method = headers.get("access-control-request-method")
+    else:
+        requested_method = method
+
+    # We can now get a route_entry, or just set it to none and then return not found
+    route_entry = None if requested_method is None else route.get(requested_method)
+    if route_entry is None:
+        return Response.text(f"Not Found: {method} {path}", status_code=404)
+
+    # Check private and admin route access
+    if error := check_route_access(
+        path, method, route_entry, headers, private_route_access_key, admin_key
+    ):
+        return error
+
+    # Handle OPTIONS preflight requests for CORS
+    if method == "OPTIONS":
+        return handle_options_request(route, route_entry, settings.frontend_origin)
+
+    # Browsers generally only allow responses that have this set (CORS)
     allow_origin_header = (
         b"Access-Control-Allow-Origin",
         settings.frontend_origin.encode("utf-8"),
     )
-
-    # When sending JSON requests (or basically any non-simple request), browsers will
-    # send "pre-flight requests (https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request)
-    # This is a request using the 'OPTIONS' method, so we will need to deal with this
-    if method == "OPTIONS":
-        # Parse the Access-Control-Request-Method header to see which method is being
-        # requested
-        requested_method = None
-        for header_name, header_value in req.headers:
-            if header_name.lower() == b"access-control-request-method":
-                requested_method = header_value.decode("utf-8")
-                break
-
-        # Check if the requested method requires credentials
-        requires_credentials = False
-        if requested_method:
-            route_entry = route.get(requested_method)
-            if route_entry:
-                requires_credentials = route_entry.requires_credentials
-
-        allowed_methods = ", ".join(sorted(route.keys()))
-        headers = [
-            # To tell the browser that the method it wants to use is indeed allowed
-            # Technically, POST, GET and HEAD are always allowed in the context of
-            # CORS, but to not complicate the code we just return the same as what
-            # we actually support.
-            (b"Access-Control-Allow-Methods", allowed_methods.encode("utf-8")),
-            # The same, but in a more general context (not just preflight requests)
-            (b"Allow", allowed_methods.encode("utf-8")),
-            # We need to tell the frontend we allow requests from their origin
-            allow_origin_header,
-            # Since we will also receive JSON requests, we need to allow this as well
-            (b"Access-Control-Allow-Headers", b"Content-Type"),
-        ]
-        # We need to tell the frontend they can add credentials (e.g. cookies)
-        if requires_credentials:
-            headers.append((b"Access-Control-Allow-Credentials", b"true"))
-
-        return Response(
-            status_code=204,
-            headers=headers,
-            body=b"",
-        )
-
-    # Check if method is allowed for this path
-    route_entry = route.get(method)
-    if route_entry is None:
-        allowed_methods = ", ".join(sorted(route.keys()))
-        return Response(
-            status_code=405,
-            headers=[(b"Allow", allowed_methods.encode("utf-8")), allow_origin_header],
-            body=f"Method Not Allowed: {method} {path}.".encode("utf-8"),
-        )
 
     response = route_entry.handler()
     # This one is basically always necessary for the browser to read it
@@ -378,7 +428,7 @@ def list_newusers_handler(store_queue: StorageQueue) -> Response:
     return Response.json(result)
 
 
-def accept_user_handler(  # noqa: PLR0911
+def accept_user_handler(
     auth_client: AuthClient, req: Request, store_queue: StorageQueue
 ) -> Response:
     """Handle /admin/accept_user/ - accepts a user and initiates Faroe signup flow."""
@@ -630,9 +680,14 @@ def get_session_token_handler(req: Request) -> Response:
     return Response.json({"session_token": session_token})
 
 
+MIN_ADMIN_KEY_LEN = 16
+
+
 def run_with_settings(settings: Settings):
     log_listener = setup_logging()
     log_listener.start()
+
+    now = int(datetime.now(timezone.utc).timestamp())
 
     # Configure logging level based on debug_logs setting
     log_level = logging.DEBUG if settings.debug_logs else logging.INFO
@@ -645,9 +700,47 @@ def run_with_settings(settings: Settings):
 
     auth_client = AuthClient(settings.auth_server_url)
 
+    # Each time on startup we generate a key for private access
+    private_route_access_key = secrets.token_urlsafe(64)
+
+    # We write this to a file that (presumably) local processes can read to access the
+    # route
+    with open(settings.private_route_access_file, "w") as f:
+        f.write(private_route_access_key)
+
+    # In 'test' we set a dummy value and don't care
+    if settings.environment == "test":
+        admin_key = "test_key"
+    else:
+        if (
+            settings.admin_key is None
+            or len(settings.admin_key.key) < MIN_ADMIN_KEY_LEN
+        ):
+            raise RuntimeError(
+                f"You must set the 'admin_key' to length at least {MIN_ADMIN_KEY_LEN}"
+            )
+
+        if settings.admin_key.expiration > now:
+            raise RuntimeError("Admin key is expired, please set a new one.")
+
+        admin_key = settings.admin_key.key
+
     # hfree doesn't know about the client, so we create a new handler that captures it
     def handler(req: Request, store_queue: StorageQueue | None) -> Response:
-        return handler_with_client(auth_client, req, store_queue)
+        # In test we set these headers so that we do actually check, but we just check
+        # what we now is right
+        if settings.environment == "test":
+            req.headers.append(
+                (
+                    b"x-private-route-access-key",
+                    private_route_access_key.encode("utf-8"),
+                )
+            )
+            req.headers.append((b"x-admin-key", admin_key.encode("utf-8")))
+
+        return handler_with_client(
+            auth_client, admin_key, private_route_access_key, req, store_queue
+        )
 
     config = ServerConfig(
         db_file=str(settings.db_file),

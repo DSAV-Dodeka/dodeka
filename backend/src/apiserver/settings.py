@@ -1,10 +1,18 @@
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from apiserver.resources import res_path
 
 __all__ = ["Settings", "settings"]
+
+
+@dataclass
+class AdminKey:
+    key: str
+    # Unix timestamp for when it expires
+    expiration: int
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -12,9 +20,12 @@ class Settings:
     """Application settings loaded from TOML configuration file."""
 
     db_file: Path = Path("./db.sqlite")
+    environment: Literal["test"] | Literal["production"] = "production"
     auth_server_url: str = "http://localhost:3777"
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
+    private_route_access_file: Path = Path("./private_route.key")
+    admin_key: AdminKey | None = None
 
 
 def find_config_file() -> Path | None:
@@ -64,6 +75,38 @@ def validate_bool(name: str, value: object) -> bool:
     return value
 
 
+def validate_int(name: str, value: object) -> int:
+    """Validate an integer setting."""
+    if not isinstance(value, int):
+        raise ValueError(
+            f"Setting '{name}' must be an int, got {type(value).__name__}"
+        )
+    return value
+
+
+def validate_environment(name: str, value: object) -> Literal["test", "production"]:
+    """Validate environment setting."""
+    env = validate_str(name, value)
+    if env not in ("test", "production"):
+        raise ValueError(
+            f"Setting '{name}' must be 'test' or 'production', got '{env}'"
+        )
+    return env  # type: ignore
+
+
+def validate_admin_key(name: str, value: object) -> AdminKey:
+    """Validate admin_key setting."""
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"Setting '{name}' must be a table/dict, got {type(value).__name__}"
+        )
+
+    key = validate_str(f"{name}.key", value.get("key"))
+    expiration = validate_int(f"{name}.expiration", value.get("expiration"))
+
+    return AdminKey(key=key, expiration=expiration)
+
+
 def load_settings() -> Settings:
     config_file = find_config_file()
 
@@ -76,21 +119,33 @@ def load_settings() -> Settings:
             toml_data = tomllib.load(f)
 
         # Validate and convert each setting
-        if "db_file" in toml_data:
-            config["db_file"] = validate_path("db_file", toml_data["db_file"])
+        k = "db_file"
+        if k in toml_data:
+            config[k] = validate_path(k, toml_data[k])
 
-        if "auth_server_url" in toml_data:
-            config["auth_server_url"] = validate_str(
-                "auth_server_url", toml_data["auth_server_url"]
-            )
+        k = "environment"
+        if k in toml_data:
+            config[k] = validate_environment(k, toml_data[k])
 
-        if "frontend_origin" in toml_data:
-            config["frontend_origin"] = validate_str(
-                "frontend_origin", toml_data["frontend_origin"]
-            )
+        k = "auth_server_url"
+        if k in toml_data:
+            config[k] = validate_str(k, toml_data[k])
 
-        if "debug_logs" in toml_data:
-            config["debug_logs"] = validate_bool("debug_logs", toml_data["debug_logs"])
+        k = "frontend_origin"
+        if k in toml_data:
+            config[k] = validate_str(k, toml_data[k])
+
+        k = "debug_logs"
+        if k in toml_data:
+            config[k] = validate_bool(k, toml_data[k])
+
+        k = "private_route_access_file"
+        if k in toml_data:
+            config[k] = validate_path(k, toml_data[k])
+
+        k = "admin_key"
+        if k in toml_data:
+            config[k] = validate_admin_key(k, toml_data[k])
 
     return Settings(**config)
 

@@ -49,6 +49,10 @@ pythonVersion = "3.14"
 include = ["src", "tests"]
 exclude = ["**/__pycache__", ".venv", "**/.venv"]
 
+[tool.ruff.lint.pylint]
+max-returns = 8
+max-args = 6
+
 [tool.ruff.lint]
 select = ["F", "PL", "E", "W", "RUF"]
 # TODO: check if we need this
