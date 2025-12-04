@@ -29,6 +29,7 @@ from apiserver.data.permissions import (
     UserNotFoundError,
     add_permission,
     allowed_permission,
+    remove_permission,
 )
 from apiserver.data.registration_state import (
     RegistrationStateNotFoundForEmail,
@@ -36,10 +37,20 @@ from apiserver.data.registration_state import (
     get_registration_state,
     update_registration_state_accepted,
 )
-from apiserver.data.user import InvalidSession, SessionInfo, get_session
+from apiserver.data.user import (
+    CachedSessionData,
+    InvalidSession,
+    SessionInfo,
+    get_cached_session,
+    get_user_info,
+    update_session_cache,
+)
 from apiserver.settings import Settings, settings
 
 logger = logging.getLogger("apiserver.app")
+
+# Cache session validations for 8 hours to reduce auth server load
+SESSION_CACHE_EXPIRY_SECONDS = 8 * 60 * 60
 
 
 class Visibility(enum.Enum):
@@ -61,6 +72,19 @@ class RouteEntry:
     visibility: Visibility = Visibility.PRIVATE
 
 
+def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
+    """Parse cookie value from headers dict."""
+    cookie_str = headers.get("cookie")
+    if cookie_str is None:
+        return None
+
+    cookie = SimpleCookie()
+    cookie.load(cookie_str)
+    if cookie_name in cookie:
+        return cookie[cookie_name].value
+    return None
+
+
 def check_route_access(
     path: str,
     method: str,
@@ -70,7 +94,8 @@ def check_route_access(
     admin_key: str,
 ) -> Response | None:
     """Check private and admin route access, return error response or None if OK."""
-    # Check private route access
+    # Check private route access, some defense in depth we check both entry and route
+    # string
     is_private = route_entry.visibility == Visibility.PRIVATE or path.startswith(
         "/private"
     )
@@ -126,6 +151,15 @@ def handler_with_client(
     path = req.path
     method = req.method
 
+    # Parse headers once for reuse in handlers
+    headers: dict[str, str] = {}
+    try:
+        for header_name, header_value in req.headers:
+            headers[header_name.lower().decode("utf-8")] = header_value.decode("utf-8")
+    except ValueError:
+        # In case there is non-utf-8
+        return Response.text("Bad Request: Invalid Header", status_code=400)
+
     def h_invoke_action():
         return invoke_user_action(req, store_queue)
 
@@ -139,16 +173,19 @@ def handler_with_client(
         return request_registration(req, store_queue)
 
     def h_set_sess():
-        return set_session(req)
+        return set_session(auth_client, req, headers, store_queue)
 
     def h_clear_sess():
-        return clear_session(req)
+        return clear_session(headers)
 
     def h_sess_info():
-        return session_info(auth_client, req, store_queue)
+        return session_info(auth_client, headers, store_queue)
 
     def h_add_perm():
         return add_user_permission(req, store_queue)
+
+    def h_remove_perm():
+        return remove_user_permission(req, store_queue)
 
     def h_list_newusers():
         return list_newusers_handler(store_queue)
@@ -160,7 +197,7 @@ def handler_with_client(
         return get_registration_status_handler(req, store_queue)
 
     def h_get_sess_token():
-        return get_session_token_handler(req)
+        return get_session_token_handler(headers)
 
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
@@ -175,8 +212,8 @@ def handler_with_client(
         # We prefix the next with 'admin' to make it clear it's only accessible to
         # admins
         "/admin/accept_user/": {"POST": RouteEntry(h_accept_user)},
-        # Admin-only functions
         "/admin/add_permission/": {"POST": RouteEntry(h_add_perm)},
+        "/admin/remove_permission/": {"POST": RouteEntry(h_remove_perm)},
         "/admin/list_newusers/": {"GET": RouteEntry(h_list_newusers)},
         "/auth/session_info/": {
             "GET": RouteEntry(h_sess_info, requires_credentials=True)
@@ -196,16 +233,6 @@ def handler_with_client(
     route = route_table.get(path)
     if route is None:
         return Response.text(f"Not Found: {method} {path}", status_code=404)
-
-    # We only use the last header with the same lower-case name, we don't care about any
-    # weird practices
-    headers: dict[str, str] = {}
-    try:
-        for header_name, header_value in req.headers:
-            headers[header_name.lower().decode("utf-8")] = header_value.decode("utf-8")
-    except ValueError:
-        # In case there is non-utf-8
-        return Response.text("Bad Request: Invalid Header", status_code=400)
 
     # In order to get a useful method when the method is OPTIONS is sent for many other
     # methods in a so-called pre-flight request during CORS), we get this special header
@@ -245,7 +272,10 @@ def handler_with_client(
 
 
 def invoke_user_action(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /auth/invoke_user_action - executes user actions via SqliteSyncServer."""
+    """
+    Handle /auth/invoke_user_action - executes Faroe user actions via
+    SqliteSyncServer. It's important that these are protected.
+    """
     try:
         request_json = json.loads(req.body.decode("utf-8"))
     except json.JSONDecodeError:
@@ -493,15 +523,71 @@ def accept_user_handler(
         return Response.text(f"Failed to create signup: {e}", status_code=500)
 
 
-def set_session(req: Request) -> Response:
-    """Handle /auth/set_session/ - sets session cookie."""
+def get_or_validate_session(
+    auth_client: AuthClient,
+    session_token: str,
+    store_queue: StorageQueue,
+) -> tuple[str, int, int | None] | Response:
+    """
+    Get session from cache or validate with auth server.
+
+    Returns tuple of (user_id, created_at, expires_at) on success,
+    or error Response on failure.
+    """
+    timestamp = int(time.time())
+
+    # Try to get from cache first
+    def check_cache(store: Storage) -> CachedSessionData | None:
+        return get_cached_session(store, session_token, timestamp)
+
+    cached_session = store_queue.execute(check_cache)
+
+    # If cache miss, validate with auth server
+    if cached_session is None:
+        session_result = auth_client.get_session(session_token)
+
+        if isinstance(session_result, ActionErrorResult):
+            if session_result.error_code != "invalid_session_token":
+                invocation_id = session_result.action_invocation_id
+                error_code = session_result.error_code
+                raise ValueError(
+                    f"Error getting session from auth server "
+                    f"(invocation {invocation_id}): {error_code}."
+                )
+            return Response.text("Invalid session_token", status_code=401)
+
+        # Cache the validated session
+        user_id = session_result.session.user_id
+        created_at = session_result.session.created_at
+        expires_at = session_result.session.expires_at
+
+        def update_cache(store: Storage):
+            # Note that it's fine if it already executes by this point, it will just
+            # overwite which should be fine based on session token uniqueness
+            update_session_cache(
+                store, session_token, user_id, created_at, expires_at, timestamp
+            )
+
+        store_queue.execute(update_cache)
+    else:
+        # Cache hit - use cached session data
+        user_id = cached_session.user_id
+        created_at = cached_session.created_at
+        expires_at = cached_session.expires_at
+
+    return (user_id, created_at, expires_at)
+
+
+def set_session(
+    auth_client: AuthClient,
+    req: Request,
+    headers: dict[str, str],
+    store_queue: StorageQueue,
+) -> Response:
+    """Handle /auth/set_session/ - validates and sets session cookie."""
     # Get Origin header
     # TODO: should we really perform this check or is it up to browser?
-    origin = None
-    for header_name, header_value in req.headers:
-        if header_name.lower() == b"origin":
-            origin = header_value.decode("utf-8")
-            break
+    origin = headers.get("origin")
 
     if origin != settings.frontend_origin:
         return Response.text("Invalid origin!", status_code=403)
@@ -513,6 +599,11 @@ def set_session(req: Request) -> Response:
             return Response.text("Missing session_token", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
         return Response.text(f"Invalid request: {e}", status_code=400)
+
+    # Validate session with auth server (and cache it)
+    result = get_or_validate_session(auth_client, session_token, store_queue)
+    if isinstance(result, Response):
+        return result
 
     max_session_age = 86400 * 365
 
@@ -536,14 +627,10 @@ def set_session(req: Request) -> Response:
     )
 
 
-def clear_session(req: Request) -> Response:
+def clear_session(headers: dict[str, str]) -> Response:
     """Handle /auth/clear_session/ - clears session cookie."""
     # Get Origin header
-    origin = None
-    for header_name, header_value in req.headers:
-        if header_name.lower() == b"origin":
-            origin = header_value.decode("utf-8")
-            break
+    origin = headers.get("origin")
 
     if origin != settings.frontend_origin:
         return Response.text("Invalid origin!", status_code=403)
@@ -567,44 +654,34 @@ def clear_session(req: Request) -> Response:
 
 
 def session_info(
-    auth_client: AuthClient, req: Request, store_queue: StorageQueue
+    auth_client: AuthClient,
+    headers: dict[str, str],
+    store_queue: StorageQueue,
 ) -> Response:
     """Handle /auth/session_info/ - gets session information."""
-    # Parse session_token from Cookie header using http.cookies
-    session_token = None
-    for header_name, header_value in req.headers:
-        if header_name.lower() == b"cookie":
-            cookie_str = header_value.decode("utf-8")
-            cookie = SimpleCookie()
-            cookie.load(cookie_str)
-            if "session_token" in cookie:
-                session_token = cookie["session_token"].value
-            break
+    session_token = get_cookie_value(headers, "session_token")
 
     if session_token is None:
         response_data = {"error": "no_session"}
         return Response.json(response_data)
 
+    # Validate session with auth server (and cache it)
+    result = get_or_validate_session(auth_client, session_token, store_queue)
+    if isinstance(result, Response):
+        # Return error response as JSON with proper error field
+        return Response.json({"error": "invalid_session"}, status_code=401)
+
+    user_id, created_at, expires_at = result
     timestamp = int(time.time())
 
-    # Do HTTP call before entering database thread to avoid deadlock
-    session_result = auth_client.get_session(session_token)
+    # Get user info from database
+    def get_session_data(store: Storage) -> SessionInfo | InvalidSession:
+        user = get_user_info(store, timestamp, user_id)
+        if user is None:
+            return InvalidSession()
+        return SessionInfo(user=user, created_at=created_at, expires_at=expires_at)
 
-    if isinstance(session_result, ActionErrorResult):
-        if session_result.error_code != "invalid_session_token":
-            invocation_id = session_result.action_invocation_id
-            error_code = session_result.error_code
-            raise ValueError(
-                f"Error getting session from auth server "
-                f"(invocation {invocation_id}): {error_code}."
-            )
-        response_data = {"error": "invalid_session"}
-        return Response.json(response_data)
-
-    def get_session_info(store: Storage) -> SessionInfo | InvalidSession:
-        return get_session(store, session_result, timestamp)
-
-    session = store_queue.execute(get_session_info)
+    session = store_queue.execute(get_session_data)
 
     if isinstance(session, InvalidSession):
         response_data = {"error": "invalid_session"}
@@ -661,18 +738,36 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
         return Response.text(result)
 
 
-def get_session_token_handler(req: Request) -> Response:
+def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/remove_permission/ - removes a permission from a user."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        user_id = body_data.get("user_id")
+        permission = body_data.get("permission")
+        if not user_id or not permission:
+            return Response.text("Missing user_id or permission", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    if not allowed_permission(permission):
+        return Response.text(f"Invalid permission: {permission}", status_code=400)
+
+    def remove_perm(store: Storage) -> str | UserNotFoundError:
+        result = remove_permission(store, user_id, permission)
+        if result is not None:
+            return result
+        return f"Removed permission {permission} from user {user_id}\n"
+
+    result = store_queue.execute(remove_perm)
+    if isinstance(result, UserNotFoundError):
+        return Response.text(f"User {user_id} not found", status_code=404)
+    else:
+        return Response.text(result)
+
+
+def get_session_token_handler(headers: dict[str, str]) -> Response:
     """Handle /auth/get_session_token/ - returns session token from cookie."""
-    # Parse session_token from Cookie header using http.cookies
-    session_token = None
-    for header_name, header_value in req.headers:
-        if header_name.lower() == b"cookie":
-            cookie_str = header_value.decode("utf-8")
-            cookie = SimpleCookie()
-            cookie.load(cookie_str)
-            if "session_token" in cookie:
-                session_token = cookie["session_token"].value
-            break
+    session_token = get_cookie_value(headers, "session_token")
 
     if session_token is None:
         return Response.json({"error": "no_session"}, status_code=401)
@@ -750,6 +845,7 @@ def run_with_settings(settings: Settings):
             "newusers",
             "registration_state",
             "metadata",
+            "session_cache",
         ],
     )
     try:

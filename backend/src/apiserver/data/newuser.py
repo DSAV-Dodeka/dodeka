@@ -92,7 +92,7 @@ def update_accepted_flag(
     updated_data = json.dumps(user_data).encode("utf-8")
 
     # assert_updated=True by default - will assert on concurrent modification
-    store.update("newusers", email, updated_data, expires_at=0, counter=counter)
+    store.update("newusers", email, updated_data, counter, expires_at=0)
     return None
 
 

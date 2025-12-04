@@ -59,7 +59,7 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     # Increment counter for next user
     new_user_counter = str(int_id + 1).encode("utf-8")
     store.update(
-        "metadata", "user_id_counter", new_user_counter, expires_at=0, counter=counter
+        "metadata", "user_id_counter", new_user_counter, counter, expires_at=0
     )
 
     # We construct a user_id from a unique integer and first name + last name
@@ -82,7 +82,7 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     store.add("users", f"{user_id}:password", password_bytes, expires_at=0)
     store.add("users", f"{user_id}:disabled", b"0", expires_at=0)
     store.add("users", f"{user_id}:sessions_counter", b"0", expires_at=0)
-    store.add("users", f"{user_id}:permissions", b"", expires_at=0)
+    # Permissions are now stored as separate keys with native expiration
     # This is used as an index to find a user_id by email
     store.add("users_by_email", email, user_id.encode("utf-8"), expires_at=0)
 
@@ -192,7 +192,6 @@ def get_user_by_email_address(
 def update_user_email_address(
     store: Storage, effect: UpdateUserEmailAddressEffect
 ) -> EffectResult:
-    """Update user email address. Runs atomically."""
     user_id = effect.user_id
     new_email = effect.email_address
 
@@ -218,20 +217,22 @@ def update_user_email_address(
 
     # Update email (assert_updated=True by default - will assert on counter mismatch)
     new_email_bytes = new_email.encode("utf-8")
-    store.update(
+    updated = store.update(
         "users",
         f"{user_id}:email",
         new_email_bytes,
+        effect.user_email_address_counter,
         expires_at=0,
-        counter=effect.user_email_address_counter,
+        assert_updated=False,
     )
+    if not updated:
+        return ActionError("user_not_found")
 
     # Update email index
     store.add("users_by_email", new_email, user_id.encode("utf-8"), expires_at=0)
     store.delete("users_by_email", old_email)
 
     logger.info(f"Updated email for user {user_id} from {old_email} to {new_email}")
-    return None
 
 
 def update_user_password_hash(
@@ -247,14 +248,17 @@ def update_user_password_hash(
     }
     new_password_bytes = json.dumps(password_data).encode("utf-8")
 
-    # Update password (assert_updated=True by default - will assert on counter mismatch)
-    store.update(
+    updated = store.update(
         "users",
         f"{user_id}:password",
         new_password_bytes,
+        effect.user_password_hash_counter,
         expires_at=0,
-        counter=effect.user_password_hash_counter,
+        assert_updated=False,
     )
+
+    if not updated:
+        return ActionError("user_not_found")
 
     logger.info(f"Updated password hash for user {user_id}")
     return None
@@ -281,8 +285,8 @@ def increment_user_sessions_counter(
         "users",
         f"{user_id}:sessions_counter",
         new_count_bytes,
+        effect.user_sessions_counter,
         expires_at=0,
-        counter=effect.user_sessions_counter,
     )
 
     logger.info(
@@ -326,8 +330,7 @@ class SqliteSyncServer(SyncServer):
         self.store = store
 
     @override
-    def execute_effect(self, effect: Effect) -> EffectResult:  # noqa: PLR0911
-        """Execute an effect atomically."""
+    def execute_effect(self, effect: Effect) -> EffectResult:
         logger.info(f"Executing effect: {type(effect).__name__}")
 
         if isinstance(effect, CreateUserEffect):

@@ -100,8 +100,8 @@ def update_registration_state_accepted(
                     "registration_state",
                     key,
                     updated_data,
+                    counter,
                     expires_at=0,
-                    counter=counter,
                 )
                 return None
 
