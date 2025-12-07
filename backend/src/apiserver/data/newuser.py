@@ -57,8 +57,8 @@ def add_new_user(
     Add a new user to the newuser table.
     Returns error if email already exists in either newuser or user table.
     """
-    # Check if email already exists in user table
-    user_data = store.get("users", email)
+    # Check if email already exists in user table (users_by_email is the index)
+    user_data = store.get("users_by_email", email)
     if user_data is not None:
         return EmailExistsInUserTable(email=email)
 

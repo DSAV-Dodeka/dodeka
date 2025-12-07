@@ -4,3 +4,5 @@ localenv.toml
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+**/private_route.key

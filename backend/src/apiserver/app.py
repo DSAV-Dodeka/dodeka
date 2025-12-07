@@ -101,6 +101,7 @@ def check_route_access(
     )
     req_private_key = headers.get("x-private-route-access-key")
     if is_private and req_private_key != private_key:
+        logger.warning(f"Access denied to private route: {method} {path}")
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
     # Check admin route access
@@ -109,6 +110,7 @@ def check_route_access(
     )
     req_admin_key = headers.get("x-admin-key")
     if is_admin and req_admin_key != admin_key:
+        logger.warning(f"Access denied to admin route: {method} {path}")
         return Response.text(f"Unauthorized: {method} {path}", status_code=401)
 
     return None
@@ -130,6 +132,7 @@ def handle_options_request(
     if route_entry.requires_credentials:
         res_headers.append((b"Access-Control-Allow-Credentials", b"true"))
 
+    logger.debug("Returning OPTIONS request.")
     return Response(status_code=204, headers=res_headers, body=b"")
 
 
@@ -146,6 +149,7 @@ def handler_with_client(
     not the same 'origin', so different domain)
     """
     if store_queue is None:
+        logger.error("Storage not available")
         return Response.text("Storage not available", status_code=500)
 
     path = req.path
@@ -158,6 +162,7 @@ def handler_with_client(
             headers[header_name.lower().decode("utf-8")] = header_value.decode("utf-8")
     except ValueError:
         # In case there is non-utf-8
+        logger.debug("Received request with non-utf-8 headers.")
         return Response.text("Bad Request: Invalid Header", status_code=400)
 
     def h_invoke_action():
@@ -232,6 +237,7 @@ def handler_with_client(
 
     route = route_table.get(path)
     if route is None:
+        logger.info(f"Route not found: {method} {path}")
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
     # In order to get a useful method when the method is OPTIONS is sent for many other
@@ -244,6 +250,7 @@ def handler_with_client(
     # We can now get a route_entry, or just set it to none and then return not found
     route_entry = None if requested_method is None else route.get(requested_method)
     if route_entry is None:
+        logger.info(f"Method not supported: {method} {path}")
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
     # Check private and admin route access
@@ -279,6 +286,7 @@ def invoke_user_action(req: Request, store_queue: StorageQueue) -> Response:
     try:
         request_json = json.loads(req.body.decode("utf-8"))
     except json.JSONDecodeError:
+        logger.warning("invoke_user_action: Invalid JSON in request")
         return Response.text("Invalid JSON", status_code=400)
 
     def execute_action(store: Storage) -> str:
@@ -286,9 +294,9 @@ def invoke_user_action(req: Request, store_queue: StorageQueue) -> Response:
         result = handle_request_sync(request_json, server)
 
         if result.error is not None:
-            logger.error(f"Action error: {result.error}")
+            logger.error(f"invoke_user_action: Action error: {result.error}")
 
-        logger.debug(f"Action response: {result.response_json}")
+        logger.debug(f"invoke_user_action: Action response: {result.response_json}")
         return result.response_json
 
     response_json = store_queue.execute(execute_action)
@@ -317,8 +325,9 @@ def clear_tables(store_queue: StorageQueue) -> Response:
         store.clear("metadata")
         return "cleared!\n"
 
+    logger.info("clear_tables: Clearing all tables")
     result = store_queue.execute(clear)
-    logger.info(result.strip())
+    logger.info(f"clear_tables: {result.strip()}")
     return Response.text(result)
 
 
@@ -333,8 +342,10 @@ def prepare_user(req: Request, store_queue: StorageQueue) -> Response:
         email = body_data.get("email")
         names = body_data.get("names", [])
         if not email:
+            logger.warning("prepare_user: Missing email in request")
             return Response.text("Missing email", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"prepare_user: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     def prepare(
@@ -347,15 +358,17 @@ def prepare_user(req: Request, store_queue: StorageQueue) -> Response:
 
     result = store_queue.execute(prepare)
     if isinstance(result, InvalidNamesCount):
+        logger.warning(f"prepare_user: Invalid names count: {result.names_count}")
         return Response.text(
             f"Invalid names count: {result.names_count}", status_code=400
         )
     elif isinstance(result, EmailExistsInNewUserTable):
+        logger.warning(f"prepare_user: Email {email} already exists in newuser table")
         return Response.text(
             "User with e-mail already exists in newuser table", status_code=400
         )
     else:
-        logger.info(result.strip())
+        logger.info(f"prepare_user: {result.strip()}")
         return Response.text(result)
 
 
@@ -371,8 +384,10 @@ def request_registration(req: Request, store_queue: StorageQueue) -> Response:
         firstname = body_data.get("firstname", "")
         lastname = body_data.get("lastname", "")
         if not email:
+            logger.warning("request_registration: Missing email in request")
             return Response.text("Missing email", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"request_registration: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     def register(
@@ -386,16 +401,24 @@ def request_registration(req: Request, store_queue: StorageQueue) -> Response:
 
     result = store_queue.execute(register)
     if isinstance(result, EmailExistsInUserTable):
+        logger.error(
+            f"request_registration: Email {email} already exists in user table"
+        )
         return Response.text(
             "User with e-mail already exists in user table", status_code=400
         )
     elif isinstance(result, EmailExistsInNewUserTable):
+        logger.warning(
+            f"request_registration: Email {email} already exists in newuser table"
+        )
         return Response.text(
             "User with e-mail already exists in newuser table", status_code=400
         )
     else:
         registration_token = result
-        logger.info(f"registered {email} with token {registration_token}")
+        logger.info(
+            f"request_registration: Registered {email} with token {registration_token}"
+        )
         return Response.json(
             {
                 "success": True,
@@ -417,8 +440,10 @@ def get_registration_status_handler(
         body_data = json.loads(req.body.decode("utf-8"))
         registration_token = body_data.get("registration_token")
         if not registration_token:
+            logger.warning("get_registration_status: Missing registration_token")
             return Response.text("Missing registration_token", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"get_registration_status: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     def get_status(store: Storage) -> dict | None:
@@ -434,8 +459,13 @@ def get_registration_status_handler(
 
     result = store_queue.execute(get_status)
     if result is None:
+        logger.info(f"get_registration_status: Token {registration_token} not found")
         return Response.text("Registration token not found", status_code=404)
 
+    logger.info(
+        f"get_registration_status: Found status for {result['email']}, "
+        f"accepted={result['accepted']}"
+    )
     return Response.json(result)
 
 
@@ -455,6 +485,7 @@ def list_newusers_handler(store_queue: StorageQueue) -> Response:
         ]
 
     result = store_queue.execute(list_users)
+    logger.info(f"list_newusers: Returning {len(result)} users")
     return Response.json(result)
 
 
@@ -467,15 +498,22 @@ def accept_user_handler(
         body_data = json.loads(req.body.decode("utf-8"))
         email = body_data.get("email")
         if not email:
+            logger.warning("accept_user: Missing email in request")
             return Response.text("Missing email", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"accept_user: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     try:
         # Initiate Faroe signup flow first
+        logger.info(f"accept_user: Creating Faroe signup for {email}")
         signup_result = auth_client.create_signup(email)
 
         if isinstance(signup_result, ActionErrorResult):
+            logger.error(
+                f"accept_user: Faroe signup failed for {email}: "
+                f"{signup_result.error_code}"
+            )
             return Response.json(
                 {
                     "error": "Faroe signup failed",
@@ -500,15 +538,17 @@ def accept_user_handler(
 
         result = store_queue.execute(accept)
         if isinstance(result, EmailNotFoundInNewUserTable):
+            logger.warning(f"accept_user: Email {email} not found in newuser table")
             return Response.text(
                 f"Email {email} not found in newuser table", status_code=400
             )
         elif isinstance(result, RegistrationStateNotFoundForEmail):
+            logger.warning(f"accept_user: No registration state found for {email}")
             return Response.text(
                 f"No registration state found for email: {email}", status_code=400
             )
         else:
-            logger.info(result.strip())
+            logger.info(f"accept_user: {result.strip()}")
 
             # Return signup token from successful result
             return Response.json(
@@ -519,7 +559,7 @@ def accept_user_handler(
                 }
             )
     except Exception as e:
-        logger.error(f"Failed to create Faroe signup: {e}")
+        logger.error(f"accept_user: Failed to create Faroe signup: {e}")
         return Response.text(f"Failed to create signup: {e}", status_code=500)
 
 
@@ -544,22 +584,29 @@ def get_or_validate_session(
 
     # If cache miss, validate with auth server
     if cached_session is None:
+        logger.debug("Session cache miss, validating with auth server")
         session_result = auth_client.get_session(session_token)
 
         if isinstance(session_result, ActionErrorResult):
             if session_result.error_code != "invalid_session_token":
                 invocation_id = session_result.action_invocation_id
                 error_code = session_result.error_code
+                logger.error(
+                    f"Auth server error (invocation {invocation_id}): {error_code}"
+                )
                 raise ValueError(
                     f"Error getting session from auth server "
                     f"(invocation {invocation_id}): {error_code}."
                 )
+            logger.info("Invalid session token provided")
             return Response.text("Invalid session_token", status_code=401)
 
         # Cache the validated session
         user_id = session_result.session.user_id
         created_at = session_result.session.created_at
         expires_at = session_result.session.expires_at
+
+        logger.debug(f"Session validated for user {user_id}, updating cache")
 
         def update_cache(store: Storage):
             # Note that it's fine if it already executes by this point, it will just
@@ -574,6 +621,7 @@ def get_or_validate_session(
         user_id = cached_session.user_id
         created_at = cached_session.created_at
         expires_at = cached_session.expires_at
+        logger.debug(f"Session cache hit for user {user_id}")
 
     return (user_id, created_at, expires_at)
 
@@ -590,20 +638,27 @@ def set_session(
     origin = headers.get("origin")
 
     if origin != settings.frontend_origin:
+        logger.warning(f"set_session: Invalid origin {origin}")
         return Response.text("Invalid origin!", status_code=403)
 
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         session_token = body_data.get("session_token")
         if not session_token:
+            logger.warning("set_session: Missing session_token in request")
             return Response.text("Missing session_token", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"set_session: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     # Validate session with auth server (and cache it)
     result = get_or_validate_session(auth_client, session_token, store_queue)
     if isinstance(result, Response):
+        logger.info("set_session: Session validation failed")
         return result
+
+    user_id, _, _ = result
+    logger.info(f"set_session: Setting session cookie for user {user_id}")
 
     max_session_age = 86400 * 365
 
@@ -633,7 +688,10 @@ def clear_session(headers: dict[str, str]) -> Response:
     origin = headers.get("origin")
 
     if origin != settings.frontend_origin:
+        logger.warning(f"clear_session: Invalid origin {origin}")
         return Response.text("Invalid origin!", status_code=403)
+
+    logger.info("clear_session: Clearing session cookie")
 
     # Build Set-Cookie header that clears the cookie (max-age=0)
     cookie = SimpleCookie()
@@ -662,12 +720,14 @@ def session_info(
     session_token = get_cookie_value(headers, "session_token")
 
     if session_token is None:
+        logger.debug("session_info: No session cookie found")
         response_data = {"error": "no_session"}
         return Response.json(response_data)
 
     # Validate session with auth server (and cache it)
     result = get_or_validate_session(auth_client, session_token, store_queue)
     if isinstance(result, Response):
+        logger.info("session_info: Session validation failed")
         # Return error response as JSON with proper error field
         return Response.json({"error": "invalid_session"}, status_code=401)
 
@@ -684,8 +744,10 @@ def session_info(
     session = store_queue.execute(get_session_data)
 
     if isinstance(session, InvalidSession):
+        logger.warning(f"session_info: User {user_id} not found in database")
         response_data = {"error": "invalid_session"}
     else:
+        logger.debug(f"session_info: Returning session info for user {user_id}")
         response_data = {
             "user": {
                 "user_id": session.user.user_id,
@@ -716,11 +778,14 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
         user_id = body_data.get("user_id")
         permission = body_data.get("permission")
         if not user_id or not permission:
+            logger.warning("add_user_permission: Missing user_id or permission")
             return Response.text("Missing user_id or permission", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"add_user_permission: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     if not allowed_permission(permission):
+        logger.warning(f"add_user_permission: Invalid permission {permission}")
         return Response.text(f"Invalid permission: {permission}", status_code=400)
 
     timestamp = int(time.time())
@@ -733,8 +798,10 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
 
     result = store_queue.execute(add_perm)
     if isinstance(result, UserNotFoundError):
+        logger.warning(f"add_user_permission: User {user_id} not found")
         return Response.text(f"User {user_id} not found", status_code=404)
     else:
+        logger.info(f"add_user_permission: {result.strip()}")
         return Response.text(result)
 
 
@@ -745,11 +812,14 @@ def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
         user_id = body_data.get("user_id")
         permission = body_data.get("permission")
         if not user_id or not permission:
+            logger.warning("remove_user_permission: Missing user_id or permission")
             return Response.text("Missing user_id or permission", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"remove_user_permission: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     if not allowed_permission(permission):
+        logger.warning(f"remove_user_permission: Invalid permission {permission}")
         return Response.text(f"Invalid permission: {permission}", status_code=400)
 
     def remove_perm(store: Storage) -> str | UserNotFoundError:
@@ -760,8 +830,10 @@ def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
 
     result = store_queue.execute(remove_perm)
     if isinstance(result, UserNotFoundError):
+        logger.warning(f"remove_user_permission: User {user_id} not found")
         return Response.text(f"User {user_id} not found", status_code=404)
     else:
+        logger.info(f"remove_user_permission: {result.strip()}")
         return Response.text(result)
 
 
@@ -770,8 +842,10 @@ def get_session_token_handler(headers: dict[str, str]) -> Response:
     session_token = get_cookie_value(headers, "session_token")
 
     if session_token is None:
+        logger.debug("get_session_token: No session cookie found")
         return Response.json({"error": "no_session"}, status_code=401)
 
+    logger.debug("get_session_token: Returning session token")
     return Response.json({"session_token": session_token})
 
 
