@@ -3,8 +3,7 @@ import json
 import logging
 import secrets
 import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
 from typing import Callable
 
@@ -55,8 +54,45 @@ SESSION_CACHE_EXPIRY_SECONDS = 8 * 60 * 60
 
 class Visibility(enum.Enum):
     PRIVATE = enum.auto()
-    ADMIN_ONLY = enum.auto()
     PUBLIC = enum.auto()
+
+
+class PermissionMode(enum.Enum):
+    """Mode for permission checking on routes."""
+
+    PUBLIC = enum.auto()  # No authentication needed
+    DENY_ALL = enum.auto()  # Restrictive default - denies all access
+    REQUIRE_PERMISSIONS = enum.auto()  # Check specific permissions
+
+
+@dataclass(frozen=True)
+class PermissionConfig:
+    """
+    Configuration for permission requirements on a route.
+    Use static methods to create instances.
+    """
+
+    mode: PermissionMode
+    permissions: frozenset[str] = frozenset()
+
+    @staticmethod
+    def public() -> "PermissionConfig":
+        """No authentication needed - public access."""
+        return PermissionConfig(PermissionMode.PUBLIC)
+
+    @staticmethod
+    def deny_all() -> "PermissionConfig":
+        """Deny all access - restrictive default."""
+        return PermissionConfig(PermissionMode.DENY_ALL)
+
+    @staticmethod
+    def require(*permissions: str) -> "PermissionConfig":
+        """Require one or more specific permissions (user must have ALL of them)."""
+        if not permissions:
+            raise ValueError("Must specify at least one permission")
+        return PermissionConfig(
+            PermissionMode.REQUIRE_PERMISSIONS, frozenset(permissions)
+        )
 
 
 @dataclass
@@ -66,10 +102,23 @@ class RouteEntry:
     """
 
     handler: Callable[[], Response]
+    # Permission configuration for this route - use PermissionConfig static methods
+    # Default is DENY_ALL for security (forces explicit permission configuration)
+    permission: PermissionConfig = field(default_factory=PermissionConfig.deny_all)
     # If yes, then we add special headers so that browsers are able to send things
-    # like cookies along
+    # like cookies along (automatically true for permission-protected routes)
     requires_credentials: bool = False
     visibility: Visibility = Visibility.PRIVATE
+
+    def needs_credentials(self) -> bool:
+        """Check if this route needs credentials (session cookie)."""
+        # Explicit override
+        if self.requires_credentials:
+            return True
+        # Automatic: permission-protected routes need credentials
+        if self.permission.mode == PermissionMode.REQUIRE_PERMISSIONS:
+            return True
+        return False
 
 
 def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
@@ -91,9 +140,8 @@ def check_route_access(
     route_entry: RouteEntry,
     headers: dict[str, str],
     private_key: str,
-    admin_key: str,
 ) -> Response | None:
-    """Check private and admin route access, return error response or None if OK."""
+    """Check private route access, return error response or None if OK."""
     # Check private route access, some defense in depth we check both entry and route
     # string
     is_private = route_entry.visibility == Visibility.PRIVATE or path.startswith(
@@ -104,15 +152,96 @@ def check_route_access(
         logger.warning(f"Access denied to private route: {method} {path}")
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
-    # Check admin route access
-    is_admin = route_entry.visibility == Visibility.ADMIN_ONLY or path.startswith(
-        "/admin"
-    )
-    req_admin_key = headers.get("x-admin-key")
-    if is_admin and req_admin_key != admin_key:
-        logger.warning(f"Access denied to admin route: {method} {path}")
-        return Response.text(f"Unauthorized: {method} {path}", status_code=401)
+    return None
 
+
+def check_permission_required(
+    path: str,
+    method: str,
+    route_entry: RouteEntry,
+    headers: dict[str, str],
+    auth_client: AuthClient,
+    store_queue: StorageQueue,
+) -> Response | None:
+    """
+    Check if route requires specific permissions via session cookie.
+    Returns error response if unauthorized, None if OK.
+    """
+    # Check the permission configuration
+    permission_config = route_entry.permission
+
+    # PUBLIC routes need no authentication
+    if permission_config.mode == PermissionMode.PUBLIC:
+        return None
+
+    # DENY_ALL is the restrictive default - route was not properly configured
+    if permission_config.mode == PermissionMode.DENY_ALL:
+        logger.error(
+            f"Route not properly configured - DENY_ALL permission: {method} {path}"
+        )
+        return Response.text("Forbidden: Route not configured", status_code=403)
+
+    # At this point, mode must be REQUIRE_PERMISSIONS
+    assert permission_config.mode == PermissionMode.REQUIRE_PERMISSIONS
+    required_permissions = permission_config.permissions
+
+    # Get session token from cookie
+    session_token = get_cookie_value(headers, "session_token")
+    if session_token is None:
+        logger.warning(
+            f"Permission-protected route access denied - no session: {method} {path} "
+            f"(requires: {', '.join(sorted(required_permissions))})"
+        )
+        return Response.text("Unauthorized: No session", status_code=401)
+
+    # Validate session and get user_id
+    result = get_or_validate_session(auth_client, session_token, store_queue)
+    if isinstance(result, Response):
+        logger.warning(
+            f"Permission-protected route access denied - invalid session: "
+            f"{method} {path} (requires: {', '.join(sorted(required_permissions))})"
+        )
+        return Response.text("Unauthorized: Invalid session", status_code=401)
+
+    user_id, _, _ = result
+    timestamp = int(time.time())
+
+    # Get user permissions
+    def get_permissions(store: Storage) -> set[str] | None:
+        user = get_user_info(store, timestamp, user_id)
+        if user is None:
+            return None
+        return user.permissions
+
+    user_permissions = store_queue.execute(get_permissions)
+
+    if user_permissions is None:
+        logger.warning(
+            f"Permission-protected route access denied - user not found: "
+            f"{method} {path} (user_id={user_id}, "
+            f"requires: {', '.join(sorted(required_permissions))})"
+        )
+        return Response.text("Unauthorized: User not found", status_code=401)
+
+    # Check that user has ALL required permissions
+    missing_permissions = required_permissions - user_permissions
+    if missing_permissions:
+        logger.warning(
+            f"Permission-protected route access denied - missing permissions: "
+            f"{method} {path} (user_id={user_id}, "
+            f"has: {', '.join(sorted(user_permissions))}, "
+            f"missing: {', '.join(sorted(missing_permissions))})"
+        )
+        return Response.text(
+            f"Forbidden: Missing required permissions: "
+            f"{', '.join(sorted(missing_permissions))}",
+            status_code=403,
+        )
+
+    logger.debug(
+        f"Permission-protected route access granted: {method} {path} "
+        f"(user_id={user_id}, permissions: {', '.join(sorted(required_permissions))})"
+    )
     return None
 
 
@@ -129,7 +258,7 @@ def handle_options_request(
         (b"Access-Control-Allow-Origin", frontend_origin.encode("utf-8")),
         (b"Access-Control-Allow-Headers", b"Content-Type"),
     ]
-    if route_entry.requires_credentials:
+    if route_entry.needs_credentials():
         res_headers.append((b"Access-Control-Allow-Credentials", b"true"))
 
     logger.debug("Returning OPTIONS request.")
@@ -138,7 +267,6 @@ def handle_options_request(
 
 def handler_with_client(
     auth_client: AuthClient,
-    admin_key: str,
     private_route_access_key: str,
     req: Request,
     store_queue: StorageQueue | None,
@@ -204,34 +332,64 @@ def handler_with_client(
     def h_get_sess_token():
         return get_session_token_handler(headers)
 
+    def h_add_admin_perm():
+        return add_admin_permission(req, store_queue)
+
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
         # Private endpoint, only accessible to the Go auth server
-        "/private/invoke_user_action": {"POST": RouteEntry(h_invoke_action)},
+        "/private/invoke_user_action": {
+            "POST": RouteEntry(h_invoke_action, PermissionConfig.public())
+        },
+        "/private/add_admin_permission/": {
+            "POST": RouteEntry(h_add_admin_perm, PermissionConfig.public())
+        },
         # Test endpoints used for the test suite and development
-        "/test/prepare_user": {"POST": RouteEntry(h_prepare)},
-        "/test/clear_tables": {"POST": RouteEntry(h_clear)},
+        "/test/prepare_user": {
+            "POST": RouteEntry(h_prepare, PermissionConfig.public())
+        },
+        "/test/clear_tables": {"POST": RouteEntry(h_clear, PermissionConfig.public())},
         # Dodeka-specific actions related to auth
-        "/auth/request_registration": {"POST": RouteEntry(h_request_registration)},
-        "/auth/registration_status": {"POST": RouteEntry(h_get_reg_status)},
+        "/auth/request_registration": {
+            "POST": RouteEntry(h_request_registration, PermissionConfig.public())
+        },
+        "/auth/registration_status": {
+            "POST": RouteEntry(h_get_reg_status, PermissionConfig.public())
+        },
         # We prefix the next with 'admin' to make it clear it's only accessible to
         # admins
-        "/admin/accept_user/": {"POST": RouteEntry(h_accept_user)},
-        "/admin/add_permission/": {"POST": RouteEntry(h_add_perm)},
-        "/admin/remove_permission/": {"POST": RouteEntry(h_remove_perm)},
-        "/admin/list_newusers/": {"GET": RouteEntry(h_list_newusers)},
+        "/admin/accept_user/": {
+            "POST": RouteEntry(h_accept_user, PermissionConfig.require("admin"))
+        },
+        "/admin/add_permission/": {
+            "POST": RouteEntry(h_add_perm, PermissionConfig.require("admin"))
+        },
+        "/admin/remove_permission/": {
+            "POST": RouteEntry(h_remove_perm, PermissionConfig.require("admin"))
+        },
+        "/admin/list_newusers/": {
+            "GET": RouteEntry(h_list_newusers, PermissionConfig.require("admin"))
+        },
         "/auth/session_info/": {
-            "GET": RouteEntry(h_sess_info, requires_credentials=True)
+            "GET": RouteEntry(
+                h_sess_info, PermissionConfig.public(), requires_credentials=True
+            )
         },
         # Since we have HttpOnly cookies, we need server functions to modify them
         "/cookies/session_token/": {
-            "GET": RouteEntry(h_get_sess_token, requires_credentials=True)
+            "GET": RouteEntry(
+                h_get_sess_token, PermissionConfig.public(), requires_credentials=True
+            )
         },
         "/cookies/set_session/": {
-            "POST": RouteEntry(h_set_sess, requires_credentials=True)
+            "POST": RouteEntry(
+                h_set_sess, PermissionConfig.public(), requires_credentials=True
+            )
         },
         "/cookies/clear_session/": {
-            "POST": RouteEntry(h_clear_sess, requires_credentials=True)
+            "POST": RouteEntry(
+                h_clear_sess, PermissionConfig.public(), requires_credentials=True
+            )
         },
     }
 
@@ -253,9 +411,15 @@ def handler_with_client(
         logger.info(f"Method not supported: {method} {path}")
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
-    # Check private and admin route access
+    # Check private route access
     if error := check_route_access(
-        path, method, route_entry, headers, private_route_access_key, admin_key
+        path, method, route_entry, headers, private_route_access_key
+    ):
+        return error
+
+    # Check if route requires a specific permission via session cookie
+    if error := check_permission_required(
+        path, method, route_entry, headers, auth_client, store_queue
     ):
         return error
 
@@ -273,7 +437,7 @@ def handler_with_client(
     # This one is basically always necessary for the browser to read it
     response.headers.append(allow_origin_header)
     # Add credentials header if this route requires it
-    if route_entry.requires_credentials:
+    if route_entry.needs_credentials():
         response.headers.append((b"Access-Control-Allow-Credentials", b"true"))
     return response
 
@@ -772,7 +936,7 @@ def session_info(
 
 
 def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/add_permission/ - adds a permission to a user."""
+    """Handle /admin/add_permission/ - adds a permission to a user (except admin)."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         user_id = body_data.get("user_id")
@@ -783,6 +947,13 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"add_user_permission: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
+
+    # Block adding admin permission through public API
+    if permission == "admin":
+        logger.error(
+            f"add_user_permission: Attempted to add admin permission to {user_id}"
+        )
+        return Response.text("Cannot add admin permission", status_code=403)
 
     if not allowed_permission(permission):
         logger.warning(f"add_user_permission: Invalid permission {permission}")
@@ -837,6 +1008,38 @@ def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
         return Response.text(result)
 
 
+def add_admin_permission(req: Request, store_queue: StorageQueue) -> Response:
+    """
+    Handle /private/add_admin_permission/ - adds admin permission to a user.
+    This is a private route only accessible with the private route access key.
+    """
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        user_id = body_data.get("user_id")
+        if not user_id:
+            logger.warning("add_admin_permission: Missing user_id")
+            return Response.text("Missing user_id", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"add_admin_permission: Invalid request: {e}")
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    timestamp = int(time.time())
+
+    def add_admin_perm(store: Storage) -> str | UserNotFoundError:
+        result = add_permission(store, timestamp, user_id, "admin")
+        if result is not None:
+            return result
+        return f"Added admin permission to user {user_id}\n"
+
+    result = store_queue.execute(add_admin_perm)
+    if isinstance(result, UserNotFoundError):
+        logger.warning(f"add_admin_permission: User {user_id} not found")
+        return Response.text(f"User {user_id} not found", status_code=404)
+    else:
+        logger.info(f"add_admin_permission: {result.strip()}")
+        return Response.text(result)
+
+
 def get_session_token_handler(headers: dict[str, str]) -> Response:
     """Handle /auth/get_session_token/ - returns session token from cookie."""
     session_token = get_cookie_value(headers, "session_token")
@@ -849,14 +1052,9 @@ def get_session_token_handler(headers: dict[str, str]) -> Response:
     return Response.json({"session_token": session_token})
 
 
-MIN_ADMIN_KEY_LEN = 16
-
-
 def run_with_settings(settings: Settings):
     log_listener = setup_logging()
     log_listener.start()
-
-    now = int(datetime.now(timezone.utc).timestamp())
 
     # Configure logging level based on debug_logs setting
     log_level = logging.DEBUG if settings.debug_logs else logging.INFO
@@ -877,23 +1075,6 @@ def run_with_settings(settings: Settings):
     with open(settings.private_route_access_file, "w") as f:
         f.write(private_route_access_key)
 
-    # In 'test' we set a dummy value and don't care
-    if settings.environment == "test":
-        admin_key = "test_key"
-    else:
-        if (
-            settings.admin_key is None
-            or len(settings.admin_key.key) < MIN_ADMIN_KEY_LEN
-        ):
-            raise RuntimeError(
-                f"You must set the 'admin_key' to length at least {MIN_ADMIN_KEY_LEN}"
-            )
-
-        if settings.admin_key.expiration > now:
-            raise RuntimeError("Admin key is expired, please set a new one.")
-
-        admin_key = settings.admin_key.key
-
     # hfree doesn't know about the client, so we create a new handler that captures it
     def handler(req: Request, store_queue: StorageQueue | None) -> Response:
         # In test we set these headers so that we do actually check, but we just check
@@ -905,10 +1086,9 @@ def run_with_settings(settings: Settings):
                     private_route_access_key.encode("utf-8"),
                 )
             )
-            req.headers.append((b"x-admin-key", admin_key.encode("utf-8")))
 
         return handler_with_client(
-            auth_client, admin_key, private_route_access_key, req, store_queue
+            auth_client, private_route_access_key, req, store_queue
         )
 
     config = ServerConfig(
