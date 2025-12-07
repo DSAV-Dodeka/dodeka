@@ -67,22 +67,15 @@ class PermissionMode(enum.Enum):
 
 @dataclass(frozen=True)
 class PermissionConfig:
-    """
-    Configuration for permission requirements on a route.
-    Use static methods to create instances.
-    """
-
     mode: PermissionMode
     permissions: frozenset[str] = frozenset()
 
     @staticmethod
     def public() -> "PermissionConfig":
-        """No authentication needed - public access."""
         return PermissionConfig(PermissionMode.PUBLIC)
 
     @staticmethod
     def deny_all() -> "PermissionConfig":
-        """Deny all access - restrictive default."""
         return PermissionConfig(PermissionMode.DENY_ALL)
 
     @staticmethod
@@ -337,58 +330,96 @@ def handler_with_client(
 
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
-        # Private endpoint, only accessible to the Go auth server
+        # Private endpoint, only accessible to the Go auth server or other local
+        # processes
         "/private/invoke_user_action": {
             "POST": RouteEntry(h_invoke_action, PermissionConfig.public())
         },
         "/private/add_admin_permission/": {
             "POST": RouteEntry(h_add_admin_perm, PermissionConfig.public())
         },
-        # Test endpoints used for the test suite and development
-        "/test/prepare_user": {
+        "/private/prepare_user": {
             "POST": RouteEntry(h_prepare, PermissionConfig.public())
         },
-        "/test/clear_tables": {"POST": RouteEntry(h_clear, PermissionConfig.public())},
+        "/private/clear_tables": {
+            "POST": RouteEntry(h_clear, PermissionConfig.public())
+        },
         # Dodeka-specific actions related to auth
         "/auth/request_registration": {
-            "POST": RouteEntry(h_request_registration, PermissionConfig.public())
+            "POST": RouteEntry(
+                h_request_registration,
+                PermissionConfig.public(),
+                visibility=Visibility.PUBLIC,
+            )
         },
         "/auth/registration_status": {
-            "POST": RouteEntry(h_get_reg_status, PermissionConfig.public())
+            "POST": RouteEntry(
+                h_get_reg_status,
+                PermissionConfig.public(),
+                visibility=Visibility.PUBLIC,
+            )
         },
         # We prefix the next with 'admin' to make it clear it's only accessible to
         # admins
         "/admin/accept_user/": {
-            "POST": RouteEntry(h_accept_user, PermissionConfig.require("admin"))
+            "POST": RouteEntry(
+                h_accept_user,
+                PermissionConfig.require("admin"),
+                visibility=Visibility.PUBLIC,
+            )
         },
         "/admin/add_permission/": {
-            "POST": RouteEntry(h_add_perm, PermissionConfig.require("admin"))
+            "POST": RouteEntry(
+                h_add_perm,
+                PermissionConfig.require("admin"),
+                visibility=Visibility.PUBLIC,
+            )
         },
         "/admin/remove_permission/": {
-            "POST": RouteEntry(h_remove_perm, PermissionConfig.require("admin"))
+            "POST": RouteEntry(
+                h_remove_perm,
+                PermissionConfig.require("admin"),
+                visibility=Visibility.PUBLIC,
+            )
         },
         "/admin/list_newusers/": {
-            "GET": RouteEntry(h_list_newusers, PermissionConfig.require("admin"))
+            "GET": RouteEntry(
+                h_list_newusers,
+                PermissionConfig.require("admin"),
+                visibility=Visibility.PUBLIC,
+            )
         },
         "/auth/session_info/": {
             "GET": RouteEntry(
-                h_sess_info, PermissionConfig.public(), requires_credentials=True
+                h_sess_info,
+                PermissionConfig.public(),
+                requires_credentials=True,
+                visibility=Visibility.PUBLIC,
             )
         },
         # Since we have HttpOnly cookies, we need server functions to modify them
         "/cookies/session_token/": {
             "GET": RouteEntry(
-                h_get_sess_token, PermissionConfig.public(), requires_credentials=True
+                h_get_sess_token,
+                PermissionConfig.public(),
+                requires_credentials=True,
+                visibility=Visibility.PUBLIC,
             )
         },
         "/cookies/set_session/": {
             "POST": RouteEntry(
-                h_set_sess, PermissionConfig.public(), requires_credentials=True
+                h_set_sess,
+                PermissionConfig.public(),
+                requires_credentials=True,
+                visibility=Visibility.PUBLIC,
             )
         },
         "/cookies/clear_session/": {
             "POST": RouteEntry(
-                h_clear_sess, PermissionConfig.public(), requires_credentials=True
+                h_clear_sess,
+                PermissionConfig.public(),
+                requires_credentials=True,
+                visibility=Visibility.PUBLIC,
             )
         },
     }
