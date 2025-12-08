@@ -58,9 +58,7 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
 
     # Increment counter for next user
     new_user_counter = str(int_id + 1).encode("utf-8")
-    store.update(
-        "metadata", "user_id_counter", new_user_counter, counter, expires_at=0
-    )
+    store.update("metadata", "user_id_counter", new_user_counter, counter, expires_at=0)
 
     # We construct a user_id from a unique integer and first name + last name
     name_id = f"{firstname.lower()}_{lastname.lower()}"

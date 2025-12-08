@@ -19,7 +19,7 @@ dependencies = [
 
 [tool.uv.sources]
 "tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/lib" }
-"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/client", rev="1c2c8fa9f1f722ae6ffe26c6fc777c0cbd5d7eb2" }
+"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/client", rev="d321ef96388ae16b0c09b1fb06d45d3cfb44d119" }
 hfree = { git = "https://github.com/tiptenbrink/pyht" }
 
 [project.scripts]
@@ -43,7 +43,7 @@ include = ["src", "tests"]
 exclude = ["**/__pycache__", ".venv", "**/.venv"]
 
 [tool.ruff.lint.pylint]
-max-returns = 8
+max-returns = 10
 max-args = 6
 
 [tool.ruff.lint]

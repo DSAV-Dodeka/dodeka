@@ -25,6 +25,7 @@ class Settings:
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
     private_route_access_file: Path = Path("./private_route.key")
+    code_socket_path: Path = Path("/home/tipcl-pop/files/gitp/tiauth-faroe/tokens.sock")
     admin_key: AdminKey | None = None
 
 
@@ -78,9 +79,7 @@ def validate_bool(name: str, value: object) -> bool:
 def validate_int(name: str, value: object) -> int:
     """Validate an integer setting."""
     if not isinstance(value, int):
-        raise ValueError(
-            f"Setting '{name}' must be an int, got {type(value).__name__}"
-        )
+        raise ValueError(f"Setting '{name}' must be an int, got {type(value).__name__}")
     return value
 
 
@@ -140,6 +139,10 @@ def load_settings() -> Settings:
             config[k] = validate_bool(k, toml_data[k])
 
         k = "private_route_access_file"
+        if k in toml_data:
+            config[k] = validate_path(k, toml_data[k])
+
+        k = "code_socket_path"
         if k in toml_data:
             config[k] = validate_path(k, toml_data[k])
 
