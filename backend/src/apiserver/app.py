@@ -122,6 +122,27 @@ class RouteData:
     path: str
 
 
+def parse_headers(req_headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
+    """Parse request headers into a dict. If header keys occur multiple times, we
+    use only the last one."""
+    headers: dict[str, str] = {}
+    try:
+        for header_name, header_value in req_headers:
+            headers[header_name.lower().decode("utf-8")] = header_value.decode("utf-8")
+    except ValueError:
+        # In case there is non-utf-8
+        logger.debug("Received request with non-utf-8 headers.")
+    return headers
+
+
+def add_cookie_to_header(existing_cookie: str | None, name: str, value: str) -> str:
+    cookie = SimpleCookie()
+    if existing_cookie:
+        cookie.load(existing_cookie)
+    cookie[name] = value
+    return "; ".join(f"{k}={morsel.value}" for k, morsel in cookie.items())
+
+
 def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
     """Parse cookie value from headers dict."""
     cookie_str = headers.get("cookie")
@@ -172,7 +193,15 @@ def check_access(
     assert route.entry.permission.mode == PermissionMode.REQUIRE_PERMISSIONS
     required_permissions = route.entry.permission.permissions
 
+    # This one is used purely for access, not for determining who you are logged in
+    # as. It takes precedence for determining access
+    # access_session_token = get_cookie_value(headers, "access_session_token")
+    # if access_session_token is not None:
+    #     logger.debug("Using access_session_token for access.")
+    #     session_token = access_session_token
+    # else:
     session_token = get_cookie_value(headers, "session_token")
+
     if session_token is None:
         logger.warning(
             f"Permission-protected route access denied - no session: "
@@ -193,7 +222,6 @@ def check_access(
     user_id, _, _ = result
     timestamp = int(time.time())
 
-    # Get user permissions
     def get_permissions(store: Storage) -> set[str] | None:
         user = get_user_info(store, timestamp, user_id)
         if user is None:
@@ -271,14 +299,7 @@ def handler_with_client(
     method = req.method
 
     # Parse headers once for reuse in handlers
-    headers: dict[str, str] = {}
-    try:
-        for header_name, header_value in req.headers:
-            headers[header_name.lower().decode("utf-8")] = header_value.decode("utf-8")
-    except ValueError:
-        # In case there is non-utf-8
-        logger.debug("Received request with non-utf-8 headers.")
-        return Response.text("Bad Request: Invalid Header", status_code=400)
+    headers = parse_headers(req.headers)
 
     def h_invoke_action():
         return invoke_user_action(req, store_queue)
@@ -1169,14 +1190,16 @@ def run_with_settings(settings: Settings):
                     private_route_access_key.encode("utf-8"),
                 )
             )
-            # Add admin session cookie if available
-            if test_admin_session_token[0]:
-                req.headers.append(
-                    (
-                        b"cookie",
-                        f"session_token={test_admin_session_token[0]}".encode(),
-                    )
-                )
+            # # Add admin session cookie if available
+            # # TODO: how useful is this really with private access?
+            # if test_admin_session_token[0]:
+            #     headers = parse_headers(req.headers)
+            #     cookie_value = add_cookie_to_header(
+            #         headers.get("cookie"),
+            #         "access_session_token",
+            #         test_admin_session_token[0],
+            #     )
+            #     req.headers.append((b"cookie", cookie_value.encode("utf-8")))
 
         return handler_with_client(
             auth_client, private_route_access_key, req, store_queue
