@@ -13,6 +13,13 @@ from hfree.server import StorageQueue
 from tiauth_faroe.client import ActionErrorResult
 from tiauth_faroe.user_server import handle_request_sync
 
+from apiserver.actions import (
+    AdminUserCreationError,
+    AppClient,
+    MessageReader,
+    create_admin_user,
+    start_socket_reader,
+)
 from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.client import AuthClient
 from apiserver.data.newuser import (
@@ -122,6 +129,16 @@ class RouteData:
     path: str
 
 
+@dataclass
+class AdminBootstrapConfig:
+    message_reader: MessageReader
+    auth_client: AuthClient
+    private_route_access_key: str
+    config: ServerConfig
+    # This is currently unused
+    test_admin_session_token: list[str | None]
+
+
 def parse_headers(req_headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
     """Parse request headers into a dict. If header keys occur multiple times, we
     use only the last one."""
@@ -193,13 +210,6 @@ def check_access(
     assert route.entry.permission.mode == PermissionMode.REQUIRE_PERMISSIONS
     required_permissions = route.entry.permission.permissions
 
-    # This one is used purely for access, not for determining who you are logged in
-    # as. It takes precedence for determining access
-    # access_session_token = get_cookie_value(headers, "access_session_token")
-    # if access_session_token is not None:
-    #     logger.debug("Using access_session_token for access.")
-    #     session_token = access_session_token
-    # else:
     session_token = get_cookie_value(headers, "session_token")
 
     if session_token is None:
@@ -285,6 +295,7 @@ def handler_with_client(
     private_route_access_key: str,
     req: Request,
     store_queue: StorageQueue | None,
+    bootstrap_config: AdminBootstrapConfig | None = None,
 ) -> Response:
     """
     This function dispatches a request to a specific handler, based on the route. It
@@ -305,7 +316,17 @@ def handler_with_client(
         return invoke_user_action(req, store_queue)
 
     def h_clear():
-        return clear_tables(store_queue)
+        response = clear_tables(store_queue)
+        if bootstrap_config:
+            bootstrap_admin(
+                bootstrap_config.message_reader,
+                bootstrap_config.auth_client,
+                bootstrap_config.private_route_access_key,
+                bootstrap_config.config.host,
+                bootstrap_config.config.port,
+                bootstrap_config.test_admin_session_token,
+            )
+        return response
 
     def h_prepare():
         return prepare_user(req, store_queue)
@@ -1140,6 +1161,35 @@ def delete_user_account(req: Request, store_queue: StorageQueue) -> Response:
     return Response.text(result_msg)
 
 
+def bootstrap_admin(
+    message_reader: MessageReader,
+    auth_client: AuthClient,
+    private_route_access_key: str,
+    host: str,
+    port: int,
+    test_admin_session_token: list[str | None] | None = None,
+) -> tuple[str, str]:
+    """Bootstrap the root admin user."""
+    client = AppClient(
+        f"http://{host}:{port}",
+        auth_client.base_url,
+        private_route_access_key,
+    )
+    root_email = "root_admin@localhost"
+    root_password = secrets.token_urlsafe(32)
+
+    user_id, session_token = create_admin_user(
+        client, root_email, root_password, message_reader, ["Root", "Admin"]
+    )
+
+    if test_admin_session_token is not None:
+        test_admin_session_token[0] = session_token
+
+    logger.info(f"Root admin bootstrapped: {root_email} (user_id={user_id})")
+    logger.info(f"Root admin credentials: email={root_email}, password={root_password}")
+    return user_id, session_token
+
+
 def get_session_token_handler(headers: dict[str, str]) -> Response:
     """Handle /auth/get_session_token/ - returns session token from cookie."""
     session_token = get_cookie_value(headers, "session_token")
@@ -1179,31 +1229,10 @@ def run_with_settings(settings: Settings):
     # Use a list so it's mutable from the thread
     test_admin_session_token: list[str | None] = [None]
 
-    # hfree doesn't know about the client, so we create a new handler that captures it
-    def handler(req: Request, store_queue: StorageQueue | None) -> Response:
-        # In test we set these headers so that we do actually check, but we just check
-        # what we now is right
-        if settings.environment == "test":
-            req.headers.append(
-                (
-                    b"x-private-route-access-key",
-                    private_route_access_key.encode("utf-8"),
-                )
-            )
-            # # Add admin session cookie if available
-            # # TODO: how useful is this really with private access?
-            # if test_admin_session_token[0]:
-            #     headers = parse_headers(req.headers)
-            #     cookie_value = add_cookie_to_header(
-            #         headers.get("cookie"),
-            #         "access_session_token",
-            #         test_admin_session_token[0],
-            #     )
-            #     req.headers.append((b"cookie", cookie_value.encode("utf-8")))
-
-        return handler_with_client(
-            auth_client, private_route_access_key, req, store_queue
-        )
+    # Create socket reader state
+    socket_messages: list[dict[str, Any]] = []
+    socket_condition = threading.Condition()
+    message_reader = MessageReader(socket_messages, socket_condition)
 
     config = ServerConfig(
         db_file=str(settings.db_file),
@@ -1217,6 +1246,35 @@ def run_with_settings(settings: Settings):
         ],
     )
 
+    # Create admin bootstrap config
+    bootstrap_config = AdminBootstrapConfig(
+        message_reader=message_reader,
+        auth_client=auth_client,
+        private_route_access_key=private_route_access_key,
+        config=config,
+        test_admin_session_token=test_admin_session_token,
+    )
+
+    # hfree doesn't know about the client, so we create a new handler that captures it
+    def handler(req: Request, store_queue: StorageQueue | None) -> Response:
+        # In test we set these headers so that we do actually check, but we just check
+        # what we now is right
+        if settings.environment == "test":
+            req.headers.append(
+                (
+                    b"x-private-route-access-key",
+                    private_route_access_key.encode("utf-8"),
+                )
+            )
+
+        return handler_with_client(
+            auth_client,
+            private_route_access_key,
+            req,
+            store_queue,
+            bootstrap_config,
+        )
+
     # Create ready event for server startup
     ready_event = threading.Event()
 
@@ -1226,53 +1284,25 @@ def run_with_settings(settings: Settings):
         ready_event.wait()
         logger.info("Server ready, running startup actions...")
 
-        # In test mode, bootstrap admin user
-        if settings.environment == "test":
-            from apiserver.actions import (  # noqa: PLC0415
-                AdminUserCreationError,
-                AppClient,
-                MessageReader,
-                create_admin_user,
-                start_socket_reader,
+        # This is used for reading verification codes from Faroe
+        start_socket_reader(
+            settings.code_socket_path,
+            bootstrap_config.message_reader.messages,
+            bootstrap_config.message_reader.condition,
+        )
+        try:
+            bootstrap_admin(
+                bootstrap_config.message_reader,
+                bootstrap_config.auth_client,
+                bootstrap_config.private_route_access_key,
+                bootstrap_config.config.host,
+                bootstrap_config.config.port,
+                bootstrap_config.test_admin_session_token,
             )
-
-            try:
-                # Create shared state for socket messages
-                socket_messages: list[dict[str, Any]] = []
-                socket_condition = threading.Condition()
-
-                # Start socket reader thread
-                start_socket_reader(
-                    settings.code_socket_path, socket_messages, socket_condition
-                )
-
-                # Create message reader for admin user creation
-                message_reader = MessageReader(socket_messages, socket_condition)
-
-                client = AppClient(
-                    f"http://{config.host}:{config.port}",
-                    settings.auth_server_url,
-                    private_route_access_key,
-                )
-                root_email = "root_admin@localhost"
-                root_password = secrets.token_urlsafe(32)
-
-                user_id, session_token = create_admin_user(
-                    client, root_email, root_password, message_reader, ["Root", "Admin"]
-                )
-
-                test_admin_session_token[0] = session_token
-                logger.info(
-                    f"Root admin bootstrapped: {root_email} (user_id={user_id})"
-                )
-                logger.info(
-                    f"Test admin credentials: email={root_email}, "
-                    f"password={root_password}"
-                )
-            except AdminUserCreationError as e:
-                logger.error(f"Failed to bootstrap root admin: {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error bootstrapping root admin: {e}")
+        except AdminUserCreationError as e:
+            logger.error(f"Failed to bootstrap root admin: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error bootstrapping root admin: {e}")
 
     threading.Thread(target=run_startup_actions, daemon=True).start()
 
