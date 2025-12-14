@@ -1,0 +1,16 @@
+github.com/faroedev/faroe v0.5.1 h1:5LCwQp8giKnhtMV7TSVzzsCY+I7bTJviSIwQI9e3O2A=
+github.com/faroedev/faroe v0.5.1/go.mod h1:qZy0yQWnZ7xykfgkoZ9HscF7u7qjhhQ3APNSr9IJCxw=
+github.com/faroedev/go-json v0.1.1 h1:PfYNgKpxELrtC66UFj0P1zaoV4wK9AejD1UyBcEHcP4=
+github.com/faroedev/go-json v0.1.1/go.mod h1:xDXcDdefPzXVQCk9Zx+MecgvYCSkmLm6LxiXsn7vA+c=
+github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
+github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214190501-3f988a119b99 h1:H3HHabFhre3D+NMeoRfGePJH49JkPpJULNw9BCTOtoQ=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214190501-3f988a119b99/go.mod h1:xgfq93P5+pW1nVEH5jFAhCsrpjj8KDCt1c1+EmhWQEA=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214194509-ddd0e7f65bf8 h1:RBf2ycSU2ry4MEO6xBbbgm3DaKwrmRkivUnOj/WSzI0=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214194509-ddd0e7f65bf8/go.mod h1:xgfq93P5+pW1nVEH5jFAhCsrpjj8KDCt1c1+EmhWQEA=
+golang.org/x/crypto v0.41.0 h1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=
+golang.org/x/crypto v0.41.0/go.mod h1:pO5AFd7FA68rFak7rOAGVuygIISepHftHnr8dr6+sUc=
+golang.org/x/sync v0.16.0 h1:ycBJEhp9p4vXvUZNszeOq0kGTPghopOL8q0fq3vstxw=
+golang.org/x/sync v0.16.0/go.mod h1:1dzgHSNfp02xaA81J2MS99Qcpr2w7fw1gpm99rleRqA=
+golang.org/x/sys v0.35.0 h1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=
+golang.org/x/sys v0.35.0/go.mod h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k=

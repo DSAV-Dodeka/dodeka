@@ -25,7 +25,7 @@ class Settings:
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
     private_route_access_file: Path = Path("./private_route.key")
-    code_socket_path: Path = Path("/home/tipcl-pop/files/gitp/tiauth-faroe/tokens.sock")
+    code_socket_path: Path = Path("./auth/tokens.sock")
     admin_key: AdminKey | None = None
 
 

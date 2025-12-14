@@ -6,3 +6,6 @@ localenv.toml
 *.sqlite-wal
 
 **/private_route.key
+**/tokens.sock
+
+auth/auth
