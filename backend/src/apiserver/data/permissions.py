@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import final
 
-from hfree import Storage
+from freetser import Storage
 
 
 @final

@@ -2,7 +2,7 @@ import json
 import secrets
 from dataclasses import dataclass
 
-from hfree import Storage
+from freetser import Storage
 
 
 @dataclass

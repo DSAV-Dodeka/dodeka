@@ -8,8 +8,15 @@ from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
 from typing import Any, Callable
 
-from hfree import Request, Response, ServerConfig, Storage, setup_logging, start_server
-from hfree.server import StorageQueue
+from freetser import (
+    Request,
+    Response,
+    ServerConfig,
+    Storage,
+    setup_logging,
+    start_server,
+)
+from freetser.server import StorageQueue
 from tiauth_faroe.client import ActionErrorResult
 from tiauth_faroe.user_server import handle_request_sync
 

@@ -2,7 +2,7 @@ import json
 import logging
 from typing import override
 
-from hfree import Storage
+from freetser import Storage
 from tiauth_faroe.user_server import (
     ActionError,
     CreateUserEffect,

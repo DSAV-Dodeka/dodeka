@@ -13,14 +13,13 @@ dependencies = [
     "jinja2==3.1.6",
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
-    "hfree",
+    "freetser==0.1.0",
     "requests==2.32.5",
 ]
 
 [tool.uv.sources]
 "tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/lib" }
 "tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/client", rev="d321ef96388ae16b0c09b1fb06d45d3cfb44d119" }
-hfree = { git = "https://github.com/tiptenbrink/pyht" }
 
 [project.scripts]
 backend = "apiserver.app:run"

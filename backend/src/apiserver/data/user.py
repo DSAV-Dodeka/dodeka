@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 
-from hfree import Storage
+from freetser import Storage
 
 from apiserver.data.permissions import UserNotFoundError, read_permissions
 

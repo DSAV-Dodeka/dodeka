@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 
-from hfree import EntryAlreadyExists, Storage
+from freetser import EntryAlreadyExists, Storage
 
 
 @dataclass
