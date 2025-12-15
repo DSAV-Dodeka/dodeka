@@ -118,6 +118,15 @@ def list_new_users(store: Storage) -> list[NewUser]:
     return users
 
 
+def delete_new_user(store: Storage, email: str) -> bool:
+    """Delete a user from the newuser table. Returns True if deleted."""
+    result = store.get("newusers", email)
+    if result is None:
+        return False
+    store.delete("newusers", email)
+    return True
+
+
 def prepare_user_store(
     store: Storage, email: str, names: list[str]
 ) -> None | InvalidNamesCount | EmailExistsInNewUserTable:

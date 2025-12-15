@@ -8,6 +8,8 @@ github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214190501-3f988a119b99 h1
 github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214190501-3f988a119b99/go.mod h1:xgfq93P5+pW1nVEH5jFAhCsrpjj8KDCt1c1+EmhWQEA=
 github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214194509-ddd0e7f65bf8 h1:RBf2ycSU2ry4MEO6xBbbgm3DaKwrmRkivUnOj/WSzI0=
 github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251214194509-ddd0e7f65bf8/go.mod h1:xgfq93P5+pW1nVEH5jFAhCsrpjj8KDCt1c1+EmhWQEA=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251215185018-868c1122b3ba h1:qYoWJNwFOibRFqPWTx19eUS2M2/8FaXMH727t13s/6A=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.0.0-20251215185018-868c1122b3ba/go.mod h1:xgfq93P5+pW1nVEH5jFAhCsrpjj8KDCt1c1+EmhWQEA=
 golang.org/x/crypto v0.41.0 h1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=
 golang.org/x/crypto v0.41.0/go.mod h1:pO5AFd7FA68rFak7rOAGVuygIISepHftHnr8dr6+sUc=
 golang.org/x/sync v0.16.0 h1:ycBJEhp9p4vXvUZNszeOq0kGTPghopOL8q0fq3vstxw=

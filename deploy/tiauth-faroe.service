@@ -1,0 +1,25 @@
+[Unit]
+# Description of the service
+Description=Tiauth Faroe Go Service
+# Start after network is available
+After=network.target
+
+[Service]
+# Type simple means systemd considers the service started immediately
+Type=simple
+# User to run the service as
+User=backend
+# Working directory for the service
+WorkingDir=/home/backend/
+# Path to the compiled Go binary
+ExecStart=/home/backend/go-app/myapp
+# Restart the service if it crashes
+Restart=on-failure
+# Wait 5 seconds before restarting
+RestartSec=5
+# Optional: environment variables
+Environment=GIN_MODE=release
+
+[Install]
+# Start this service when the system reaches multi-user mode
+WantedBy=multi-user.target

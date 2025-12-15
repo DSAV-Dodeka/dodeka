@@ -35,6 +35,7 @@ from apiserver.data.newuser import (
     EmailNotFoundInNewUserTable,
     InvalidNamesCount,
     add_new_user,
+    delete_new_user,
     list_new_users,
     prepare_user_store,
     update_accepted_flag,
@@ -1133,15 +1134,20 @@ def delete_user_account(req: Request, store_queue: StorageQueue) -> Response:
         logger.warning(f"delete_user_account: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Look up user_id by email
-    def get_user_id_by_email(store: Storage) -> str | None:
+    # Look up user_id by email and also clean up newusers table
+    def get_user_id_and_cleanup_newuser(store: Storage) -> str | None:
+        # Always try to delete from newusers table (handles inconsistent state)
+        deleted_from_newusers = delete_new_user(store, email)
+        if deleted_from_newusers:
+            logger.debug(f"delete_user_account: Deleted {email} from newusers table")
+
         result = store.get("users_by_email", email)
         if result is None:
             return None
         user_id_bytes, _ = result
         return user_id_bytes.decode("utf-8")
 
-    user_id = store_queue.execute(get_user_id_by_email)
+    user_id = store_queue.execute(get_user_id_and_cleanup_newuser)
 
     if user_id is None:
         logger.info(f"delete_user_account: User with email {email} not found (OK)")
