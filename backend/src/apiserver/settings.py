@@ -1,9 +1,13 @@
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from apiserver.resources import res_path
+
+# Default socket path in system temp directory
+DEFAULT_SOCKET_PATH = Path(tempfile.gettempdir()) / "tiauth_faroe.sock"
 
 __all__ = ["Settings", "settings"]
 
@@ -24,8 +28,8 @@ class Settings:
     auth_server_url: str = "http://localhost:3777"
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
-    private_route_access_file: Path = Path("./private_route.key")
-    code_socket_path: Path = Path("./auth/tokens.sock")
+    # Unix socket path for Go-Python communication (user actions + notifications)
+    socket_path: Path = DEFAULT_SOCKET_PATH
     admin_key: AdminKey | None = None
 
 
@@ -138,11 +142,7 @@ def load_settings() -> Settings:
         if k in toml_data:
             config[k] = validate_bool(k, toml_data[k])
 
-        k = "private_route_access_file"
-        if k in toml_data:
-            config[k] = validate_path(k, toml_data[k])
-
-        k = "code_socket_path"
+        k = "socket_path"
         if k in toml_data:
             config[k] = validate_path(k, toml_data[k])
 

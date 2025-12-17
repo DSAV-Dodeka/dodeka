@@ -8,6 +8,8 @@ logger = logging.getLogger("apiserver.client")
 
 
 class AuthClient(SyncClient):
+    """Client for communicating with tiauth-faroe auth server."""
+
     session: requests.Session
     base_url: str
 

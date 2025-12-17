@@ -6,38 +6,28 @@ import threading
 import time
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
-from typing import Any, Callable
+from typing import Callable
 
 from freetser import (
     Request,
     Response,
-    ServerConfig,
     Storage,
+    TcpServerConfig,
     setup_logging,
     start_server,
+    start_storage_thread,
 )
 from freetser.server import StorageQueue
 from tiauth_faroe.client import ActionErrorResult
-from tiauth_faroe.user_server import handle_request_sync
 
-from apiserver.actions import (
-    AdminUserCreationError,
-    AppClient,
-    MessageReader,
-    create_admin_user,
-    start_socket_reader,
-)
-from apiserver.data.auth import SqliteSyncServer
+from apiserver.actions import AdminUserCreationError, create_admin_user
 from apiserver.data.client import AuthClient
 from apiserver.data.newuser import (
     EmailExistsInNewUserTable,
     EmailExistsInUserTable,
     EmailNotFoundInNewUserTable,
-    InvalidNamesCount,
     add_new_user,
-    delete_new_user,
     list_new_users,
-    prepare_user_store,
     update_accepted_flag,
 )
 from apiserver.data.permissions import (
@@ -60,17 +50,13 @@ from apiserver.data.user import (
     get_user_info,
     update_session_cache,
 )
+from apiserver.private import TOKENS_TABLE, TokenWaiter, start_private_server
 from apiserver.settings import Settings, settings
 
 logger = logging.getLogger("apiserver.app")
 
 # Cache session validations for 8 hours to reduce auth server load
 SESSION_CACHE_EXPIRY_SECONDS = 8 * 60 * 60
-
-
-class Visibility(enum.Enum):
-    PRIVATE = enum.auto()
-    PUBLIC = enum.auto()
 
 
 class PermissionMode(enum.Enum):
@@ -117,7 +103,6 @@ class RouteEntry:
     # If yes, then we add special headers so that browsers are able to send things
     # like cookies along (automatically true for permission-protected routes)
     requires_credentials: bool = False
-    visibility: Visibility = Visibility.PRIVATE
 
     def needs_credentials(self) -> bool:
         """Check if this route needs credentials (session cookie)."""
@@ -137,14 +122,6 @@ class RouteData:
     path: str
 
 
-@dataclass
-class AdminBootstrapConfig:
-    message_reader: MessageReader
-    auth_client: AuthClient
-    private_route_access_key: str
-    config: ServerConfig
-    # This is currently unused
-    test_admin_session_token: list[str | None]
 
 
 def parse_headers(req_headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
@@ -184,7 +161,6 @@ def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
 def check_access(
     route: RouteData,
     headers: dict[str, str],
-    private_key: str,
     auth_client: AuthClient,
     store_queue: StorageQueue,
 ) -> Response | None:
@@ -194,22 +170,6 @@ def check_access(
             f"Route not properly configured - DENY_ALL permission: "
             f"{route.method} {route.path}"
         )
-
-    req_private_key = headers.get("x-private-route-access-key")
-    has_private_access = req_private_key is not None and req_private_key == private_key
-
-    # Private access bypasses all other checks
-    # This is important for e.g. bootstrapping an admin account
-    if has_private_access:
-        return None
-
-    # Check if route is private (defense in depth - check both entry and route string)
-    is_private = route.entry.visibility == Visibility.PRIVATE or route.path.startswith(
-        "/private"
-    )
-    if is_private:
-        logger.warning(f"Access denied to private route: {route.method} {route.path}")
-        return Response.text(f"Not Found: {route.method} {route.path}", status_code=404)
 
     # PUBLIC routes need no authentication
     if route.entry.permission.mode == PermissionMode.PUBLIC:
@@ -300,10 +260,8 @@ def handle_options_request(
 
 def handler_with_client(
     auth_client: AuthClient,
-    private_route_access_key: str,
     req: Request,
     store_queue: StorageQueue | None,
-    bootstrap_config: AdminBootstrapConfig | None = None,
 ) -> Response:
     """
     This function dispatches a request to a specific handler, based on the route. It
@@ -319,25 +277,6 @@ def handler_with_client(
 
     # Parse headers once for reuse in handlers
     headers = parse_headers(req.headers)
-
-    def h_invoke_action():
-        return invoke_user_action(req, store_queue)
-
-    def h_clear():
-        response = clear_tables(store_queue)
-        if bootstrap_config:
-            bootstrap_admin(
-                bootstrap_config.message_reader,
-                bootstrap_config.auth_client,
-                bootstrap_config.private_route_access_key,
-                bootstrap_config.config.host,
-                bootstrap_config.config.port,
-                bootstrap_config.test_admin_session_token,
-            )
-        return response
-
-    def h_prepare():
-        return prepare_user(req, store_queue)
 
     def h_request_registration():
         return request_registration(req, store_queue)
@@ -369,107 +308,48 @@ def handler_with_client(
     def h_get_sess_token():
         return get_session_token_handler(headers)
 
-    def h_add_admin_perm():
-        return add_admin_permission(req, store_queue)
-
-    def h_delete_user():
-        return delete_user_account(req, store_queue)
-
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
-        # Private endpoint, only accessible to the Go auth server or other local
-        # processes
-        "/private/invoke_user_action": {
-            "POST": RouteEntry(h_invoke_action, PermissionConfig.public())
-        },
-        "/private/add_admin_permission/": {
-            "POST": RouteEntry(h_add_admin_perm, PermissionConfig.public())
-        },
-        "/private/delete_user/": {
-            "POST": RouteEntry(h_delete_user, PermissionConfig.public())
-        },
-        "/private/prepare_user": {
-            "POST": RouteEntry(h_prepare, PermissionConfig.public())
-        },
-        "/private/clear_tables": {
-            "POST": RouteEntry(h_clear, PermissionConfig.public())
-        },
         # Dodeka-specific actions related to auth
         "/auth/request_registration": {
-            "POST": RouteEntry(
-                h_request_registration,
-                PermissionConfig.public(),
-                visibility=Visibility.PUBLIC,
-            )
+            "POST": RouteEntry(h_request_registration, PermissionConfig.public())
         },
         "/auth/registration_status": {
-            "POST": RouteEntry(
-                h_get_reg_status,
-                PermissionConfig.public(),
-                visibility=Visibility.PUBLIC,
-            )
+            "POST": RouteEntry(h_get_reg_status, PermissionConfig.public())
         },
         # We prefix the next with 'admin' to make it clear it's only accessible to
         # admins
         "/admin/accept_user/": {
-            "POST": RouteEntry(
-                h_accept_user,
-                PermissionConfig.require("admin"),
-                visibility=Visibility.PUBLIC,
-            )
+            "POST": RouteEntry(h_accept_user, PermissionConfig.require("admin"))
         },
         "/admin/add_permission/": {
-            "POST": RouteEntry(
-                h_add_perm,
-                PermissionConfig.require("admin"),
-                visibility=Visibility.PUBLIC,
-            )
+            "POST": RouteEntry(h_add_perm, PermissionConfig.require("admin"))
         },
         "/admin/remove_permission/": {
-            "POST": RouteEntry(
-                h_remove_perm,
-                PermissionConfig.require("admin"),
-                visibility=Visibility.PUBLIC,
-            )
+            "POST": RouteEntry(h_remove_perm, PermissionConfig.require("admin"))
         },
         "/admin/list_newusers/": {
-            "GET": RouteEntry(
-                h_list_newusers,
-                PermissionConfig.require("admin"),
-                visibility=Visibility.PUBLIC,
-            )
+            "GET": RouteEntry(h_list_newusers, PermissionConfig.require("admin"))
         },
         "/auth/session_info/": {
             "GET": RouteEntry(
-                h_sess_info,
-                PermissionConfig.public(),
-                requires_credentials=True,
-                visibility=Visibility.PUBLIC,
+                h_sess_info, PermissionConfig.public(), requires_credentials=True
             )
         },
         # Since we have HttpOnly cookies, we need server functions to modify them
         "/cookies/session_token/": {
             "GET": RouteEntry(
-                h_get_sess_token,
-                PermissionConfig.public(),
-                requires_credentials=True,
-                visibility=Visibility.PUBLIC,
+                h_get_sess_token, PermissionConfig.public(), requires_credentials=True
             )
         },
         "/cookies/set_session/": {
             "POST": RouteEntry(
-                h_set_sess,
-                PermissionConfig.public(),
-                requires_credentials=True,
-                visibility=Visibility.PUBLIC,
+                h_set_sess, PermissionConfig.public(), requires_credentials=True
             )
         },
         "/cookies/clear_session/": {
             "POST": RouteEntry(
-                h_clear_sess,
-                PermissionConfig.public(),
-                requires_credentials=True,
-                visibility=Visibility.PUBLIC,
+                h_clear_sess, PermissionConfig.public(), requires_credentials=True
             )
         },
     }
@@ -492,11 +372,10 @@ def handler_with_client(
         logger.info(f"Method not supported: {method} {path}")
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
-    # Check access (private routes, permissions, etc.)
+    # Check access (permissions, etc.)
     if error := check_access(
         RouteData(entry=route_entry, method=method, path=path),
         headers,
-        private_route_access_key,
         auth_client,
         store_queue,
     ):
@@ -519,100 +398,6 @@ def handler_with_client(
     if route_entry.needs_credentials():
         response.headers.append((b"Access-Control-Allow-Credentials", b"true"))
     return response
-
-
-def invoke_user_action(req: Request, store_queue: StorageQueue) -> Response:
-    """
-    Handle /auth/invoke_user_action - executes Faroe user actions via
-    SqliteSyncServer. It's important that these are protected.
-    """
-    try:
-        request_json = json.loads(req.body.decode("utf-8"))
-    except json.JSONDecodeError:
-        logger.warning("invoke_user_action: Invalid JSON in request")
-        return Response.text("Invalid JSON", status_code=400)
-
-    def execute_action(store: Storage) -> str:
-        server = SqliteSyncServer(store)
-        result = handle_request_sync(request_json, server)
-
-        if result.error is not None:
-            logger.error(f"invoke_user_action: Action error: {result.error}")
-
-        logger.debug(f"invoke_user_action: Action response: {result.response_json}")
-        return result.response_json
-
-    response_json = store_queue.execute(execute_action)
-    return Response(
-        status_code=200,
-        headers=[
-            (b"Content-Type", b"application/json"),
-            (b"Content-Length", str(len(response_json)).encode("ascii")),
-        ],
-        body=response_json.encode("utf-8"),
-    )
-
-
-def clear_tables(store_queue: StorageQueue) -> Response:
-    """
-    Handle /auth/clear_tables.
-
-    Clears user, newuser, and registration_state tables.
-    """
-
-    def clear(store: Storage) -> str:
-        store.clear("users_by_email")
-        store.clear("users")
-        store.clear("newusers")
-        store.clear("registration_state")
-        store.clear("metadata")
-        return "cleared!\n"
-
-    logger.info("clear_tables: Clearing all tables")
-    result = store_queue.execute(clear)
-    logger.info(f"clear_tables: {result.strip()}")
-    return Response.text(result)
-
-
-def prepare_user(req: Request, store_queue: StorageQueue) -> Response:
-    """
-    Handle /test/prepare_user.
-
-    Prepares a user in the newuser store with accepted=True (for testing).
-    """
-    try:
-        body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
-        names = body_data.get("names", [])
-        if not email:
-            logger.warning("prepare_user: Missing email in request")
-            return Response.text("Missing email", status_code=400)
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"prepare_user: Invalid request: {e}")
-        return Response.text(f"Invalid request: {e}", status_code=400)
-
-    def prepare(
-        store: Storage,
-    ) -> str | InvalidNamesCount | EmailExistsInNewUserTable:
-        result = prepare_user_store(store, email, names)
-        if result is not None:
-            return result
-        return f"prepared {email}\n"
-
-    result = store_queue.execute(prepare)
-    if isinstance(result, InvalidNamesCount):
-        logger.warning(f"prepare_user: Invalid names count: {result.names_count}")
-        return Response.text(
-            f"Invalid names count: {result.names_count}", status_code=400
-        )
-    elif isinstance(result, EmailExistsInNewUserTable):
-        logger.warning(f"prepare_user: Email {email} already exists in newuser table")
-        return Response.text(
-            "User with e-mail already exists in newuser table", status_code=400
-        )
-    else:
-        logger.info(f"prepare_user: {result.strip()}")
-        return Response.text(result)
 
 
 def request_registration(req: Request, store_queue: StorageQueue) -> Response:
@@ -1087,116 +872,23 @@ def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
         return Response.text(result)
 
 
-def add_admin_permission(req: Request, store_queue: StorageQueue) -> Response:
-    """
-    Handle /private/add_admin_permission/ - adds admin permission to a user.
-    This is a private route only accessible with the private route access key.
-    """
-    try:
-        body_data = json.loads(req.body.decode("utf-8"))
-        user_id = body_data.get("user_id")
-        if not user_id:
-            logger.warning("add_admin_permission: Missing user_id")
-            return Response.text("Missing user_id", status_code=400)
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"add_admin_permission: Invalid request: {e}")
-        return Response.text(f"Invalid request: {e}", status_code=400)
-
-    timestamp = int(time.time())
-
-    def add_admin_perm(store: Storage) -> str | UserNotFoundError:
-        result = add_permission(store, timestamp, user_id, "admin")
-        if result is not None:
-            return result
-        return f"Added admin permission to user {user_id}\n"
-
-    result = store_queue.execute(add_admin_perm)
-    if isinstance(result, UserNotFoundError):
-        logger.warning(f"add_admin_permission: User {user_id} not found")
-        return Response.text(f"User {user_id} not found", status_code=404)
-    else:
-        logger.info(f"add_admin_permission: {result.strip()}")
-        return Response.text(result)
-
-
-def delete_user_account(req: Request, store_queue: StorageQueue) -> Response:
-    """
-    Handle /private/delete_user/ - deletes a user account by email.
-    This is a private route only accessible with the private route access key.
-    """
-    try:
-        body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
-        if not email:
-            logger.warning("delete_user_account: Missing email")
-            return Response.text("Missing email", status_code=400)
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"delete_user_account: Invalid request: {e}")
-        return Response.text(f"Invalid request: {e}", status_code=400)
-
-    # Look up user_id by email and also clean up newusers table
-    def get_user_id_and_cleanup_newuser(store: Storage) -> str | None:
-        # Always try to delete from newusers table (handles inconsistent state)
-        deleted_from_newusers = delete_new_user(store, email)
-        if deleted_from_newusers:
-            logger.debug(f"delete_user_account: Deleted {email} from newusers table")
-
-        result = store.get("users_by_email", email)
-        if result is None:
-            return None
-        user_id_bytes, _ = result
-        return user_id_bytes.decode("utf-8")
-
-    user_id = store_queue.execute(get_user_id_and_cleanup_newuser)
-
-    if user_id is None:
-        logger.info(f"delete_user_account: User with email {email} not found (OK)")
-        return Response.text("User deleted or did not exist\n")
-
-    # Use tiauth_faroe to delete the user through invoke_user_action
-    delete_request = {
-        "action": "delete_user",
-        "arguments": {"user_id": user_id},
-    }
-
-    def execute_delete(store: Storage) -> str:
-        server = SqliteSyncServer(store)
-        result = handle_request_sync(delete_request, server)
-
-        if result.error is not None:
-            logger.error(f"delete_user_account: Action error: {result.error}")
-            return f"Error deleting user: {result.error}"
-
-        logger.info(f"delete_user_account: Deleted user {user_id} (email={email})")
-        return f"User deleted: {email}\n"
-
-    result_msg = store_queue.execute(execute_delete)
-    return Response.text(result_msg)
-
-
 def bootstrap_admin(
-    message_reader: MessageReader,
+    token_waiter: TokenWaiter,
     auth_client: AuthClient,
-    private_route_access_key: str,
-    host: str,
-    port: int,
-    test_admin_session_token: list[str | None] | None = None,
+    store_queue: StorageQueue,
 ) -> tuple[str, str]:
     """Bootstrap the root admin user."""
-    client = AppClient(
-        f"http://{host}:{port}",
-        auth_client.base_url,
-        private_route_access_key,
-    )
     root_email = "root_admin@localhost"
     root_password = secrets.token_urlsafe(32)
 
     user_id, session_token = create_admin_user(
-        client, root_email, root_password, message_reader, ["Root", "Admin"]
+        store_queue,
+        auth_client,
+        root_email,
+        root_password,
+        token_waiter,
+        ["Root", "Admin"],
     )
-
-    if test_admin_session_token is not None:
-        test_admin_session_token[0] = session_token
 
     logger.info(f"Root admin bootstrapped: {root_email} (user_id={user_id})")
     logger.info(f"Root admin credentials: email={root_email}, password={root_password}")
@@ -1226,67 +918,36 @@ def run_with_settings(settings: Settings):
     logger.info(
         f"Running with settings:\n\t- frontend_origin={settings.frontend_origin}"
         f"\n\t- debug_logs={settings.debug_logs}"
+        f"\n\t- socket_path={settings.socket_path}"
     )
 
     auth_client = AuthClient(settings.auth_server_url)
 
-    # Each time on startup we generate a key for private access
-    private_route_access_key = secrets.token_urlsafe(64)
+    db_tables = [
+        "users",
+        "users_by_email",
+        "newusers",
+        "registration_state",
+        "metadata",
+        "session_cache",
+        TOKENS_TABLE,
+    ]
 
-    # We write this to a file that (presumably) local processes can read to access the
-    # route
-    with open(settings.private_route_access_file, "w") as f:
-        f.write(private_route_access_key)
-
-    # Bootstrap root admin and get test session in test mode
-    # Use a list so it's mutable from the thread
-    test_admin_session_token: list[str | None] = [None]
-
-    # Create socket reader state
-    socket_messages: list[dict[str, Any]] = []
-    socket_condition = threading.Condition()
-    message_reader = MessageReader(socket_messages, socket_condition)
-
-    config = ServerConfig(
+    # Start storage thread
+    store_queue = start_storage_thread(
         db_file=str(settings.db_file),
-        db_tables=[
-            "users",
-            "users_by_email",
-            "newusers",
-            "registration_state",
-            "metadata",
-            "session_cache",
-        ],
+        db_tables=db_tables,
     )
 
-    # Create admin bootstrap config
-    bootstrap_config = AdminBootstrapConfig(
-        message_reader=message_reader,
-        auth_client=auth_client,
-        private_route_access_key=private_route_access_key,
-        config=config,
-        test_admin_session_token=test_admin_session_token,
-    )
+    # Create token waiter for test notifications
+    token_waiter = TokenWaiter(store_queue)
 
-    # hfree doesn't know about the client, so we create a new handler that captures it
+    # Start private UDS server (Go connects to this)
+    start_private_server(str(settings.socket_path), store_queue, token_waiter)
+
+    # freetser doesn't know about the client, so we create a handler that captures it
     def handler(req: Request, store_queue: StorageQueue | None) -> Response:
-        # In test we set these headers so that we do actually check, but we just check
-        # what we now is right
-        if settings.environment == "test":
-            req.headers.append(
-                (
-                    b"x-private-route-access-key",
-                    private_route_access_key.encode("utf-8"),
-                )
-            )
-
-        return handler_with_client(
-            auth_client,
-            private_route_access_key,
-            req,
-            store_queue,
-            bootstrap_config,
-        )
+        return handler_with_client(auth_client, req, store_queue)
 
     # Create ready event for server startup
     ready_event = threading.Event()
@@ -1297,21 +958,8 @@ def run_with_settings(settings: Settings):
         ready_event.wait()
         logger.info("Server ready, running startup actions...")
 
-        # This is used for reading verification codes from Faroe
-        start_socket_reader(
-            settings.code_socket_path,
-            bootstrap_config.message_reader.messages,
-            bootstrap_config.message_reader.condition,
-        )
         try:
-            bootstrap_admin(
-                bootstrap_config.message_reader,
-                bootstrap_config.auth_client,
-                bootstrap_config.private_route_access_key,
-                bootstrap_config.config.host,
-                bootstrap_config.config.port,
-                bootstrap_config.test_admin_session_token,
-            )
+            bootstrap_admin(token_waiter, auth_client, store_queue)
         except AdminUserCreationError as e:
             logger.error(f"Failed to bootstrap root admin: {e}")
         except Exception as e:
@@ -1319,8 +967,11 @@ def run_with_settings(settings: Settings):
 
     threading.Thread(target=run_startup_actions, daemon=True).start()
 
+    # Create TCP server config
+    config = TcpServerConfig()
+
     try:
-        start_server(config, handler, ready_event=ready_event)
+        start_server(config, handler, store_queue=store_queue, ready_event=ready_event)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:

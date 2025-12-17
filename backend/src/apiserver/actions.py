@@ -1,16 +1,20 @@
-import json
 import logging
-import socket
-import threading
-from pathlib import Path
-from typing import Any
+import time
+from typing import TYPE_CHECKING
 
-import requests
+from freetser import Storage
+from freetser.server import StorageQueue
 from tiauth_faroe.client import ActionErrorResult
+from tiauth_faroe.user_server import handle_request_sync
 
+from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.client import AuthClient
+from apiserver.data.newuser import delete_new_user, prepare_user_store
+from apiserver.data.permissions import add_permission
 
-HTTP_OK = 200
+if TYPE_CHECKING:
+    from apiserver.private import TokenWaiter
+
 logger = logging.getLogger("apiserver.actions")
 
 
@@ -18,167 +22,69 @@ class AdminUserCreationError(Exception):
     pass
 
 
-class MessageReader:
-    """Simple reader for messages stored in shared list with proper waiting."""
-
-    def __init__(
-        self,
-        messages: list[dict[str, Any]],
-        condition: threading.Condition,
-    ):
-        self.messages = messages
-        self.condition = condition
-
-    def find_and_pop(
-        self,
-        type: str,
-        email: str,
-    ) -> dict[str, Any]:
-        """Find and remove first matching message, waiting if needed."""
-        while True:
-            for i, msg in enumerate(self.messages):
-                if msg.get("type") != type:
-                    continue
-                if msg.get("email") != email:
-                    continue
-                return self.messages.pop(i)
-
-            self.condition.wait()
-
-
-def start_socket_reader(
-    socket_path: str | Path,
-    messages: list[dict[str, Any]],
-    condition: threading.Condition,
-) -> threading.Thread:
-    """Start background thread that reads from Unix socket and stores messages."""
-    running = threading.Event()
-    running.set()
-
-    def read_loop():
-        path = Path(socket_path)
-        if not path.exists():
-            threading.Event().wait(1.0)
-            raise ValueError(f"Unix socket path {path!s} does not exist.")
-
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        sock.connect(str(path))
-
-        buffer = b""
-        while running.is_set():
-            try:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                buffer += chunk
-
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                    try:
-                        msg = json.loads(line.decode("utf-8"))
-                        if isinstance(msg, dict):
-                            with condition:
-                                messages.append(msg)
-                                condition.notify_all()
-                            logger.debug(f"Unix socket message received: {msg}")
-                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                        logger.warning(f"Invalid unix socket message: {e}")
-            except socket.timeout:
-                continue
-
-        sock.close()
-
-    thread = threading.Thread(target=read_loop, daemon=True)
-    thread.start()
-    return thread
-
-
-class AppClient:
-    """
-    Client for interacting with the app's private routes and auth operations.
-    Uses AuthClient directly for tiauth_faroe operations.
-    """
-
-    session: requests.Session
-    app_base_url: str
-    private_key: str
-    auth_client: AuthClient
-
-    def __init__(self, app_url: str, auth_server_url: str, private_key: str):
-        self.session = requests.Session()
-        self.app_base_url = app_url
-        self.private_key = private_key
-        self.auth_client = AuthClient(auth_server_url)
-
-    def _private_headers(self) -> dict[str, str]:
-        """Get headers with private route access key."""
-        return {"x-private-route-access-key": self.private_key}
-
-    def delete_user(self, email: str) -> requests.Response:
-        """Delete user by email using private route."""
-        url = f"{self.app_base_url}/private/delete_user/"
-        response = self.session.post(
-            url, json={"email": email}, headers=self._private_headers()
-        )
-        return response
-
-    def add_admin_permission(self, user_id: str) -> requests.Response:
-        """Add admin permission to user using private route."""
-        url = f"{self.app_base_url}/private/add_admin_permission/"
-        response = self.session.post(
-            url, json={"user_id": user_id}, headers=self._private_headers()
-        )
-        return response
-
-    def prepare_user(
-        self, email: str, names: list[str] | None = None
-    ) -> requests.Response:
-        """Prepare user in newusers table with accepted=True."""
-        url = f"{self.app_base_url}/private/prepare_user"
-        response = self.session.post(
-            url,
-            json={"email": email, "names": names or []},
-            headers=self._private_headers(),
-        )
-        return response
-
-
 def create_admin_user(
-    client: AppClient,
+    store_queue: StorageQueue,
+    auth_client: AuthClient,
     email: str,
     password: str,
-    message_reader: MessageReader,
+    token_waiter: "TokenWaiter",
     names: list[str] | None = None,
 ) -> tuple[str, str]:
-    delete_resp = client.delete_user(email)
-    if delete_resp.status_code != HTTP_OK:
-        raise AdminUserCreationError(
-            f"Failed to delete user: HTTP {delete_resp.status_code} - "
-            f"{delete_resp.text}"
-        )
+    """Create an admin user using direct DB calls."""
+    # Delete existing user by email (cleanup from previous runs)
+    def delete_user_by_email(store: Storage) -> str | None:
+        # Clean up newusers table
+        delete_new_user(store, email)
 
-    prepare_resp = client.prepare_user(email, names)
-    if prepare_resp.status_code != HTTP_OK:
-        raise AdminUserCreationError(
-            f"Failed to prepare user: HTTP {prepare_resp.status_code} - "
-            f"{prepare_resp.text}"
-        )
+        # Look up user_id by email
+        result = store.get("users_by_email", email)
+        if result is None:
+            return None
+        user_id_bytes, _ = result
+        return user_id_bytes.decode("utf-8")
 
-    signup_result = client.auth_client.create_signup(email)
+    user_id = store_queue.execute(delete_user_by_email)
+
+    # If user exists, delete via Faroe
+    if user_id is not None:
+        delete_request = {"action": "delete_user", "arguments": {"user_id": user_id}}
+
+        def execute_delete(store: Storage) -> str | None:
+            server = SqliteSyncServer(store)
+            result = handle_request_sync(delete_request, server)
+            if result.error is not None:
+                logger.error(f"Failed to delete user: {result.error}")
+                return result.error
+            return None
+
+        error = store_queue.execute(execute_delete)
+        if error is not None:
+            raise AdminUserCreationError(f"Failed to delete user: {error}")
+
+    # Prepare user in newusers table with accepted=True
+    def prepare(store: Storage) -> str | None:
+        result = prepare_user_store(store, email, names or [])
+        if result is not None:
+            return str(result)
+        return None
+
+    prepare_error = store_queue.execute(prepare)
+    if prepare_error is not None:
+        raise AdminUserCreationError(f"Failed to prepare user: {prepare_error}")
+
+    # Create signup via auth server
+    signup_result = auth_client.create_signup(email)
     if isinstance(signup_result, ActionErrorResult):
         raise AdminUserCreationError(
             f"Failed to create signup: {signup_result.error_code}"
         )
     signup_token = signup_result.signup_token
 
-    msg = message_reader.find_and_pop(type="signup_verification", email=email)
-    if not msg.get("code"):
-        raise AdminUserCreationError("Timeout waiting for email verification code")
-    verification_code = msg["code"]
+    # Wait for verification code from Go (stored in tokens table)
+    verification_code = token_waiter.wait_for_token("signup_verification", email)
 
     # Verify email address
-    verify_result = client.auth_client.verify_signup_email_address_verification_code(
+    verify_result = auth_client.verify_signup_email_address_verification_code(
         signup_token, verification_code
     )
     if isinstance(verify_result, ActionErrorResult):
@@ -186,26 +92,34 @@ def create_admin_user(
             f"Failed to verify email: {verify_result.error_code}"
         )
 
-    password_result = client.auth_client.set_signup_password(signup_token, password)
+    # Set password
+    password_result = auth_client.set_signup_password(signup_token, password)
     if isinstance(password_result, ActionErrorResult):
         raise AdminUserCreationError(
             f"Failed to set password: {password_result.error_code}"
         )
 
-    complete_result = client.auth_client.complete_signup(signup_token)
+    # Complete signup
+    complete_result = auth_client.complete_signup(signup_token)
     if isinstance(complete_result, ActionErrorResult):
         raise AdminUserCreationError(
             f"Failed to complete signup: {complete_result.error_code}"
         )
 
-    user_id = complete_result.session.user_id
+    new_user_id = complete_result.session.user_id
     session_token = complete_result.session_token
 
-    admin_resp = client.add_admin_permission(user_id)
-    if admin_resp.status_code != HTTP_OK:
-        raise AdminUserCreationError(
-            f"Failed to add admin permission: HTTP {admin_resp.status_code} - "
-            f"{admin_resp.text}"
-        )
+    # Add admin permission directly to DB
+    timestamp = int(time.time())
 
-    return (user_id, session_token)
+    def add_admin_perm(store: Storage) -> str | None:
+        result = add_permission(store, timestamp, new_user_id, "admin")
+        if result is not None:
+            return str(result)
+        return None
+
+    admin_error = store_queue.execute(add_admin_perm)
+    if admin_error is not None:
+        raise AdminUserCreationError(f"Failed to add admin permission: {admin_error}")
+
+    return (new_user_id, session_token)
