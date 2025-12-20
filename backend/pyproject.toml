@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 backend = "apiserver.app:run"
+backend-actions = "apiserver.cli:main"
 
 [dependency-groups]
 dev = [

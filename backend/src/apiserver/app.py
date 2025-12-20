@@ -21,6 +21,7 @@ from freetser.server import StorageQueue
 from tiauth_faroe.client import ActionErrorResult
 
 from apiserver.actions import AdminUserCreationError, create_admin_user
+from apiserver.data.admin import store_admin_credentials
 from apiserver.data.client import AuthClient
 from apiserver.data.newuser import (
     EmailExistsInNewUserTable,
@@ -50,6 +51,7 @@ from apiserver.data.user import (
     get_user_info,
     update_session_cache,
 )
+from apiserver.interactive import InteractiveShell
 from apiserver.private import TOKENS_TABLE, TokenWaiter, start_private_server
 from apiserver.settings import Settings, settings
 
@@ -156,6 +158,18 @@ def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
     if cookie_name in cookie:
         return cookie[cookie_name].value
     return None
+
+
+def make_clear_session_cookie_header() -> tuple[bytes, bytes]:
+    """Create a Set-Cookie header that clears the session cookie."""
+    cookie = SimpleCookie()
+    cookie["session_token"] = ""
+    cookie["session_token"]["httponly"] = True
+    cookie["session_token"]["samesite"] = "None"
+    cookie["session_token"]["secure"] = True
+    cookie["session_token"]["path"] = "/"
+    cookie["session_token"]["max-age"] = 0
+    return (b"Set-Cookie", cookie["session_token"].OutputString().encode("utf-8"))
 
 
 def check_access(
@@ -720,23 +734,7 @@ def clear_session(headers: dict[str, str]) -> Response:
         return Response.text("Invalid origin!", status_code=403)
 
     logger.info("clear_session: Clearing session cookie")
-
-    # Build Set-Cookie header that clears the cookie (max-age=0)
-    cookie = SimpleCookie()
-    cookie["session_token"] = ""
-    cookie["session_token"]["httponly"] = True
-    cookie["session_token"]["samesite"] = "None"
-    cookie["session_token"]["secure"] = True
-    cookie["session_token"]["path"] = "/"
-    cookie["session_token"]["max-age"] = 0
-
-    cookie_header = cookie["session_token"].OutputString()
-
-    return Response.empty(
-        headers=[
-            (b"Set-Cookie", cookie_header.encode("utf-8")),
-        ],
-    )
+    return Response.empty(headers=[make_clear_session_cookie_header()])
 
 
 def session_info(
@@ -749,15 +747,17 @@ def session_info(
 
     if session_token is None:
         logger.debug("session_info: No session cookie found")
-        response_data = {"error": "no_session"}
-        return Response.json(response_data)
+        return Response.json({"error": "no_session"})
 
     # Validate session with auth server (and cache it)
     result = get_or_validate_session(auth_client, session_token, store_queue)
     if isinstance(result, Response):
-        logger.info("session_info: Session validation failed")
-        # Return error response as JSON with proper error field
-        return Response.json({"error": "invalid_session"}, status_code=401)
+        logger.info("session_info: Session validation failed, clearing cookie")
+        return Response.json(
+            {"error": "invalid_session"},
+            status_code=401,
+            headers=[make_clear_session_cookie_header()],
+        )
 
     user_id, created_at, expires_at = result
     timestamp = int(time.time())
@@ -772,31 +772,25 @@ def session_info(
     session = store_queue.execute(get_session_data)
 
     if isinstance(session, InvalidSession):
-        logger.warning(f"session_info: User {user_id} not found in database")
-        response_data = {"error": "invalid_session"}
-    else:
-        logger.debug(f"session_info: Returning session info for user {user_id}")
-        response_data = {
-            "user": {
-                "user_id": session.user.user_id,
-                "email": session.user.email,
-                "firstname": session.user.firstname,
-                "lastname": session.user.lastname,
-                "permissions": list(session.user.permissions),
-            },
-            "created_at": session.created_at,
-            "expires_at": session.expires_at,
-        }
+        logger.warning(f"session_info: User {user_id} not found, clearing cookie")
+        return Response.json(
+            {"error": "invalid_session"},
+            status_code=401,
+            headers=[make_clear_session_cookie_header()],
+        )
 
-    response_body = json.dumps(response_data)
-    return Response(
-        status_code=200,
-        headers=[
-            (b"Content-Type", b"application/json"),
-            (b"Content-Length", str(len(response_body)).encode("ascii")),
-        ],
-        body=response_body.encode("utf-8"),
-    )
+    logger.debug(f"session_info: Returning session info for user {user_id}")
+    return Response.json({
+        "user": {
+            "user_id": session.user.user_id,
+            "email": session.user.email,
+            "firstname": session.user.firstname,
+            "lastname": session.user.lastname,
+            "permissions": list(session.user.permissions),
+        },
+        "created_at": session.created_at,
+        "expires_at": session.expires_at,
+    })
 
 
 def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
@@ -890,6 +884,12 @@ def bootstrap_admin(
         ["Root", "Admin"],
     )
 
+    # Store credentials in database for retrieval via CLI
+    def save_credentials(store: Storage) -> None:
+        store_admin_credentials(store, root_email, root_password)
+
+    store_queue.execute(save_credentials)
+
     logger.info(f"Root admin bootstrapped: {root_email} (user_id={user_id})")
     logger.info(f"Root admin credentials: email={root_email}, password={root_password}")
     return user_id, session_token
@@ -942,8 +942,27 @@ def run_with_settings(settings: Settings):
     # Create token waiter for test notifications
     token_waiter = TokenWaiter(store_queue)
 
+    # Helper to bootstrap admin (used on startup, reset, and interactive)
+    def do_bootstrap_admin() -> str:
+        try:
+            bootstrap_admin(token_waiter, auth_client, store_queue)
+            return "Admin re-bootstrapped"
+        except AdminUserCreationError as e:
+            logger.error(f"Failed to bootstrap root admin: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error bootstrapping root admin: {e}")
+            raise
+
+    # Command handlers for /command endpoint
+    command_handlers = {
+        "reset": do_bootstrap_admin,
+    }
+
     # Start private UDS server (Go connects to this)
-    start_private_server(str(settings.socket_path), store_queue, token_waiter)
+    start_private_server(
+        str(settings.socket_path), store_queue, token_waiter, command_handlers
+    )
 
     # freetser doesn't know about the client, so we create a handler that captures it
     def handler(req: Request, store_queue: StorageQueue | None) -> Response:
@@ -957,15 +976,17 @@ def run_with_settings(settings: Settings):
         """Execute startup actions after server is ready."""
         ready_event.wait()
         logger.info("Server ready, running startup actions...")
-
         try:
-            bootstrap_admin(token_waiter, auth_client, store_queue)
-        except AdminUserCreationError as e:
-            logger.error(f"Failed to bootstrap root admin: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error bootstrapping root admin: {e}")
+            do_bootstrap_admin()
+        except Exception:
+            pass  # Already logged
 
     threading.Thread(target=run_startup_actions, daemon=True).start()
+
+    # Start interactive shell if enabled
+    if settings.interactive:
+        shell = InteractiveShell(store_queue, do_bootstrap_admin)
+        shell.start()
 
     # Create TCP server config
     config = TcpServerConfig()

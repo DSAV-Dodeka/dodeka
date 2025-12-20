@@ -30,6 +30,8 @@ class Settings:
     debug_logs: bool = False
     # Unix socket path for Go-Python communication (user actions + notifications)
     socket_path: Path = DEFAULT_SOCKET_PATH
+    # Enable interactive shell mode
+    interactive: bool = False
     admin_key: AdminKey | None = None
 
 
@@ -145,6 +147,10 @@ def load_settings() -> Settings:
         k = "socket_path"
         if k in toml_data:
             config[k] = validate_path(k, toml_data[k])
+
+        k = "interactive"
+        if k in toml_data:
+            config[k] = validate_bool(k, toml_data[k])
 
         k = "admin_key"
         if k in toml_data:

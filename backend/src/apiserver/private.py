@@ -3,23 +3,41 @@
 Handles requests from Go tiauth-faroe:
 - POST /invoke - user action invocation (faroe UserServerClient)
 - POST /token - token notifications (for testing with --no-smtp)
+- POST /command - server management commands (reset, etc.)
 """
 
 import json
 import logging
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from freetser import Request, Response, Storage, UnixServerConfig, start_server
 from freetser.server import StorageQueue
 from tiauth_faroe.user_server import handle_request_sync
 
+from apiserver.data.admin import AdminCredentials, get_admin_credentials
 from apiserver.data.auth import SqliteSyncServer
+from apiserver.data.newuser import (
+    EmailExistsInNewUserTable,
+    InvalidNamesCount,
+    prepare_user_store,
+)
 
 logger = logging.getLogger("apiserver.private")
 
 # Token table name
 TOKENS_TABLE = "tokens"
+
+# Database tables that can be cleared
+DB_TABLES = [
+    "users",
+    "users_by_email",
+    "newusers",
+    "registration_state",
+    "metadata",
+    "session_cache",
+    TOKENS_TABLE,
+]
 
 
 def add_token(store: Storage, action: str, email: str, code: str) -> None:
@@ -78,6 +96,7 @@ class TokenWaiter:
 def create_private_handler(
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
+    command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> Any:
     """Create the handler for the private UDS server."""
 
@@ -86,6 +105,8 @@ def create_private_handler(
             return handle_invoke(req, store_queue)
         elif req.method == "POST" and req.path == "/token":
             return handle_token(req, store_queue, token_waiter)
+        elif req.method == "POST" and req.path == "/command":
+            return handle_command(req, store_queue, command_handlers or {})
         else:
             return Response.text("Not Found", status_code=404)
 
@@ -141,17 +162,123 @@ def handle_token(
     # Notify waiters
     token_waiter.notify()
 
-    logger.debug(f"Stored token: action={action}, email={email}")
+    logger.debug(f"Stored token: action={action}, email={email}, code={code}")
     return Response.text("OK")
+
+
+def _handle_reset(
+    store_queue: StorageQueue,
+    command_handlers: dict[str, Callable[[], str]],
+) -> Response:
+    """Handle the reset command."""
+
+    def clear_tables(store: Storage) -> None:
+        for table in DB_TABLES:
+            store.clear(table)
+
+    store_queue.execute(clear_tables)
+    logger.info("Tables cleared")
+
+    if "reset" not in command_handlers:
+        return Response.text("Tables cleared")
+
+    try:
+        result = command_handlers["reset"]()
+        logger.info(f"Reset handler result: {result}")
+        return Response.text(f"Tables cleared. {result}")
+    except Exception as e:
+        logger.error(f"Reset handler failed: {e}")
+        return Response.text(f"Tables cleared but reset handler failed: {e}")
+
+
+def _handle_prepare_user(
+    store_queue: StorageQueue,
+    email: str | None,
+    names: list[str],
+) -> Response:
+    """Handle the prepare_user command."""
+    if not email:
+        return Response.text("Missing email for prepare_user", status_code=400)
+
+    def do_prepare(store: Storage) -> str | None:
+        result = prepare_user_store(store, email, names)
+        if isinstance(result, InvalidNamesCount):
+            return f"Invalid names count: {result.names_count}"
+        if isinstance(result, EmailExistsInNewUserTable):
+            return f"Email already exists in newuser table: {result.email}"
+        return None
+
+    error = store_queue.execute(do_prepare)
+    if error:
+        logger.warning(f"prepare_user failed: {error}")
+        return Response.text(error, status_code=400)
+
+    logger.info(f"Prepared user: email={email}, names={names}")
+    return Response.text(f"User prepared: {email}")
+
+
+def _handle_get_admin_credentials(store_queue: StorageQueue) -> Response:
+    """Handle the get_admin_credentials command."""
+
+    def get_creds(store: Storage) -> AdminCredentials | None:
+        return get_admin_credentials(store)
+
+    credentials = store_queue.execute(get_creds)
+    if credentials is None:
+        logger.warning("get_admin_credentials: No admin credentials found")
+        return Response.text("No admin credentials found", status_code=404)
+
+    logger.info(f"get_admin_credentials: Returning credentials for {credentials.email}")
+    return Response.json({"email": credentials.email, "password": credentials.password})
+
+
+def handle_command(
+    req: Request,
+    store_queue: StorageQueue,
+    command_handlers: dict[str, Callable[[], str]],
+) -> Response:
+    """Handle management command."""
+    try:
+        body = json.loads(req.body.decode("utf-8"))
+        command = body.get("command")
+        if not command:
+            return Response.text("Missing command", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Invalid command request: {e}")
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    logger.info(f"Received command: {command}")
+
+    if command == "reset":
+        return _handle_reset(store_queue, command_handlers)
+
+    if command == "prepare_user":
+        email = body.get("email")
+        names = body.get("names", [])
+        return _handle_prepare_user(store_queue, email, names)
+
+    if command == "get_admin_credentials":
+        return _handle_get_admin_credentials(store_queue)
+
+    if command in command_handlers:
+        try:
+            result = command_handlers[command]()
+            return Response.text(result)
+        except Exception as e:
+            logger.error(f"Command handler failed: {e}")
+            return Response.text(f"Command failed: {e}", status_code=500)
+
+    return Response.text(f"Unknown command: {command}", status_code=400)
 
 
 def start_private_server(
     socket_path: str,
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
+    command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> None:
     """Start the private UDS HTTP server in a background thread."""
-    handler = create_private_handler(store_queue, token_waiter)
+    handler = create_private_handler(store_queue, token_waiter, command_handlers)
     config = UnixServerConfig(path=socket_path)
 
     def run():
