@@ -1,73 +1,38 @@
-"""CLI commands that communicate with a running backend server."""
+"""CLI for the backend private server.
+
+Commands:
+- reset: clear all tables and re-bootstrap admin
+- prepare-user: create user ready for tiauth-faroe signup flow (testing)
+- get-admin-credentials: return bootstrapped admin email/password
+- get-token: retrieve email verification code (for test automation)
+"""
 
 import argparse
-import json
-import socket
 from typing import Any
 
-from apiserver.settings import settings
+import requests
+
+from apiserver.settings import PRIVATE_HOST, settings
+
+
+def get_private_url() -> str:
+    """Get the base URL for the private server."""
+    return f"http://{PRIVATE_HOST}:{settings.private_port}"
 
 
 def send_command(command: str, **kwargs: Any) -> str:
-    """Send a command to the running server via UDS."""
-    socket_path = str(settings.socket_path)
-
-    # Create UDS connection
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.connect(socket_path)
-    except FileNotFoundError:
-        return f"Error: Socket not found at {socket_path}. Is the server running?"
-    except ConnectionRefusedError:
-        return f"Error: Connection refused at {socket_path}. Is the server running?"
-
-    # Build HTTP request
-    body = json.dumps({"command": command, **kwargs})
-    request = (
-        f"POST /command HTTP/1.1\r\n"
-        f"Host: localhost\r\n"
-        f"Content-Type: application/json\r\n"
-        f"Content-Length: {len(body)}\r\n"
-        f"\r\n"
-        f"{body}"
-    )
+    """Send a command to the running server via HTTP."""
+    url = f"{get_private_url()}/command"
+    payload = {"command": command, **kwargs}
 
     try:
-        sock.sendall(request.encode("utf-8"))
-
-        # Read response
-        response = b""
-        while True:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            response += chunk
-            # Check if we've received the full response
-            if b"\r\n\r\n" in response:
-                # Parse headers to get content length
-                header_end = response.index(b"\r\n\r\n")
-                headers = response[:header_end].decode("utf-8")
-                body_start = header_end + 4
-
-                # Find content-length
-                content_length = 0
-                for line in headers.split("\r\n"):
-                    if line.lower().startswith("content-length:"):
-                        content_length = int(line.split(":")[1].strip())
-                        break
-
-                # Check if we have the full body
-                if len(response) >= body_start + content_length:
-                    break
-
-        # Parse response
-        if b"\r\n\r\n" in response:
-            header_end = response.index(b"\r\n\r\n")
-            body = response[header_end + 4 :].decode("utf-8")
-            return body
-        return response.decode("utf-8")
-    finally:
-        sock.close()
+        response = requests.post(url, json=payload, timeout=30)
+        return response.text
+    except requests.exceptions.ConnectionError:
+        return (
+            f"Error: Could not connect to {url}. "
+            "Is the server running?"
+        )
 
 
 def cmd_reset(_args: argparse.Namespace) -> None:
@@ -91,6 +56,12 @@ def cmd_prepare_user(args: argparse.Namespace) -> None:
 def cmd_get_admin_credentials(_args: argparse.Namespace) -> None:
     """Get the bootstrap admin credentials."""
     result = send_command("get_admin_credentials")
+    print(result)
+
+
+def cmd_get_token(args: argparse.Namespace) -> None:
+    """Get an email verification token."""
+    result = send_command("get_token", action=args.action, email=args.email)
     print(result)
 
 
@@ -122,6 +93,14 @@ def main() -> None:
         "get-admin-credentials", help="Get the bootstrap admin credentials"
     )
     admin_creds_parser.set_defaults(func=cmd_get_admin_credentials)
+
+    # get-token command
+    token_parser = subparsers.add_parser(
+        "get-token", help="Get an email verification token"
+    )
+    token_parser.add_argument("action", help="Token action (e.g., signup, reset)")
+    token_parser.add_argument("email", help="Email address")
+    token_parser.set_defaults(func=cmd_get_token)
 
     args = parser.parse_args()
     args.func(args)

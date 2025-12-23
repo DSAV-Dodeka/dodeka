@@ -1,4 +1,3 @@
-import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,10 +5,10 @@ from typing import Literal
 
 from apiserver.resources import res_path
 
-# Default socket path in system temp directory
-DEFAULT_SOCKET_PATH = Path(tempfile.gettempdir()) / "tiauth_faroe.sock"
+# Private server address - uses 127.0.0.2 for isolation from main loopback
+PRIVATE_HOST = "127.0.0.2"
 
-__all__ = ["Settings", "settings"]
+__all__ = ["PRIVATE_HOST", "Settings", "settings"]
 
 
 @dataclass
@@ -28,8 +27,8 @@ class Settings:
     auth_server_url: str = "http://localhost:3777"
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
-    # Unix socket path for Go-Python communication (user actions + notifications)
-    socket_path: Path = DEFAULT_SOCKET_PATH
+    # Port for private server (Go-Python communication). Binds to PRIVATE_HOST.
+    private_port: int = 8079
     # Enable interactive shell mode
     interactive: bool = False
     admin_key: AdminKey | None = None
@@ -144,9 +143,9 @@ def load_settings() -> Settings:
         if k in toml_data:
             config[k] = validate_bool(k, toml_data[k])
 
-        k = "socket_path"
+        k = "private_port"
         if k in toml_data:
-            config[k] = validate_path(k, toml_data[k])
+            config[k] = validate_int(k, toml_data[k])
 
         k = "interactive"
         if k in toml_data:

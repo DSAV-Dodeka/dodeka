@@ -6,7 +6,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
-from typing import Callable
+from urllib.parse import parse_qs, urlparse
+from typing import Callable, Literal
 
 from freetser import (
     Request,
@@ -59,6 +60,21 @@ logger = logging.getLogger("apiserver.app")
 
 # Cache session validations for 8 hours to reduce auth server load
 SESSION_CACHE_EXPIRY_SECONDS = 8 * 60 * 60
+
+# Session cookie names
+#
+# Primary session: The user's actual logged-in session. Used by default for
+# session_info, get_session_token, and endpoints that need "who is the user".
+#
+# Secondary session: Authorization-only fallback for permission checks. Not the
+# logged-in identity. Useful for testing: log in as a regular user (primary)
+# while using an admin session (secondary) to authorize admin actions.
+#
+# Permission checks (check_access) try primary first, then secondary as fallback.
+# session_info defaults to primary, but accepts ?secondary=true to check the
+# secondary session (e.g., to verify it's still valid).
+SESSION_COOKIE_PRIMARY = "session_token"
+SESSION_COOKIE_SECONDARY = "session_token_secondary"
 
 
 class PermissionMode(enum.Enum):
@@ -124,8 +140,6 @@ class RouteData:
     path: str
 
 
-
-
 def parse_headers(req_headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
     """Parse request headers into a dict. If header keys occur multiple times, we
     use only the last one."""
@@ -160,16 +174,83 @@ def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
     return None
 
 
-def make_clear_session_cookie_header() -> tuple[bytes, bytes]:
-    """Create a Set-Cookie header that clears the session cookie."""
+def make_clear_session_cookie_header(
+    cookie_name: str = SESSION_COOKIE_PRIMARY,
+) -> tuple[bytes, bytes]:
+    """Create a Set-Cookie header that clears a session cookie."""
     cookie = SimpleCookie()
-    cookie["session_token"] = ""
-    cookie["session_token"]["httponly"] = True
-    cookie["session_token"]["samesite"] = "None"
-    cookie["session_token"]["secure"] = True
-    cookie["session_token"]["path"] = "/"
-    cookie["session_token"]["max-age"] = 0
-    return (b"Set-Cookie", cookie["session_token"].OutputString().encode("utf-8"))
+    cookie[cookie_name] = ""
+    cookie[cookie_name]["httponly"] = True
+    cookie[cookie_name]["samesite"] = "None"
+    cookie[cookie_name]["secure"] = True
+    cookie[cookie_name]["path"] = "/"
+    cookie[cookie_name]["max-age"] = 0
+    return (b"Set-Cookie", cookie[cookie_name].OutputString().encode("utf-8"))
+
+
+@dataclass(frozen=True)
+class ValidatedSession:
+    """Session token validated successfully."""
+
+    user_id: str
+    created_at: int
+    expires_at: int | None
+
+
+@dataclass(frozen=True)
+class InvalidSessionToken:
+    """Session token was rejected by auth server."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class AccessGranted:
+    """Access check passed."""
+
+    user_id: str
+
+
+@dataclass(frozen=True)
+class AccessDenied:
+    """Access check failed."""
+
+    error: Literal["no_session", "invalid_session", "user_not_found", "missing"]
+    message: str
+    status_code: int
+
+
+def check_session_for_access(
+    session_token: str,
+    required_permissions: frozenset[str],
+    auth_client: AuthClient,
+    store_queue: StorageQueue,
+) -> AccessGranted | AccessDenied:
+    """Check if a session token grants the required permissions."""
+    validation = validate_session(auth_client, session_token, store_queue)
+    if isinstance(validation, InvalidSessionToken):
+        return AccessDenied("invalid_session", "Invalid session", 401)
+
+    timestamp = int(time.time())
+
+    def get_permissions(store: Storage) -> set[str] | None:
+        user = get_user_info(store, timestamp, validation.user_id)
+        return user.permissions if user else None
+
+    permissions = store_queue.execute(get_permissions)
+
+    if permissions is None:
+        return AccessDenied("user_not_found", "User not found", 401)
+
+    missing = required_permissions - permissions
+    if missing:
+        return AccessDenied(
+            "missing",
+            f"Missing permissions: {', '.join(sorted(missing))}",
+            403,
+        )
+
+    return AccessGranted(user_id=validation.user_id)
 
 
 def check_access(
@@ -178,78 +259,41 @@ def check_access(
     auth_client: AuthClient,
     store_queue: StorageQueue,
 ) -> Response | None:
-    # Check invalid error conditions first
-    if route.entry.permission.mode == PermissionMode.DENY_ALL:
-        raise ValueError(
-            f"Route not properly configured - DENY_ALL permission: "
-            f"{route.method} {route.path}"
-        )
+    """Check if the request has permission to access the route.
 
-    # PUBLIC routes need no authentication
+    Returns None if access is granted, or a Response with an error.
+    """
+    if route.entry.permission.mode == PermissionMode.DENY_ALL:
+        raise ValueError(f"Route not configured: {route.method} {route.path}")
+
     if route.entry.permission.mode == PermissionMode.PUBLIC:
         return None
 
-    assert route.entry.permission.mode == PermissionMode.REQUIRE_PERMISSIONS
-    required_permissions = route.entry.permission.permissions
+    required = route.entry.permission.permissions
 
-    session_token = get_cookie_value(headers, "session_token")
+    # Try primary session first, then secondary as fallback
+    tokens = [
+        ("primary", get_cookie_value(headers, SESSION_COOKIE_PRIMARY)),
+        ("secondary", get_cookie_value(headers, SESSION_COOKIE_SECONDARY)),
+    ]
 
-    if session_token is None:
-        logger.warning(
-            f"Permission-protected route access denied - no session: "
-            f"{route.method} {route.path} "
-            f"(requires: {', '.join(sorted(required_permissions))})"
-        )
+    last_error: AccessDenied | None = None
+    for name, token in tokens:
+        if token is None:
+            continue
+        result = check_session_for_access(token, required, auth_client, store_queue)
+        if isinstance(result, AccessGranted):
+            logger.debug(f"Access granted ({name}): {route.method} {route.path}")
+            return None
+        last_error = result
+
+    # No valid session
+    if last_error is None:
+        logger.warning(f"Access denied (no session): {route.method} {route.path}")
         return Response.text("Unauthorized: No session", status_code=401)
 
-    result = get_or_validate_session(auth_client, session_token, store_queue)
-    if isinstance(result, Response):
-        logger.warning(
-            f"Permission-protected route access denied - invalid session: "
-            f"{route.method} {route.path} "
-            f"(requires: {', '.join(sorted(required_permissions))})"
-        )
-        return Response.text("Unauthorized: Invalid session", status_code=401)
-
-    user_id, _, _ = result
-    timestamp = int(time.time())
-
-    def get_permissions(store: Storage) -> set[str] | None:
-        user = get_user_info(store, timestamp, user_id)
-        if user is None:
-            return None
-        return user.permissions
-
-    user_permissions = store_queue.execute(get_permissions)
-
-    if user_permissions is None:
-        logger.warning(
-            f"Permission-protected route access denied - user not found: "
-            f"{route.method} {route.path} (user_id={user_id}, "
-            f"requires: {', '.join(sorted(required_permissions))})"
-        )
-        return Response.text("Unauthorized: User not found", status_code=401)
-
-    # Check that user has ALL required permissions
-    missing_permissions = required_permissions - user_permissions
-    if missing_permissions:
-        logger.warning(
-            f"Permission-protected route access denied - missing permissions: "
-            f"{route.method} {route.path} (user_id={user_id}, "
-            f"has: {', '.join(sorted(user_permissions))}, "
-            f"missing: {', '.join(sorted(missing_permissions))})"
-        )
-        return Response.text(
-            f"Forbidden: Missing required permissions: "
-            f"{', '.join(sorted(missing_permissions))}",
-            status_code=403,
-        )
-
-    logger.debug(
-        f"Permission-protected route access granted: {route.method} {route.path} "
-        f"(user_id={user_id}, permissions: {', '.join(sorted(required_permissions))})"
-    )
-    return None
+    logger.warning(f"Access denied ({last_error.error}): {route.method} {route.path}")
+    return Response.text(last_error.message, status_code=last_error.status_code)
 
 
 def handle_options_request(
@@ -286,7 +330,8 @@ def handler_with_client(
         logger.error("Storage not available")
         return Response.text("Storage not available", status_code=500)
 
-    path = req.path
+    # Strip query string for route lookup (handlers can access full path via req.path)
+    path = urlparse(req.path).path
     method = req.method
 
     # Parse headers once for reuse in handlers
@@ -299,10 +344,10 @@ def handler_with_client(
         return set_session(auth_client, req, headers, store_queue)
 
     def h_clear_sess():
-        return clear_session(headers)
+        return clear_session(req, headers)
 
     def h_sess_info():
-        return session_info(auth_client, headers, store_queue)
+        return session_info(auth_client, req, headers, store_queue)
 
     def h_add_perm():
         return add_user_permission(req, store_queue)
@@ -386,6 +431,10 @@ def handler_with_client(
         logger.info(f"Method not supported: {method} {path}")
         return Response.text(f"Not Found: {method} {path}", status_code=404)
 
+    # Handle OPTIONS preflight for CORS (before auth - preflight has no cookies)
+    if method == "OPTIONS":
+        return handle_options_request(route, route_entry, settings.frontend_origin)
+
     # Check access (permissions, etc.)
     if error := check_access(
         RouteData(entry=route_entry, method=method, path=path),
@@ -394,10 +443,6 @@ def handler_with_client(
         store_queue,
     ):
         return error
-
-    # Handle OPTIONS preflight requests for CORS
-    if method == "OPTIONS":
-        return handle_options_request(route, route_entry, settings.frontend_origin)
 
     # Browsers generally only allow responses that have this set (CORS)
     allow_origin_header = (
@@ -605,67 +650,46 @@ def accept_user_handler(
         return Response.text(f"Failed to create signup: {e}", status_code=500)
 
 
-def get_or_validate_session(
+def validate_session(
     auth_client: AuthClient,
     session_token: str,
     store_queue: StorageQueue,
-) -> tuple[str, int, int | None] | Response:
-    """
-    Get session from cache or validate with auth server.
-
-    Returns tuple of (user_id, created_at, expires_at) on success,
-    or error Response on failure.
-    """
+) -> ValidatedSession | InvalidSessionToken:
+    """Validate session token with auth server, using cache when possible."""
     timestamp = int(time.time())
 
-    # Try to get from cache first
     def check_cache(store: Storage) -> CachedSessionData | None:
         return get_cached_session(store, session_token, timestamp)
 
-    cached_session = store_queue.execute(check_cache)
+    cached = store_queue.execute(check_cache)
 
-    # If cache miss, validate with auth server
-    if cached_session is None:
-        logger.debug("Session cache miss, validating with auth server")
-        session_result = auth_client.get_session(session_token)
+    if cached is not None:
+        logger.debug(f"Session cache hit for user {cached.user_id}")
+        return ValidatedSession(cached.user_id, cached.created_at, cached.expires_at)
 
-        if isinstance(session_result, ActionErrorResult):
-            if session_result.error_code != "invalid_session_token":
-                invocation_id = session_result.action_invocation_id
-                error_code = session_result.error_code
-                logger.error(
-                    f"Auth server error (invocation {invocation_id}): {error_code}"
-                )
-                raise ValueError(
-                    f"Error getting session from auth server "
-                    f"(invocation {invocation_id}): {error_code}."
-                )
-            logger.info("Invalid session token provided")
-            return Response.text("Invalid session_token", status_code=401)
+    # Cache miss - validate with auth server
+    logger.debug("Session cache miss, validating with auth server")
+    result = auth_client.get_session(session_token)
 
-        # Cache the validated session
-        user_id = session_result.session.user_id
-        created_at = session_result.session.created_at
-        expires_at = session_result.session.expires_at
+    if isinstance(result, ActionErrorResult):
+        if result.error_code != "invalid_session_token":
+            logger.error(f"Auth server error: {result.error_code}")
+            raise ValueError(f"Auth server error: {result.error_code}")
+        logger.info("Invalid session token provided")
+        return InvalidSessionToken()
 
-        logger.debug(f"Session validated for user {user_id}, updating cache")
+    # Cache and return validated session
+    session = result.session
+    logger.debug(f"Session validated for user {session.user_id}, updating cache")
 
-        def update_cache(store: Storage):
-            # Note that it's fine if it already executes by this point, it will just
-            # overwite which should be fine based on session token uniqueness
-            update_session_cache(
-                store, session_token, user_id, created_at, expires_at, timestamp
-            )
+    def update_cache(store: Storage) -> None:
+        update_session_cache(
+            store, session_token, session.user_id,
+            session.created_at, session.expires_at, timestamp
+        )
 
-        store_queue.execute(update_cache)
-    else:
-        # Cache hit - use cached session data
-        user_id = cached_session.user_id
-        created_at = cached_session.created_at
-        expires_at = cached_session.expires_at
-        logger.debug(f"Session cache hit for user {user_id}")
-
-    return (user_id, created_at, expires_at)
+    store_queue.execute(update_cache)
+    return ValidatedSession(session.user_id, session.created_at, session.expires_at)
 
 
 def set_session(
@@ -674,7 +698,12 @@ def set_session(
     headers: dict[str, str],
     store_queue: StorageQueue,
 ) -> Response:
-    """Handle /auth/set_session/ - validates and sets session cookie."""
+    """Handle /auth/set_session/ - validates and sets session cookie.
+
+    Request body:
+        session_token: The session token to set
+        secondary: Optional boolean, if true sets the secondary session cookie
+    """
     # Get Origin header
     # TODO: should we really perform this check or is it up to browser?
     origin = headers.get("origin")
@@ -686,6 +715,7 @@ def set_session(
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         session_token = body_data.get("session_token")
+        secondary = body_data.get("secondary", False)
         if not session_token:
             logger.warning("set_session: Missing session_token in request")
             return Response.text("Missing session_token", status_code=400)
@@ -694,28 +724,26 @@ def set_session(
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     # Validate session with auth server (and cache it)
-    result = get_or_validate_session(auth_client, session_token, store_queue)
-    if isinstance(result, Response):
+    result = validate_session(auth_client, session_token, store_queue)
+    if isinstance(result, InvalidSessionToken):
         logger.info("set_session: Session validation failed")
-        return result
+        return Response.text("Invalid session_token", status_code=401)
 
-    user_id, _, _ = result
-    logger.info(f"set_session: Setting session cookie for user {user_id}")
+    cookie_name = SESSION_COOKIE_SECONDARY if secondary else SESSION_COOKIE_PRIMARY
+    logger.info(f"set_session: Setting {cookie_name} cookie for user {result.user_id}")
 
     max_session_age = 86400 * 365
 
     # Build Set-Cookie header using http.cookies
     cookie = SimpleCookie()
-    cookie["session_token"] = session_token
-    cookie["session_token"]["httponly"] = True
-    cookie["session_token"]["samesite"] = "None"
-    cookie["session_token"]["secure"] = True
-    cookie["session_token"]["path"] = "/"
-    cookie["session_token"]["max-age"] = max_session_age
+    cookie[cookie_name] = session_token
+    cookie[cookie_name]["httponly"] = True
+    cookie[cookie_name]["samesite"] = "None"
+    cookie[cookie_name]["secure"] = True
+    cookie[cookie_name]["path"] = "/"
+    cookie[cookie_name]["max-age"] = max_session_age
 
-    # SimpleCookie.output() returns "Set-Cookie: name=value; attrs"
-    # We just need the value part after "Set-Cookie: "
-    cookie_header = cookie["session_token"].OutputString()
+    cookie_header = cookie[cookie_name].OutputString()
 
     return Response.empty(
         headers=[
@@ -724,8 +752,12 @@ def set_session(
     )
 
 
-def clear_session(headers: dict[str, str]) -> Response:
-    """Handle /auth/clear_session/ - clears session cookie."""
+def clear_session(req: Request, headers: dict[str, str]) -> Response:
+    """Handle /auth/clear_session/ - clears session cookie.
+
+    Request body (optional):
+        secondary: Optional boolean, if true clears the secondary session cookie
+    """
     # Get Origin header
     origin = headers.get("origin")
 
@@ -733,64 +765,92 @@ def clear_session(headers: dict[str, str]) -> Response:
         logger.warning(f"clear_session: Invalid origin {origin}")
         return Response.text("Invalid origin!", status_code=403)
 
-    logger.info("clear_session: Clearing session cookie")
-    return Response.empty(headers=[make_clear_session_cookie_header()])
+    # Parse optional body for secondary flag
+    secondary = False
+    if req.body:
+        try:
+            body_data = json.loads(req.body.decode("utf-8"))
+            secondary = body_data.get("secondary", False)
+        except (json.JSONDecodeError, ValueError):
+            pass  # Ignore invalid body, default to primary
+
+    cookie_name = SESSION_COOKIE_SECONDARY if secondary else SESSION_COOKIE_PRIMARY
+    logger.info(f"clear_session: Clearing {cookie_name} cookie")
+    return Response.empty(headers=[make_clear_session_cookie_header(cookie_name)])
 
 
 def session_info(
     auth_client: AuthClient,
+    req: Request,
     headers: dict[str, str],
     store_queue: StorageQueue,
 ) -> Response:
-    """Handle /auth/session_info/ - gets session information."""
-    session_token = get_cookie_value(headers, "session_token")
+    """Handle /auth/session_info/ - gets session information.
+
+    Query params:
+        secondary: If "true", check secondary session instead of primary.
+
+    By default checks primary session (the logged-in user). Use secondary=true
+    to check the authorization-only session.
+    """
+    # Parse query params to check for secondary flag
+    secondary = False
+    if "?" in req.path:
+        query = parse_qs(urlparse(req.path).query)
+        secondary = query.get("secondary", [""])[0].lower() == "true"
+
+    cookie_name = SESSION_COOKIE_SECONDARY if secondary else SESSION_COOKIE_PRIMARY
+    session_token = get_cookie_value(headers, cookie_name)
 
     if session_token is None:
-        logger.debug("session_info: No session cookie found")
+        logger.debug(f"session_info: No {cookie_name} cookie found")
         return Response.json({"error": "no_session"})
 
     # Validate session with auth server (and cache it)
-    result = get_or_validate_session(auth_client, session_token, store_queue)
-    if isinstance(result, Response):
-        logger.info("session_info: Session validation failed, clearing cookie")
+    result = validate_session(auth_client, session_token, store_queue)
+    if isinstance(result, InvalidSessionToken):
+        logger.info(f"session_info: {cookie_name} validation failed")
         return Response.json(
             {"error": "invalid_session"},
             status_code=401,
-            headers=[make_clear_session_cookie_header()],
+            headers=[make_clear_session_cookie_header(cookie_name)],
         )
 
-    user_id, created_at, expires_at = result
     timestamp = int(time.time())
 
     # Get user info from database
     def get_session_data(store: Storage) -> SessionInfo | InvalidSession:
-        user = get_user_info(store, timestamp, user_id)
+        user = get_user_info(store, timestamp, result.user_id)
         if user is None:
             return InvalidSession()
-        return SessionInfo(user=user, created_at=created_at, expires_at=expires_at)
+        return SessionInfo(
+            user=user, created_at=result.created_at, expires_at=result.expires_at
+        )
 
     session = store_queue.execute(get_session_data)
 
     if isinstance(session, InvalidSession):
-        logger.warning(f"session_info: User {user_id} not found, clearing cookie")
+        logger.warning(f"session_info: User {result.user_id} not found")
         return Response.json(
             {"error": "invalid_session"},
             status_code=401,
-            headers=[make_clear_session_cookie_header()],
+            headers=[make_clear_session_cookie_header(cookie_name)],
         )
 
-    logger.debug(f"session_info: Returning session info for user {user_id}")
-    return Response.json({
-        "user": {
-            "user_id": session.user.user_id,
-            "email": session.user.email,
-            "firstname": session.user.firstname,
-            "lastname": session.user.lastname,
-            "permissions": list(session.user.permissions),
-        },
-        "created_at": session.created_at,
-        "expires_at": session.expires_at,
-    })
+    logger.debug(f"session_info: Returning info for user {result.user_id}")
+    return Response.json(
+        {
+            "user": {
+                "user_id": session.user.user_id,
+                "email": session.user.email,
+                "firstname": session.user.firstname,
+                "lastname": session.user.lastname,
+                "permissions": list(session.user.permissions),
+            },
+            "created_at": session.created_at,
+            "expires_at": session.expires_at,
+        }
+    )
 
 
 def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
@@ -896,8 +956,8 @@ def bootstrap_admin(
 
 
 def get_session_token_handler(headers: dict[str, str]) -> Response:
-    """Handle /auth/get_session_token/ - returns session token from cookie."""
-    session_token = get_cookie_value(headers, "session_token")
+    """Handle /cookies/session_token/ - returns session token from primary cookie."""
+    session_token = get_cookie_value(headers, SESSION_COOKIE_PRIMARY)
 
     if session_token is None:
         logger.debug("get_session_token: No session cookie found")
@@ -918,7 +978,7 @@ def run_with_settings(settings: Settings):
     logger.info(
         f"Running with settings:\n\t- frontend_origin={settings.frontend_origin}"
         f"\n\t- debug_logs={settings.debug_logs}"
-        f"\n\t- socket_path={settings.socket_path}"
+        f"\n\t- private_port={settings.private_port}"
     )
 
     auth_client = AuthClient(settings.auth_server_url)
@@ -954,14 +1014,16 @@ def run_with_settings(settings: Settings):
             logger.error(f"Unexpected error bootstrapping root admin: {e}")
             raise
 
-    # Command handlers for /command endpoint
+    # Command handlers that need app.py dependencies (auth_client, token_waiter).
+    # Other commands (prepare_user, get_admin_credentials) only need database
+    # access and are handled directly in private.py.
     command_handlers = {
-        "reset": do_bootstrap_admin,
+        "reset": do_bootstrap_admin,  # Called after tables are cleared
     }
 
-    # Start private UDS server (Go connects to this)
+    # Start private TCP server on 127.0.0.2 (Go and CLI connect to this)
     start_private_server(
-        str(settings.socket_path), store_queue, token_waiter, command_handlers
+        settings.private_port, store_queue, token_waiter, command_handlers
     )
 
     # freetser doesn't know about the client, so we create a handler that captures it

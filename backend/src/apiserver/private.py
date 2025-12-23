@@ -1,9 +1,16 @@
-"""Private HTTP server over Unix domain socket.
+"""Private HTTP server for local inter-process communication.
 
-Handles requests from Go tiauth-faroe:
+Binds to 127.0.0.2 (separate loopback address) for isolation.
+Handles requests from Go tiauth-faroe and CLI.
+
+Routes:
 - POST /invoke - user action invocation (faroe UserServerClient)
 - POST /token - token notifications (for testing with --no-smtp)
-- POST /command - server management commands (reset, etc.)
+- POST /command - management commands:
+    - reset: clear all tables and re-bootstrap admin
+    - prepare_user: create user ready for tiauth-faroe signup flow (testing)
+    - get_admin_credentials: return bootstrapped admin email/password
+    - get_token: retrieve email verification code (for test automation)
 """
 
 import json
@@ -11,9 +18,11 @@ import logging
 import threading
 from typing import Any, Callable
 
-from freetser import Request, Response, Storage, UnixServerConfig, start_server
+from freetser import Request, Response, Storage, TcpServerConfig, start_server
 from freetser.server import StorageQueue
 from tiauth_faroe.user_server import handle_request_sync
+
+from apiserver.settings import PRIVATE_HOST, settings
 
 from apiserver.data.admin import AdminCredentials, get_admin_credentials
 from apiserver.data.auth import SqliteSyncServer
@@ -93,22 +102,54 @@ class TokenWaiter:
                         )
 
 
+def add_cors_headers(response: Response, origin: str) -> Response:
+    """Add CORS headers to a response."""
+    response.headers.append((b"Access-Control-Allow-Origin", origin.encode("utf-8")))
+    return response
+
+
+def handle_options(path: str, origin: str) -> Response:
+    """Handle OPTIONS preflight request for CORS."""
+    valid_paths = {"/invoke", "/token", "/command"}
+    if path not in valid_paths:
+        return Response.text("Not Found", status_code=404)
+
+    return Response(
+        status_code=204,
+        headers=[
+            (b"Access-Control-Allow-Methods", b"POST, OPTIONS"),
+            (b"Allow", b"POST, OPTIONS"),
+            (b"Access-Control-Allow-Origin", origin.encode("utf-8")),
+            (b"Access-Control-Allow-Headers", b"Content-Type"),
+        ],
+        body=b"",
+    )
+
+
 def create_private_handler(
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
     command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> Any:
-    """Create the handler for the private UDS server."""
+    """Create the handler for the private server."""
+    origin = settings.frontend_origin
 
     def handler(req: Request, _: StorageQueue | None) -> Response:
+        # Handle CORS preflight
+        if req.method == "OPTIONS":
+            return handle_options(req.path, origin)
+
+        response: Response
         if req.method == "POST" and req.path == "/invoke":
-            return handle_invoke(req, store_queue)
+            response = handle_invoke(req, store_queue)
         elif req.method == "POST" and req.path == "/token":
-            return handle_token(req, store_queue, token_waiter)
+            response = handle_token(req, store_queue, token_waiter)
         elif req.method == "POST" and req.path == "/command":
-            return handle_command(req, store_queue, command_handlers or {})
+            response = handle_command(req, store_queue, command_handlers or {})
         else:
             return Response.text("Not Found", status_code=404)
+
+        return add_cors_headers(response, origin)
 
     return handler
 
@@ -118,7 +159,7 @@ def handle_invoke(req: Request, store_queue: StorageQueue) -> Response:
     try:
         body = json.loads(req.body.decode("utf-8"))
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Invalid invoke request: {e}")
+        logger.warning(f"invoke: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     def execute(store: Storage) -> str:
@@ -148,9 +189,10 @@ def handle_token(
         email = body.get("email")
         code = body.get("code")
         if not all([action, email, code]):
+            logger.warning("token: Missing action, email, or code")
             return Response.text("Missing action, email, or code", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Invalid token request: {e}")
+        logger.warning(f"token: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     # Store token in database
@@ -232,6 +274,28 @@ def _handle_get_admin_credentials(store_queue: StorageQueue) -> Response:
     return Response.json({"email": credentials.email, "password": credentials.password})
 
 
+def _handle_get_token(
+    store_queue: StorageQueue,
+    action: str | None,
+    email: str | None,
+) -> Response:
+    """Handle the get_token command - retrieve email verification code."""
+    if not action or not email:
+        logger.warning("get_token: Missing action or email")
+        return Response.text("Missing action or email", status_code=400)
+
+    def do_get(store: Storage) -> dict[str, Any] | None:
+        return get_token(store, action, email)
+
+    token = store_queue.execute(do_get)
+    if token is None:
+        logger.info(f"get_token: No token found for {action}:{email}")
+        return Response.json({"found": False})
+
+    logger.info(f"get_token: Retrieved token for {action}:{email}")
+    return Response.json({"found": True, "code": token["code"]})
+
+
 def handle_command(
     req: Request,
     store_queue: StorageQueue,
@@ -242,12 +306,13 @@ def handle_command(
         body = json.loads(req.body.decode("utf-8"))
         command = body.get("command")
         if not command:
+            logger.warning("command: Missing command field")
             return Response.text("Missing command", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Invalid command request: {e}")
+        logger.warning(f"command: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    logger.info(f"Received command: {command}")
+    logger.debug(f"command: Received {command}")
 
     if command == "reset":
         return _handle_reset(store_queue, command_handlers)
@@ -260,29 +325,38 @@ def handle_command(
     if command == "get_admin_credentials":
         return _handle_get_admin_credentials(store_queue)
 
+    if command == "get_token":
+        action = body.get("action")
+        email = body.get("email")
+        return _handle_get_token(store_queue, action, email)
+
     if command in command_handlers:
         try:
             result = command_handlers[command]()
             return Response.text(result)
         except Exception as e:
-            logger.error(f"Command handler failed: {e}")
+            logger.error(f"command: Handler for '{command}' failed: {e}")
             return Response.text(f"Command failed: {e}", status_code=500)
 
+    logger.warning(f"command: Unknown command '{command}'")
     return Response.text(f"Unknown command: {command}", status_code=400)
 
 
 def start_private_server(
-    socket_path: str,
+    port: int,
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
     command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> None:
-    """Start the private UDS HTTP server in a background thread."""
+    """Start the private TCP HTTP server in a background thread.
+
+    Binds to PRIVATE_HOST (127.0.0.2) for isolation from the public server.
+    """
     handler = create_private_handler(store_queue, token_waiter, command_handlers)
-    config = UnixServerConfig(path=socket_path)
+    config = TcpServerConfig(host=PRIVATE_HOST, port=port)
 
     def run():
-        logger.info(f"Private server listening on {socket_path}")
+        logger.info(f"Private server listening on {PRIVATE_HOST}:{port}")
         start_server(config, handler, store_queue=store_queue)
 
     thread = threading.Thread(target=run, daemon=True)
