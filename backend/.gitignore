@@ -9,3 +9,4 @@ localenv.toml
 **/tokens.sock
 
 auth/auth
+faroe-docs

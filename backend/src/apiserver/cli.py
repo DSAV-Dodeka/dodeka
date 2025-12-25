@@ -5,6 +5,10 @@ Commands:
 - prepare-user: create user ready for tiauth-faroe signup flow (testing)
 - get-admin-credentials: return bootstrapped admin email/password
 - get-token: retrieve email verification code (for test automation)
+
+The private server also handles:
+- POST /invoke: user action invocation from tiauth-faroe
+- POST /email: email sending (stores tokens for testing, sends via SMTP if configured)
 """
 
 import argparse

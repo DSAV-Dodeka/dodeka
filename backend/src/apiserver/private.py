@@ -5,7 +5,7 @@ Handles requests from Go tiauth-faroe and CLI.
 
 Routes:
 - POST /invoke - user action invocation (faroe UserServerClient)
-- POST /token - token notifications (for testing with --no-smtp)
+- POST /email - email sending from tiauth-faroe (stores tokens, sends via SMTP)
 - POST /command - management commands:
     - reset: clear all tables and re-bootstrap admin
     - prepare_user: create user ready for tiauth-faroe signup flow (testing)
@@ -23,6 +23,7 @@ from freetser.server import StorageQueue
 from tiauth_faroe.user_server import handle_request_sync
 
 from apiserver.settings import PRIVATE_HOST, settings
+from apiserver.email import EmailData, EmailType, TOKEN_EMAIL_TYPES, sendemail
 
 from apiserver.data.admin import AdminCredentials, get_admin_credentials
 from apiserver.data.auth import SqliteSyncServer
@@ -110,7 +111,7 @@ def add_cors_headers(response: Response, origin: str) -> Response:
 
 def handle_options(path: str, origin: str) -> Response:
     """Handle OPTIONS preflight request for CORS."""
-    valid_paths = {"/invoke", "/token", "/command"}
+    valid_paths = {"/invoke", "/email", "/command"}
     if path not in valid_paths:
         return Response.text("Not Found", status_code=404)
 
@@ -142,8 +143,8 @@ def create_private_handler(
         response: Response
         if req.method == "POST" and req.path == "/invoke":
             response = handle_invoke(req, store_queue)
-        elif req.method == "POST" and req.path == "/token":
-            response = handle_token(req, store_queue, token_waiter)
+        elif req.method == "POST" and req.path == "/email":
+            response = handle_email(req, store_queue, token_waiter)
         elif req.method == "POST" and req.path == "/command":
             response = handle_command(req, store_queue, command_handlers or {})
         else:
@@ -177,35 +178,57 @@ def handle_invoke(req: Request, store_queue: StorageQueue) -> Response:
     )
 
 
-def handle_token(
+def handle_email(
     req: Request,
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
 ) -> Response:
-    """Handle token notification from Go."""
+    """Handle email request from Go - stores tokens and sends email."""
     try:
         body = json.loads(req.body.decode("utf-8"))
-        action = body.get("action")
-        email = body.get("email")
-        code = body.get("code")
-        if not all([action, email, code]):
-            logger.warning("token: Missing action, email, or code")
-            return Response.text("Missing action, email, or code", status_code=400)
+        email_type: EmailType = body.get("type")
+        to_email = body.get("email")
+        if not email_type or not to_email:
+            logger.warning("email: Missing type or email")
+            return Response.text("Missing type or email", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"token: Invalid request: {e}")
+        logger.warning(f"email: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Store token in database
-    def store_token(store: Storage) -> None:
-        add_token(store, action, email, code)
+    # Extract optional fields
+    display_name = body.get("displayName")
+    code = body.get("code")
+    timestamp = body.get("timestamp")
+    new_email = body.get("newEmail")
 
-    store_queue.execute(store_token)
+    # Store token if this is a verification/reset email type
+    if email_type in TOKEN_EMAIL_TYPES and code:
+        def store_token(store: Storage) -> None:
+            add_token(store, email_type, to_email, code)
 
-    # Notify waiters
-    token_waiter.notify()
+        store_queue.execute(store_token)
+        token_waiter.notify()
+        logger.debug(f"Stored token: {email_type}:{to_email} code={code}")
 
-    logger.debug(f"Stored token: action={action}, email={email}, code={code}")
-    return Response.text("OK")
+    # Send email if SMTP is configured
+    if settings.smtp is not None:
+        try:
+            data = EmailData(
+                email_type=email_type,
+                to_email=to_email,
+                display_name=display_name,
+                code=code,
+                timestamp=timestamp,
+                new_email=new_email,
+            )
+            sendemail(settings.smtp, data)
+        except Exception as e:
+            logger.error(f"email: Failed to send email: {e}")
+            return Response.json({"success": False, "error": str(e)}, status_code=500)
+    else:
+        logger.debug(f"email: SMTP not configured, skipping send for {email_type}")
+
+    return Response.json({"success": True})
 
 
 def _handle_reset(

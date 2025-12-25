@@ -8,7 +8,7 @@ from apiserver.resources import res_path
 # Private server address - uses 127.0.0.2 for isolation from main loopback
 PRIVATE_HOST = "127.0.0.2"
 
-__all__ = ["PRIVATE_HOST", "Settings", "settings"]
+__all__ = ["PRIVATE_HOST", "Settings", "SmtpConfig", "settings"]
 
 
 @dataclass
@@ -16,6 +16,18 @@ class AdminKey:
     key: str
     # Unix timestamp for when it expires
     expiration: int
+
+
+@dataclass
+class SmtpConfig:
+    """SMTP configuration for sending emails."""
+
+    host: str
+    port: int
+    sender_email: str
+    sender_name: str = ""
+    username: str | None = None
+    password: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -32,6 +44,8 @@ class Settings:
     # Enable interactive shell mode
     interactive: bool = False
     admin_key: AdminKey | None = None
+    # SMTP configuration for sending emails (None = emails disabled)
+    smtp: SmtpConfig | None = None
 
 
 def find_config_file() -> Path | None:
@@ -111,6 +125,39 @@ def validate_admin_key(name: str, value: object) -> AdminKey:
     return AdminKey(key=key, expiration=expiration)
 
 
+def validate_smtp(name: str, value: object) -> SmtpConfig:
+    """Validate smtp setting."""
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"Setting '{name}' must be a table/dict, got {type(value).__name__}"
+        )
+
+    host = validate_str(f"{name}.host", value.get("host"))
+    port = validate_int(f"{name}.port", value.get("port"))
+    sender_email = validate_str(f"{name}.sender_email", value.get("sender_email"))
+
+    sender_name = ""
+    if "sender_name" in value:
+        sender_name = validate_str(f"{name}.sender_name", value.get("sender_name"))
+
+    username = None
+    if "username" in value:
+        username = validate_str(f"{name}.username", value.get("username"))
+
+    password = None
+    if "password" in value:
+        password = validate_str(f"{name}.password", value.get("password"))
+
+    return SmtpConfig(
+        host=host,
+        port=port,
+        sender_email=sender_email,
+        sender_name=sender_name,
+        username=username,
+        password=password,
+    )
+
+
 def load_settings() -> Settings:
     config_file = find_config_file()
 
@@ -154,6 +201,10 @@ def load_settings() -> Settings:
         k = "admin_key"
         if k in toml_data:
             config[k] = validate_admin_key(k, toml_data[k])
+
+        k = "smtp"
+        if k in toml_data:
+            config[k] = validate_smtp(k, toml_data[k])
 
     return Settings(**config)
 

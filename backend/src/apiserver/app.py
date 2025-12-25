@@ -42,6 +42,7 @@ from apiserver.data.registration_state import (
     RegistrationStateNotFoundForEmail,
     create_registration_state,
     get_registration_state,
+    get_signup_token_by_email,
     update_registration_state_accepted,
 )
 from apiserver.data.user import (
@@ -367,6 +368,9 @@ def handler_with_client(
     def h_get_sess_token():
         return get_session_token_handler(headers)
 
+    def h_resend_signup_email():
+        return resend_signup_email_handler(auth_client, req, store_queue)
+
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
         # Dodeka-specific actions related to auth
@@ -389,6 +393,9 @@ def handler_with_client(
         },
         "/admin/list_newusers/": {
             "GET": RouteEntry(h_list_newusers, PermissionConfig.require("admin"))
+        },
+        "/admin/resend_signup_email/": {
+            "POST": RouteEntry(h_resend_signup_email, PermissionConfig.require("admin"))
         },
         "/auth/session_info/": {
             "GET": RouteEntry(
@@ -648,6 +655,45 @@ def accept_user_handler(
     except Exception as e:
         logger.error(f"accept_user: Failed to create Faroe signup: {e}")
         return Response.text(f"Failed to create signup: {e}", status_code=500)
+
+
+def resend_signup_email_handler(
+    auth_client: AuthClient, req: Request, store_queue: StorageQueue
+) -> Response:
+    """Handle /admin/resend_signup_email/ - resends signup verification email."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        email = body_data.get("email")
+        if not email:
+            logger.warning("resend_signup_email: Missing email in request")
+            return Response.text("Missing email", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"resend_signup_email: Invalid request: {e}")
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    # Look up signup_token by email
+    def get_token(store: Storage) -> str | None:
+        return get_signup_token_by_email(store, email)
+
+    signup_token = store_queue.execute(get_token)
+    if signup_token is None:
+        logger.warning(f"resend_signup_email: No signup token found for {email}")
+        return Response.text(f"No signup token found for {email}", status_code=404)
+
+    # Call Faroe to resend the email
+    result = auth_client.send_signup_email_address_verification_code(signup_token)
+
+    if isinstance(result, ActionErrorResult):
+        logger.error(
+            f"resend_signup_email: Failed for {email}: {result.error_code}"
+        )
+        return Response.json(
+            {"error": "Failed to resend email", "error_code": result.error_code},
+            status_code=400,
+        )
+
+    logger.info(f"resend_signup_email: Resent verification email to {email}")
+    return Response.json({"success": True, "message": f"Email resent to {email}"})
 
 
 def validate_session(
@@ -973,7 +1019,11 @@ def run_with_settings(settings: Settings):
 
     # Configure logging level based on debug_logs setting
     log_level = logging.DEBUG if settings.debug_logs else logging.INFO
-    logging.getLogger().setLevel(log_level)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    # Also set handler levels (setup_logging may have set handlers with higher levels)
+    for h in root_logger.handlers:
+        h.setLevel(log_level)
 
     logger.info(
         f"Running with settings:\n\t- frontend_origin={settings.frontend_origin}"

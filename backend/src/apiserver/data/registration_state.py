@@ -106,3 +106,19 @@ def update_registration_state_accepted(
                 return None
 
     return RegistrationStateNotFoundForEmail(email=email)
+
+
+def get_signup_token_by_email(store: Storage, email: str) -> str | None:
+    """Get signup token by email from registration state."""
+    keys = store.list_keys("registration_state")
+
+    for key in keys:
+        result = store.get("registration_state", key)
+        if result is not None:
+            data_bytes, _ = result
+            state_data = _deserialize_registration_state(data_bytes)
+
+            if state_data["email"] == email:
+                return state_data.get("signup_token")
+
+    return None
