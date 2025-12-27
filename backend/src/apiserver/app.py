@@ -1033,6 +1033,7 @@ def run_with_settings(settings: Settings):
     logger.info(
         f"Running with settings:\n\t- frontend_origin={settings.frontend_origin}"
         f"\n\t- debug_logs={settings.debug_logs}"
+        f"\n\t- port={settings.port}"
         f"\n\t- private_port={settings.private_port}"
     )
 
@@ -1108,7 +1109,7 @@ def run_with_settings(settings: Settings):
     threading.Thread(target=run_startup_actions, daemon=True).start()
 
     # Create TCP server config
-    config = TcpServerConfig()
+    config = TcpServerConfig(port=settings.port)
 
     try:
         start_server(config, handler, store_queue=store_queue, ready_event=ready_event)

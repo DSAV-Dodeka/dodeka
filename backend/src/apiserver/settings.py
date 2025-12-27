@@ -31,6 +31,8 @@ class Settings:
     auth_server_url: str = "http://localhost:3777"
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
+    # Port for main HTTP server (public API)
+    port: int = 8000
     # Port for private server (Go-Python communication). Binds to PRIVATE_HOST.
     private_port: int = 8079
     # SMTP configuration for sending emails (None = emails disabled)
@@ -127,6 +129,11 @@ def load_settings_from_env(env_file: Path) -> Settings:
     # Debug logs
     if get_env(env_map, "BACKEND_DEBUG_LOGS", ""):
         config["debug_logs"] = get_env_bool(env_map, "BACKEND_DEBUG_LOGS", False)
+
+    # Port
+    port = get_env(env_map, "BACKEND_PORT", "")
+    if port:
+        config["port"] = get_env_int(env_map, "BACKEND_PORT", 8000)
 
     # Private port
     private_port = get_env(env_map, "BACKEND_PRIVATE_PORT", "")
