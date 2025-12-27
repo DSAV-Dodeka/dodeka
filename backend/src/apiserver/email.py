@@ -185,8 +185,10 @@ def sendmail(
     msg.attach(MIMEText(html_body.strip(), "html", "utf-8"))
 
     # Connect and send
+    # Use helo_domain in HELO/EHLO for SMTP relay authentication (if configured)
+    helo_domain = config.helo_domain or None
     logger.debug(f"Connecting to SMTP server {config.host}:{config.port}")
-    with smtplib.SMTP(config.host, config.port) as server:
+    with smtplib.SMTP(config.host, config.port, local_hostname=helo_domain) as server:
         server.starttls()
         if config.username and config.password:
             server.login(config.username, config.password)
