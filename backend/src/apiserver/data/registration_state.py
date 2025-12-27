@@ -122,3 +122,22 @@ def get_signup_token_by_email(store: Storage, email: str) -> str | None:
                 return state_data.get("signup_token")
 
     return None
+
+
+def get_registration_token_by_email(store: Storage, email: str) -> str | None:
+    """Get registration token by email from registration state.
+
+    Unlike signup_token, registration_token exists from initial registration.
+    """
+    keys = store.list_keys("registration_state")
+
+    for key in keys:
+        result = store.get("registration_state", key)
+        if result is not None:
+            data_bytes, _ = result
+            state_data = _deserialize_registration_state(data_bytes)
+
+            if state_data["email"] == email:
+                return key  # The key IS the registration_token
+
+    return None

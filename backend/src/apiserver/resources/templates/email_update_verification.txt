@@ -1,0 +1,11 @@
+{greeting}
+
+Je verificatiecode voor het wijzigen van je e-mailadres is: {code}
+
+Voer deze code in op de website om de wijziging te bevestigen.
+
+Heb je dit niet aangevraagd? Negeer dan deze e-mail.
+
+--
+D.S.A.V. Dodeka
+Delftse Studenten Atletiek Vereniging

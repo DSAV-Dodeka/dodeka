@@ -43,6 +43,7 @@ from apiserver.data.registration_state import (
     RegistrationStateNotFoundForEmail,
     create_registration_state,
     get_registration_state,
+    get_registration_token_by_email,
     get_signup_token_by_email,
     update_registration_state_accepted,
 )
@@ -56,7 +57,7 @@ from apiserver.data.user import (
 )
 from apiserver.private import start_private_server
 from apiserver.settings import Settings, load_settings_from_env, parse_args
-from apiserver.tokens import TOKENS_TABLE, TokenWaiter
+from apiserver.tokens import TOKENS_TABLE, TokenWaiter, get_token
 
 logger = logging.getLogger("apiserver.app")
 
@@ -367,6 +368,9 @@ def handler_with_client(
     def h_get_reg_status():
         return get_registration_status_handler(req, store_queue)
 
+    def h_lookup_registration():
+        return lookup_registration_handler(req, store_queue)
+
     def h_get_sess_token():
         return get_session_token_handler(headers)
 
@@ -381,6 +385,9 @@ def handler_with_client(
         },
         "/auth/registration_status": {
             "POST": RouteEntry(h_get_reg_status, PermissionConfig.public())
+        },
+        "/auth/lookup_registration": {
+            "POST": RouteEntry(h_lookup_registration, PermissionConfig.public())
         },
         # We prefix the next with 'admin' to make it clear it's only accessible to
         # admins
@@ -562,6 +569,42 @@ def get_registration_status_handler(
         f"get_registration_status: Found status for {result['email']}, "
         f"accepted={result['accepted']}"
     )
+    return Response.json(result)
+
+
+def lookup_registration_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """
+    Handle /auth/lookup_registration.
+
+    Look up registration token by email and verification code.
+    Used when users don't have the direct link but have received the email.
+    """
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        email = body_data.get("email")
+        code = body_data.get("code")
+        if not email or not code:
+            logger.warning("lookup_registration: Missing email or code")
+            return Response.text("Missing email or code", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"lookup_registration: Invalid request: {e}")
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    def lookup(store: Storage) -> dict:
+        # First verify the code matches what we have stored
+        stored = get_token(store, "signup_verification", email)
+        if stored is None or stored.get("code") != code:
+            return {"found": False}
+
+        # Code matches, get the registration token
+        reg_token = get_registration_token_by_email(store, email)
+        if reg_token is None:
+            return {"found": False}
+
+        return {"found": True, "token": reg_token}
+
+    result = store_queue.execute(lookup)
+    logger.info(f"lookup_registration: email={email}, found={result['found']}")
     return Response.json(result)
 
 
@@ -1084,6 +1127,7 @@ def run_with_settings(settings: Settings):
         token_waiter,
         settings.frontend_origin,
         settings.smtp,
+        settings.smtp_send,
         command_handlers,
     )
 

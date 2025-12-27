@@ -10,3 +10,6 @@ localenv.toml
 
 # tiauth faroe binary
 auth/auth
+
+# saved emails (when SMTP sending is disabled)
+emails/

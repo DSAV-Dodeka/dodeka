@@ -1,0 +1,10 @@
+{greeting}
+
+Je verificatiecode is: {code}
+
+Klik op onderstaande link om je account te activeren:
+{link}
+
+--
+D.S.A.V. Dodeka
+Delftse Studenten Atletiek Vereniging

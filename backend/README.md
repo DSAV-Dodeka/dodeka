@@ -28,7 +28,7 @@ uv run dev
 For demo environment (uses `.env.demo`):
 
 ```bash
-uv run demo
+uv run --frozen --no-dev demo
 ```
 
 For production (uses `.env`):

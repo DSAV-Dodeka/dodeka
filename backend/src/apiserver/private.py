@@ -33,6 +33,7 @@ from apiserver.data.newuser import (
     InvalidNamesCount,
     prepare_user_store,
 )
+from apiserver.data.registration_state import get_registration_token_by_email
 
 logger = logging.getLogger("apiserver.private")
 
@@ -77,6 +78,7 @@ def create_private_handler(
     token_waiter: TokenWaiter,
     frontend_origin: str,
     smtp_config: SmtpConfig | None,
+    smtp_send: bool,
     command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> Any:
     """Create the handler for the private server."""
@@ -89,7 +91,9 @@ def create_private_handler(
         if req.method == "POST" and req.path == "/invoke":
             response = handle_invoke(req, store_queue)
         elif req.method == "POST" and req.path == "/email":
-            response = handle_email(req, store_queue, token_waiter, smtp_config)
+            response = handle_email(
+                req, store_queue, token_waiter, smtp_config, smtp_send, frontend_origin
+            )
         elif req.method == "POST" and req.path == "/command":
             response = handle_command(req, store_queue, command_handlers or {})
         else:
@@ -128,6 +132,8 @@ def handle_email(
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
     smtp_config: SmtpConfig | None,
+    smtp_send: bool,
+    frontend_origin: str,
 ) -> Response:
     """Handle email request from Go - stores tokens and sends email."""
     try:
@@ -147,6 +153,22 @@ def handle_email(
     timestamp = body.get("timestamp")
     new_email = body.get("newEmail")
 
+    # Construct signup link using registration_token (exists from initial registration)
+    # Include the verification code so the form is pre-filled
+    link: str | None = None
+    if email_type == "signup_verification":
+
+        def lookup_registration_token(store: Storage) -> str | None:
+            return get_registration_token_by_email(store, to_email)
+
+        registration_token = store_queue.execute(lookup_registration_token)
+        if registration_token and code:
+            link = (
+                f"{frontend_origin}/account/signup"
+                f"?token={registration_token}&code={code}"
+            )
+            logger.info(f"Signup link for {to_email}: {link}")
+
     # Store token if this is a verification/reset email type
     if email_type in TOKEN_EMAIL_TYPES and code:
         def store_token(store: Storage) -> None:
@@ -156,23 +178,21 @@ def handle_email(
         token_waiter.notify()
         logger.debug(f"Stored token: {email_type}:{to_email} code={code}")
 
-    # Send email if SMTP is configured
-    if smtp_config is not None:
-        try:
-            data = EmailData(
-                email_type=email_type,
-                to_email=to_email,
-                display_name=display_name,
-                code=code,
-                timestamp=timestamp,
-                new_email=new_email,
-            )
-            sendemail(smtp_config, data)
-        except Exception as e:
-            logger.error(f"email: Failed to send email: {e}")
-            return Response.json({"success": False, "error": str(e)}, status_code=500)
-    else:
-        logger.debug(f"email: SMTP not configured, skipping send for {email_type}")
+    # Send email via SMTP or save to file
+    try:
+        data = EmailData(
+            email_type=email_type,
+            to_email=to_email,
+            display_name=display_name,
+            code=code,
+            timestamp=timestamp,
+            new_email=new_email,
+            link=link,
+        )
+        sendemail(smtp_config, data, smtp_send)
+    except Exception as e:
+        logger.error(f"email: Failed to process email: {e}")
+        return Response.json({"success": False, "error": str(e)}, status_code=500)
 
     return Response.json({"success": True})
 
@@ -317,6 +337,7 @@ def start_private_server(
     token_waiter: TokenWaiter,
     frontend_origin: str,
     smtp_config: SmtpConfig | None,
+    smtp_send: bool,
     command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> None:
     """Start the private TCP HTTP server in a background thread.
@@ -324,7 +345,8 @@ def start_private_server(
     Binds to PRIVATE_HOST (127.0.0.2) for isolation from the public server.
     """
     handler = create_private_handler(
-        store_queue, token_waiter, frontend_origin, smtp_config, command_handlers
+        store_queue, token_waiter, frontend_origin, smtp_config, smtp_send,
+        command_handlers
     )
     config = TcpServerConfig(host=PRIVATE_HOST, port=port)
 

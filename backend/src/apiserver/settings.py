@@ -35,8 +35,10 @@ class Settings:
     port: int = 8000
     # Port for private server (Go-Python communication). Binds to PRIVATE_HOST.
     private_port: int = 8079
-    # SMTP configuration for sending emails (None = emails disabled)
+    # SMTP configuration for sending emails (None = config not provided)
     smtp: SmtpConfig | None = None
+    # Whether to actually send emails via SMTP (False = save to files instead)
+    smtp_send: bool = False
 
 
 def load_env_file(env_file: Path) -> dict[str, str]:
@@ -158,6 +160,10 @@ def load_settings_from_env(env_file: Path) -> Settings:
             )
         except ValueError:
             pass
+
+    # SMTP send toggle (requires smtp config to be set)
+    if get_env(env_map, "BACKEND_SMTP_SEND", ""):
+        config["smtp_send"] = get_env_bool(env_map, "BACKEND_SMTP_SEND", False)
 
     return Settings(**config)
 
