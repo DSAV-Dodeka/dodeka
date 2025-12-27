@@ -1,21 +1,13 @@
-import tomllib
+import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
-
-from apiserver.resources import res_path
+from typing import Any, Literal
 
 # Private server address - uses 127.0.0.2 for isolation from main loopback
 PRIVATE_HOST = "127.0.0.2"
 
-__all__ = ["PRIVATE_HOST", "Settings", "SmtpConfig", "settings"]
-
-
-@dataclass
-class AdminKey:
-    key: str
-    # Unix timestamp for when it expires
-    expiration: int
+__all__ = ["PRIVATE_HOST", "Settings", "SmtpConfig", "load_settings_from_env"]
 
 
 @dataclass
@@ -32,182 +24,151 @@ class SmtpConfig:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Settings:
-    """Application settings loaded from TOML configuration file."""
+    """Application settings loaded from environment file."""
 
     db_file: Path = Path("./db.sqlite")
-    environment: Literal["test"] | Literal["production"] = "production"
+    environment: Literal["test", "demo", "production"] = "production"
     auth_server_url: str = "http://localhost:3777"
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
     # Port for private server (Go-Python communication). Binds to PRIVATE_HOST.
     private_port: int = 8079
-    # Enable interactive shell mode
-    interactive: bool = False
-    admin_key: AdminKey | None = None
     # SMTP configuration for sending emails (None = emails disabled)
     smtp: SmtpConfig | None = None
 
 
-def find_config_file() -> Path | None:
-    """
-    Searches in order:
-    1. config.toml in resources folder
-    2. devenv.toml.local
-    3. devenv.toml
-    """
-    candidates = [
-        res_path.joinpath("config.toml"),
-        Path("./devenv.toml.local"),
-        Path("./devenv.toml"),
-    ]
+def load_env_file(env_file: Path) -> dict[str, str]:
+    """Load environment variables from a file into a dict."""
+    env: dict[str, str] = {}
 
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
+    if not env_file.exists():
+        return env
 
-    return None
+    with open(env_file) as f:
+        for raw_line in f:
+            line = raw_line.strip()
 
+            # Skip empty lines and comments
+            if not line or line.startswith("#"):
+                continue
 
-def validate_path(name: str, value: object) -> Path:
-    """Validate and convert a path setting."""
-    if not isinstance(value, str):
-        raise ValueError(
-            f"Setting '{name}' must be a string, got {type(value).__name__}"
-        )
-    return Path(value)
+            # Split on first = sign
+            if "=" not in line:
+                continue
 
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
 
-def validate_str(name: str, value: object) -> str:
-    """Validate a string setting."""
-    if not isinstance(value, str):
-        raise ValueError(
-            f"Setting '{name}' must be a string, got {type(value).__name__}"
-        )
-    return value
+            # Remove quotes if present
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
+                value = value[1:-1]
+
+            env[key] = value
+
+    return env
 
 
-def validate_bool(name: str, value: object) -> bool:
-    """Validate a boolean setting."""
-    if not isinstance(value, bool):
-        raise ValueError(
-            f"Setting '{name}' must be a boolean, got {type(value).__name__}"
-        )
-    return value
+def get_env(env_map: dict[str, str], key: str, default: str = "") -> str:
+    """Get a value from the env map or OS environment."""
+    value = env_map.get(key)
+    if value:
+        return value
+    return os.environ.get(key, default)
 
 
-def validate_int(name: str, value: object) -> int:
-    """Validate an integer setting."""
-    if not isinstance(value, int):
-        raise ValueError(f"Setting '{name}' must be an int, got {type(value).__name__}")
-    return value
+def get_env_bool(env_map: dict[str, str], key: str, default: bool = False) -> bool:
+    """Get a boolean value from the env map or OS environment."""
+    value = get_env(env_map, key, "")
+    if not value:
+        return default
+    return value.lower() in ("true", "1", "yes")
 
 
-def validate_environment(name: str, value: object) -> Literal["test", "production"]:
-    """Validate environment setting."""
-    env = validate_str(name, value)
-    if env not in ("test", "production"):
-        raise ValueError(
-            f"Setting '{name}' must be 'test' or 'production', got '{env}'"
-        )
-    return env  # type: ignore
+def get_env_int(env_map: dict[str, str], key: str, default: int) -> int:
+    """Get an integer value from the env map or OS environment."""
+    value = get_env(env_map, key, "")
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
-def validate_admin_key(name: str, value: object) -> AdminKey:
-    """Validate admin_key setting."""
-    if not isinstance(value, dict):
-        raise ValueError(
-            f"Setting '{name}' must be a table/dict, got {type(value).__name__}"
-        )
+def load_settings_from_env(env_file: Path) -> Settings:
+    """Load settings from an environment file."""
+    env_map = load_env_file(env_file)
 
-    key = validate_str(f"{name}.key", value.get("key"))
-    expiration = validate_int(f"{name}.expiration", value.get("expiration"))
+    config: dict[str, Any] = {}
 
-    return AdminKey(key=key, expiration=expiration)
+    # Database file
+    db_file = get_env(env_map, "BACKEND_DB_FILE", "")
+    if db_file:
+        config["db_file"] = Path(db_file)
 
+    # Environment
+    environment = get_env(env_map, "BACKEND_ENVIRONMENT", "")
+    if environment in ("test", "demo", "production"):
+        config["environment"] = environment
 
-def validate_smtp(name: str, value: object) -> SmtpConfig:
-    """Validate smtp setting."""
-    if not isinstance(value, dict):
-        raise ValueError(
-            f"Setting '{name}' must be a table/dict, got {type(value).__name__}"
-        )
+    # Auth server URL
+    auth_server_url = get_env(env_map, "BACKEND_AUTH_SERVER_URL", "")
+    if auth_server_url:
+        config["auth_server_url"] = auth_server_url
 
-    host = validate_str(f"{name}.host", value.get("host"))
-    port = validate_int(f"{name}.port", value.get("port"))
-    sender_email = validate_str(f"{name}.sender_email", value.get("sender_email"))
+    # Frontend origin
+    frontend_origin = get_env(env_map, "BACKEND_FRONTEND_ORIGIN", "")
+    if frontend_origin:
+        config["frontend_origin"] = frontend_origin
 
-    sender_name = ""
-    if "sender_name" in value:
-        sender_name = validate_str(f"{name}.sender_name", value.get("sender_name"))
+    # Debug logs
+    if get_env(env_map, "BACKEND_DEBUG_LOGS", ""):
+        config["debug_logs"] = get_env_bool(env_map, "BACKEND_DEBUG_LOGS", False)
 
-    username = None
-    if "username" in value:
-        username = validate_str(f"{name}.username", value.get("username"))
+    # Private port
+    private_port = get_env(env_map, "BACKEND_PRIVATE_PORT", "")
+    if private_port:
+        config["private_port"] = get_env_int(env_map, "BACKEND_PRIVATE_PORT", 8079)
 
-    password = None
-    if "password" in value:
-        password = validate_str(f"{name}.password", value.get("password"))
-
-    return SmtpConfig(
-        host=host,
-        port=port,
-        sender_email=sender_email,
-        sender_name=sender_name,
-        username=username,
-        password=password,
-    )
-
-
-def load_settings() -> Settings:
-    config_file = find_config_file()
-
-    # Start with empty config
-    config = {}
-
-    # Load and validate TOML config if found
-    if config_file is not None:
-        with open(config_file, "rb") as f:
-            toml_data = tomllib.load(f)
-
-        # Validate and convert each setting
-        k = "db_file"
-        if k in toml_data:
-            config[k] = validate_path(k, toml_data[k])
-
-        k = "environment"
-        if k in toml_data:
-            config[k] = validate_environment(k, toml_data[k])
-
-        k = "auth_server_url"
-        if k in toml_data:
-            config[k] = validate_str(k, toml_data[k])
-
-        k = "frontend_origin"
-        if k in toml_data:
-            config[k] = validate_str(k, toml_data[k])
-
-        k = "debug_logs"
-        if k in toml_data:
-            config[k] = validate_bool(k, toml_data[k])
-
-        k = "private_port"
-        if k in toml_data:
-            config[k] = validate_int(k, toml_data[k])
-
-        k = "interactive"
-        if k in toml_data:
-            config[k] = validate_bool(k, toml_data[k])
-
-        k = "admin_key"
-        if k in toml_data:
-            config[k] = validate_admin_key(k, toml_data[k])
-
-        k = "smtp"
-        if k in toml_data:
-            config[k] = validate_smtp(k, toml_data[k])
+    # SMTP configuration
+    smtp_host = get_env(env_map, "BACKEND_SMTP_HOST", "")
+    smtp_port = get_env(env_map, "BACKEND_SMTP_PORT", "")
+    smtp_sender_email = get_env(env_map, "BACKEND_SMTP_SENDER_EMAIL", "")
+    if smtp_host and smtp_port and smtp_sender_email:
+        try:
+            smtp_username = get_env(env_map, "BACKEND_SMTP_USERNAME", "") or None
+            smtp_password = get_env(env_map, "BACKEND_SMTP_PASSWORD", "") or None
+            config["smtp"] = SmtpConfig(
+                host=smtp_host,
+                port=int(smtp_port),
+                sender_email=smtp_sender_email,
+                sender_name=get_env(env_map, "BACKEND_SMTP_SENDER_NAME", ""),
+                username=smtp_username,
+                password=smtp_password,
+            )
+        except ValueError:
+            pass
 
     return Settings(**config)
 
 
-# Global settings instance
-settings = load_settings()
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        prog="backend",
+        description="D.S.A.V. Dodeka backend server",
+    )
+    parser.add_argument(
+        "--env-file",
+        type=str,
+        default=".env",
+        help="Path to environment file (default: .env)",
+    )
+    return parser.parse_args()
+
+
+# Default private port for CLI
+DEFAULT_PRIVATE_PORT = 8079

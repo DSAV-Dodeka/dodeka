@@ -22,8 +22,9 @@ from freetser import Request, Response, Storage, TcpServerConfig, start_server
 from freetser.server import StorageQueue
 from tiauth_faroe.user_server import handle_request_sync
 
-from apiserver.settings import PRIVATE_HOST, settings
+from apiserver.settings import PRIVATE_HOST, SmtpConfig
 from apiserver.email import EmailData, EmailType, TOKEN_EMAIL_TYPES, sendemail
+from apiserver.tokens import TOKENS_TABLE, TokenWaiter, add_token, get_token
 
 from apiserver.data.admin import AdminCredentials, get_admin_credentials
 from apiserver.data.auth import SqliteSyncServer
@@ -35,9 +36,6 @@ from apiserver.data.newuser import (
 
 logger = logging.getLogger("apiserver.private")
 
-# Token table name
-TOKENS_TABLE = "tokens"
-
 # Database tables that can be cleared
 DB_TABLES = [
     "users",
@@ -48,59 +46,6 @@ DB_TABLES = [
     "session_cache",
     TOKENS_TABLE,
 ]
-
-
-def add_token(store: Storage, action: str, email: str, code: str) -> None:
-    """Store a token notification in the database."""
-    key = f"{action}:{email}"
-    value = json.dumps({"action": action, "email": email, "code": code}).encode("utf-8")
-    # Delete any existing token first, then add new one
-    store.delete(TOKENS_TABLE, key)
-    store.add(TOKENS_TABLE, key, value)
-
-
-def get_token(store: Storage, action: str, email: str) -> dict[str, Any] | None:
-    """Get and remove a token from the database."""
-    key = f"{action}:{email}"
-    result = store.get(TOKENS_TABLE, key)
-    if result is None:
-        return None
-    value_bytes, _ = result
-    store.delete(TOKENS_TABLE, key)
-    return json.loads(value_bytes.decode("utf-8"))
-
-
-class TokenWaiter:
-    """Waits for tokens to appear in the database."""
-
-    def __init__(self, store_queue: StorageQueue):
-        self.store_queue = store_queue
-        self.condition = threading.Condition()
-
-    def notify(self) -> None:
-        """Notify waiters that a new token may be available."""
-        with self.condition:
-            self.condition.notify_all()
-
-    def wait_for_token(self, action: str, email: str, timeout: float = 30.0) -> str:
-        """Wait for a token and return the code."""
-        with self.condition:
-            while True:
-                # Check database
-                def check(store: Storage) -> dict[str, Any] | None:
-                    return get_token(store, action, email)
-
-                token = self.store_queue.execute(check)
-                if token is not None:
-                    return token["code"]
-
-                # Wait for notification or timeout
-                if not self.condition.wait(timeout=1.0):
-                    timeout -= 1.0
-                    if timeout <= 0:
-                        raise TimeoutError(
-                            f"Timeout waiting for {action} token for {email}"
-                        )
 
 
 def add_cors_headers(response: Response, origin: str) -> Response:
@@ -130,27 +75,27 @@ def handle_options(path: str, origin: str) -> Response:
 def create_private_handler(
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
     command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> Any:
     """Create the handler for the private server."""
-    origin = settings.frontend_origin
-
     def handler(req: Request, _: StorageQueue | None) -> Response:
         # Handle CORS preflight
         if req.method == "OPTIONS":
-            return handle_options(req.path, origin)
+            return handle_options(req.path, frontend_origin)
 
         response: Response
         if req.method == "POST" and req.path == "/invoke":
             response = handle_invoke(req, store_queue)
         elif req.method == "POST" and req.path == "/email":
-            response = handle_email(req, store_queue, token_waiter)
+            response = handle_email(req, store_queue, token_waiter, smtp_config)
         elif req.method == "POST" and req.path == "/command":
             response = handle_command(req, store_queue, command_handlers or {})
         else:
             return Response.text("Not Found", status_code=404)
 
-        return add_cors_headers(response, origin)
+        return add_cors_headers(response, frontend_origin)
 
     return handler
 
@@ -182,6 +127,7 @@ def handle_email(
     req: Request,
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
+    smtp_config: SmtpConfig | None,
 ) -> Response:
     """Handle email request from Go - stores tokens and sends email."""
     try:
@@ -211,7 +157,7 @@ def handle_email(
         logger.debug(f"Stored token: {email_type}:{to_email} code={code}")
 
     # Send email if SMTP is configured
-    if settings.smtp is not None:
+    if smtp_config is not None:
         try:
             data = EmailData(
                 email_type=email_type,
@@ -221,7 +167,7 @@ def handle_email(
                 timestamp=timestamp,
                 new_email=new_email,
             )
-            sendemail(settings.smtp, data)
+            sendemail(smtp_config, data)
         except Exception as e:
             logger.error(f"email: Failed to send email: {e}")
             return Response.json({"success": False, "error": str(e)}, status_code=500)
@@ -369,13 +315,17 @@ def start_private_server(
     port: int,
     store_queue: StorageQueue,
     token_waiter: TokenWaiter,
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
     command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> None:
     """Start the private TCP HTTP server in a background thread.
 
     Binds to PRIVATE_HOST (127.0.0.2) for isolation from the public server.
     """
-    handler = create_private_handler(store_queue, token_waiter, command_handlers)
+    handler = create_private_handler(
+        store_queue, token_waiter, frontend_origin, smtp_config, command_handlers
+    )
     config = TcpServerConfig(host=PRIVATE_HOST, port=port)
 
     def run():

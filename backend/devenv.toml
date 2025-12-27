@@ -1,4 +1,0 @@
-frontend_origin = "http://localhost:3000"
-debug_logs = true
-environment = "test"
-socket_path = "/tmp/dodeka-auth.sock"

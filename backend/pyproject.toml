@@ -10,7 +10,6 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "jinja2==3.1.6",
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
     "freetser==0.3.1",
@@ -24,6 +23,9 @@ dependencies = [
 [project.scripts]
 backend = "apiserver.app:run"
 backend-actions = "apiserver.cli:main"
+dev = "apiserver.app:run_dev"
+demo = "apiserver.app:run_demo"
+production = "apiserver.app:run_production"
 
 [dependency-groups]
 dev = [
@@ -48,9 +50,5 @@ max-args = 6
 
 [tool.ruff.lint]
 select = ["F", "PL", "E", "W", "RUF"]
-# TODO: check if we need this
-# ignore = ["PLR0913", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
-# TODO: check if we need this
-# "__init__.py" = ["F403"]

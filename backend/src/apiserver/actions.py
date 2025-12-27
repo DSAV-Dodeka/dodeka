@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import TYPE_CHECKING
 
 from freetser import Storage
 from freetser.server import StorageQueue
@@ -11,9 +10,7 @@ from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.client import AuthClient
 from apiserver.data.newuser import delete_new_user, prepare_user_store
 from apiserver.data.permissions import add_permission
-
-if TYPE_CHECKING:
-    from apiserver.private import TokenWaiter
+from apiserver.tokens import TokenWaiter
 
 logger = logging.getLogger("apiserver.actions")
 
@@ -27,7 +24,7 @@ def create_admin_user(
     auth_client: AuthClient,
     email: str,
     password: str,
-    token_waiter: "TokenWaiter",
+    token_waiter: TokenWaiter,
     names: list[str] | None = None,
 ) -> tuple[str, str]:
     """Create an admin user using direct DB calls."""

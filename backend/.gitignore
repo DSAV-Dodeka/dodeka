@@ -8,5 +8,5 @@ localenv.toml
 **/private_route.key
 **/tokens.sock
 
+# tiauth faroe binary
 auth/auth
-faroe-docs

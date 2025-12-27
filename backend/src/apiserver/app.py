@@ -6,8 +6,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
 from typing import Callable, Literal
+from urllib.parse import parse_qs, urlparse
 
 from freetser import (
     Request,
@@ -53,9 +54,9 @@ from apiserver.data.user import (
     get_user_info,
     update_session_cache,
 )
-from apiserver.interactive import InteractiveShell
-from apiserver.private import TOKENS_TABLE, TokenWaiter, start_private_server
-from apiserver.settings import Settings, settings
+from apiserver.private import start_private_server
+from apiserver.settings import Settings, load_settings_from_env, parse_args
+from apiserver.tokens import TOKENS_TABLE, TokenWaiter
 
 logger = logging.getLogger("apiserver.app")
 
@@ -321,6 +322,7 @@ def handler_with_client(
     auth_client: AuthClient,
     req: Request,
     store_queue: StorageQueue | None,
+    frontend_origin: str,
 ) -> Response:
     """
     This function dispatches a request to a specific handler, based on the route. It
@@ -342,10 +344,10 @@ def handler_with_client(
         return request_registration(req, store_queue)
 
     def h_set_sess():
-        return set_session(auth_client, req, headers, store_queue)
+        return set_session(auth_client, req, headers, store_queue, frontend_origin)
 
     def h_clear_sess():
-        return clear_session(req, headers)
+        return clear_session(req, headers, frontend_origin)
 
     def h_sess_info():
         return session_info(auth_client, req, headers, store_queue)
@@ -440,7 +442,7 @@ def handler_with_client(
 
     # Handle OPTIONS preflight for CORS (before auth - preflight has no cookies)
     if method == "OPTIONS":
-        return handle_options_request(route, route_entry, settings.frontend_origin)
+        return handle_options_request(route, route_entry, frontend_origin)
 
     # Check access (permissions, etc.)
     if error := check_access(
@@ -454,7 +456,7 @@ def handler_with_client(
     # Browsers generally only allow responses that have this set (CORS)
     allow_origin_header = (
         b"Access-Control-Allow-Origin",
-        settings.frontend_origin.encode("utf-8"),
+        frontend_origin.encode("utf-8"),
     )
 
     response = route_entry.handler()
@@ -743,6 +745,7 @@ def set_session(
     req: Request,
     headers: dict[str, str],
     store_queue: StorageQueue,
+    frontend_origin: str,
 ) -> Response:
     """Handle /auth/set_session/ - validates and sets session cookie.
 
@@ -754,7 +757,7 @@ def set_session(
     # TODO: should we really perform this check or is it up to browser?
     origin = headers.get("origin")
 
-    if origin != settings.frontend_origin:
+    if origin != frontend_origin:
         logger.warning(f"set_session: Invalid origin {origin}")
         return Response.text("Invalid origin!", status_code=403)
 
@@ -798,7 +801,9 @@ def set_session(
     )
 
 
-def clear_session(req: Request, headers: dict[str, str]) -> Response:
+def clear_session(
+    req: Request, headers: dict[str, str], frontend_origin: str
+) -> Response:
     """Handle /auth/clear_session/ - clears session cookie.
 
     Request body (optional):
@@ -807,7 +812,7 @@ def clear_session(req: Request, headers: dict[str, str]) -> Response:
     # Get Origin header
     origin = headers.get("origin")
 
-    if origin != settings.frontend_origin:
+    if origin != frontend_origin:
         logger.warning(f"clear_session: Invalid origin {origin}")
         return Response.text("Invalid origin!", status_code=403)
 
@@ -1052,7 +1057,7 @@ def run_with_settings(settings: Settings):
     # Create token waiter for test notifications
     token_waiter = TokenWaiter(store_queue)
 
-    # Helper to bootstrap admin (used on startup, reset, and interactive)
+    # Helper to bootstrap admin (used on startup and reset)
     def do_bootstrap_admin() -> str:
         try:
             bootstrap_admin(token_waiter, auth_client, store_queue)
@@ -1073,12 +1078,19 @@ def run_with_settings(settings: Settings):
 
     # Start private TCP server on 127.0.0.2 (Go and CLI connect to this)
     start_private_server(
-        settings.private_port, store_queue, token_waiter, command_handlers
+        settings.private_port,
+        store_queue,
+        token_waiter,
+        settings.frontend_origin,
+        settings.smtp,
+        command_handlers,
     )
 
     # freetser doesn't know about the client, so we create a handler that captures it
+    frontend_origin = settings.frontend_origin
+
     def handler(req: Request, store_queue: StorageQueue | None) -> Response:
-        return handler_with_client(auth_client, req, store_queue)
+        return handler_with_client(auth_client, req, store_queue, frontend_origin)
 
     # Create ready event for server startup
     ready_event = threading.Event()
@@ -1095,11 +1107,6 @@ def run_with_settings(settings: Settings):
 
     threading.Thread(target=run_startup_actions, daemon=True).start()
 
-    # Start interactive shell if enabled
-    if settings.interactive:
-        shell = InteractiveShell(store_queue, do_bootstrap_admin)
-        shell.start()
-
     # Create TCP server config
     config = TcpServerConfig()
 
@@ -1112,7 +1119,24 @@ def run_with_settings(settings: Settings):
 
 
 def run():
-    run_with_settings(settings)
+    """Main entry point - parses args and runs with settings from env file."""
+    args = parse_args()
+    run_with_settings(load_settings_from_env(Path(args.env_file)))
+
+
+def run_dev():
+    """Run with .env.test settings."""
+    run_with_settings(load_settings_from_env(Path(".env.test")))
+
+
+def run_demo():
+    """Run with .env.demo settings."""
+    run_with_settings(load_settings_from_env(Path(".env.demo")))
+
+
+def run_production():
+    """Run with .env settings."""
+    run_with_settings(load_settings_from_env(Path(".env")))
 
 
 if __name__ == "__main__":
