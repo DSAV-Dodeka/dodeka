@@ -7,6 +7,8 @@ from freetser import Storage
 @final
 @dataclass(frozen=True)
 class Permissions:
+    """Built-in permissions with special meaning."""
+
     MEMBER = "member"
     ADMIN = "admin"
 
@@ -16,7 +18,28 @@ class UserNotFoundError:
     user_id: str
 
 
-all_permissions = {Permissions.MEMBER, Permissions.ADMIN}
+# Core permissions that have special system meaning
+core_permissions = {Permissions.MEMBER, Permissions.ADMIN}
+
+# Role permissions (committees, groups) - tags without special system behavior.
+# Colors are defined in the frontend.
+role_permissions = {
+    "bestuur",
+    "comcom",
+    "batcie",
+    "barco",
+    "lustrum",
+    "focus",
+    "nsk-meerkamp",
+    "redaxii",
+    "sax",
+    "snowdeka",
+    "sunrice",
+    "trainers",
+}
+
+# All valid permissions
+all_permissions = core_permissions | role_permissions
 
 
 def allowed_permission(permission: str) -> bool:

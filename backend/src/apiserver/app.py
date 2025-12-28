@@ -37,6 +37,7 @@ from apiserver.data.permissions import (
     UserNotFoundError,
     add_permission,
     allowed_permission,
+    read_permissions,
     remove_permission,
 )
 from apiserver.data.registration_state import (
@@ -51,8 +52,10 @@ from apiserver.data.user import (
     CachedSessionData,
     InvalidSession,
     SessionInfo,
+    get_all_permissions,
     get_cached_session,
     get_user_info,
+    list_all_users,
     update_session_cache,
 )
 from apiserver.private import start_private_server
@@ -377,6 +380,15 @@ def handler_with_client(
     def h_resend_signup_email():
         return resend_signup_email_handler(auth_client, req, store_queue)
 
+    def h_list_users():
+        return list_users_handler(store_queue)
+
+    def h_available_permissions():
+        return available_permissions_handler()
+
+    def h_set_permissions():
+        return set_permissions_handler(req, store_queue)
+
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
         # Dodeka-specific actions related to auth
@@ -399,6 +411,17 @@ def handler_with_client(
         },
         "/admin/remove_permission/": {
             "POST": RouteEntry(h_remove_perm, PermissionConfig.require("admin"))
+        },
+        "/admin/list_users/": {
+            "GET": RouteEntry(h_list_users, PermissionConfig.require("admin"))
+        },
+        "/admin/available_permissions/": {
+            "GET": RouteEntry(
+                h_available_permissions, PermissionConfig.require("admin")
+            )
+        },
+        "/admin/set_permissions/": {
+            "POST": RouteEntry(h_set_permissions, PermissionConfig.require("admin"))
         },
         "/admin/list_newusers/": {
             "GET": RouteEntry(h_list_newusers, PermissionConfig.require("admin"))
@@ -1018,6 +1041,110 @@ def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
     else:
         logger.info(f"remove_user_permission: {result.strip()}")
         return Response.text(result)
+
+
+def list_users_handler(store_queue: StorageQueue) -> Response:
+    """Handle /admin/list_users/ - lists all users with their permissions."""
+    timestamp = int(time.time())
+
+    def get_users(store: Storage) -> list[dict]:
+        users = list_all_users(store, timestamp)
+        return [
+            {
+                "user_id": u.user_id,
+                "email": u.email,
+                "firstname": u.firstname,
+                "lastname": u.lastname,
+                "permissions": sorted(u.permissions),
+            }
+            for u in users
+        ]
+
+    result = store_queue.execute(get_users)
+    logger.info(f"list_users: Returning {len(result)} users")
+    return Response.json(result)
+
+
+def available_permissions_handler() -> Response:
+    """Handle /admin/available_permissions/ - lists all valid permissions."""
+    permissions = get_all_permissions()
+    return Response.json({"permissions": permissions})
+
+
+def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/set_permissions/ - declaratively set permissions for users.
+
+    Request body (JSON):
+        {
+            "permissions": {
+                "user_id_1": ["permission1", "permission2"],
+                "user_id_2": ["permission3"],
+                ...
+            }
+        }
+
+    This will set each user's permissions to exactly the list provided,
+    adding missing permissions and removing extra ones (except 'admin').
+    """
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        permissions_map = body_data.get("permissions")
+        if not permissions_map or not isinstance(permissions_map, dict):
+            logger.warning("set_permissions: Missing or invalid permissions map")
+            return Response.text("Missing permissions map", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"set_permissions: Invalid request: {e}")
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    # Validate all permissions first
+    for user_id, perms in permissions_map.items():
+        if not isinstance(perms, list):
+            return Response.text(
+                f"Permissions for {user_id} must be a list", status_code=400
+            )
+        for perm in perms:
+            if not allowed_permission(perm):
+                return Response.text(f"Invalid permission: {perm}", status_code=400)
+            if perm == "admin":
+                return Response.text(
+                    "Cannot set admin permission via this endpoint", status_code=403
+                )
+
+    timestamp = int(time.time())
+    results: dict[str, dict] = {}
+
+    def apply_permissions(store: Storage) -> None:
+        for user_id, target_perms in permissions_map.items():
+            target_set = set(target_perms)
+
+            # Get current permissions (excluding admin)
+            current = read_permissions(store, timestamp, user_id)
+            if isinstance(current, UserNotFoundError):
+                results[user_id] = {"error": "user_not_found"}
+                continue
+
+            # Don't touch admin permission
+            current_non_admin = current - {"admin"}
+            target_non_admin = target_set - {"admin"}
+
+            # Calculate changes
+            to_add = target_non_admin - current_non_admin
+            to_remove = current_non_admin - target_non_admin
+
+            # Apply changes
+            for perm in to_add:
+                add_permission(store, timestamp, user_id, perm)
+            for perm in to_remove:
+                remove_permission(store, user_id, perm)
+
+            results[user_id] = {
+                "added": sorted(to_add),
+                "removed": sorted(to_remove),
+            }
+
+    store_queue.execute(apply_permissions)
+    logger.info(f"set_permissions: Updated {len(results)} users")
+    return Response.json({"results": results})
 
 
 def bootstrap_admin(

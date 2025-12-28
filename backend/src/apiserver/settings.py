@@ -18,7 +18,6 @@ class SmtpConfig:
     port: int
     sender_email: str
     sender_name: str = ""
-    helo_domain: str = ""  # Domain for HELO/EHLO command (SMTP relay auth)
     username: str | None = None
     password: str | None = None
 
@@ -156,7 +155,6 @@ def load_settings_from_env(env_file: Path) -> Settings:
                 port=int(smtp_port),
                 sender_email=smtp_sender_email,
                 sender_name=get_env(env_map, "BACKEND_SMTP_SENDER_NAME", ""),
-                helo_domain=get_env(env_map, "BACKEND_SMTP_HELO_DOMAIN", ""),
                 username=smtp_username,
                 password=smtp_password,
             )

@@ -3,7 +3,11 @@ from dataclasses import dataclass
 
 from freetser import Storage
 
-from apiserver.data.permissions import UserNotFoundError, read_permissions
+from apiserver.data.permissions import (
+    UserNotFoundError,
+    all_permissions,
+    read_permissions,
+)
 
 
 @dataclass
@@ -158,3 +162,31 @@ class SessionInfo:
 
 class InvalidSession:
     pass
+
+
+def list_all_users(store: Storage, timestamp: int) -> list[UserInfo]:
+    """List all users with their permissions."""
+    # Get all emails from the index table
+    email_keys = store.list_keys("users_by_email")
+
+    users = []
+    for email in email_keys:
+        # Get user_id from email index
+        result = store.get("users_by_email", email)
+        if result is None:
+            continue
+
+        user_id_bytes, _ = result
+        user_id = user_id_bytes.decode("utf-8")
+
+        # Get full user info
+        user_info = get_user_info(store, timestamp, user_id)
+        if user_info is not None:
+            users.append(user_info)
+
+    return users
+
+
+def get_all_permissions() -> list[str]:
+    """Get list of all valid permissions."""
+    return sorted(all_permissions)
