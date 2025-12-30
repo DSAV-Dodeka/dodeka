@@ -1,16 +1,18 @@
 # Claude Development Guidelines
 
+## Architecture
+
 ## Code Quality Checks
 
-Before committing, run these checks:
+After adding a significant amount of code and before finishing a request, run these checks:
 
 ```bash
 uv run basedpyright          # Type checking
-uv run ruff check            # Linting
 uv format --preview-features format  # Code formatting
+uv run ruff check            # Linting
 ```
 
-All checks must pass before committing code.
+All checks must pass. Try to avoid ignoring warnings without explicit permission from the user.
 
 ## Database Thread Deadlock Prevention
 
@@ -37,3 +39,5 @@ def handler(req: Request, store_queue: StorageQueue) -> Response:
 ```
 
 See `session_info()` in `src/apiserver/app.py` for an example.
+
+## Frontend

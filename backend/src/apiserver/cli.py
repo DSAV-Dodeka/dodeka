@@ -18,6 +18,7 @@ import requests
 
 from apiserver.settings import DEFAULT_PRIVATE_PORT, PRIVATE_HOST
 
+
 def get_private_url(port: int = DEFAULT_PRIVATE_PORT) -> str:
     """Get the base URL for the private server."""
     return f"http://{PRIVATE_HOST}:{port}"
@@ -32,10 +33,7 @@ def send_command(command: str, **kwargs: Any) -> str:
         response = requests.post(url, json=payload, timeout=30)
         return response.text
     except requests.exceptions.ConnectionError:
-        return (
-            f"Error: Could not connect to {url}. "
-            "Is the server running?"
-        )
+        return f"Error: Could not connect to {url}. Is the server running?"
 
 
 def cmd_reset(_args: argparse.Namespace) -> None:

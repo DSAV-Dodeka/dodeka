@@ -12,13 +12,15 @@ requires-python = ">=3.14"
 dependencies = [
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
-    "freetser==0.3.1",
+    "freetser==0.3.3",
     "requests==2.32.5",
+    # pin to exact version since freetser doesn't pin
+    "h11==0.16.0"
 ]
 
 [tool.uv.sources]
-"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/lib", rev = "f41698233d244c0968e27c41c3059562c0f3de74" }
-"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "py-user-server/client", rev = "f41698233d244c0968e27c41c3059562c0f3de74" }
+"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/user-server", rev = "602a7f9c369795259cb11e205c2a89e772233550" }
+"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/client", rev = "602a7f9c369795259cb11e205c2a89e772233550" }
 
 [project.scripts]
 backend = "apiserver.app:run"
@@ -29,7 +31,7 @@ production = "apiserver.app:run_production"
 
 [dependency-groups]
 dev = [
-    "basedpyright>=1.34.0",
+    "ty>=0.0.7",
     "pytest>=9.0.1",
     "ruff>=0.14.6",
 ]
@@ -38,17 +40,9 @@ dev = [
 requires = ["uv_build>=0.9.11,<0.10.0"]
 build-backend = "uv_build"
 
-[tool.basedpyright]
-typeCheckingMode = "standard"
-pythonVersion = "3.14"
-include = ["src"]
-exclude = ["**/__pycache__", ".venv", "**/.venv"]
-
 [tool.ruff.lint.pylint]
 max-returns = 10
 max-args = 7
 
 [tool.ruff.lint]
 select = ["F", "PL", "E", "W", "RUF"]
-
-[tool.ruff.lint.per-file-ignores]

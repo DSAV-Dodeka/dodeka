@@ -82,6 +82,7 @@ def create_private_handler(
     command_handlers: dict[str, Callable[[], str]] | None = None,
 ) -> Any:
     """Create the handler for the private server."""
+
     def handler(req: Request, _: StorageQueue | None) -> Response:
         # Handle CORS preflight
         if req.method == "OPTIONS":
@@ -171,6 +172,7 @@ def handle_email(
 
     # Store token if this is a verification/reset email type
     if email_type in TOKEN_EMAIL_TYPES and code:
+
         def store_token(store: Storage) -> None:
             add_token(store, email_type, to_email, code)
 
@@ -345,8 +347,12 @@ def start_private_server(
     Binds to PRIVATE_HOST (127.0.0.2) for isolation from the public server.
     """
     handler = create_private_handler(
-        store_queue, token_waiter, frontend_origin, smtp_config, smtp_send,
-        command_handlers
+        store_queue,
+        token_waiter,
+        frontend_origin,
+        smtp_config,
+        smtp_send,
+        command_handlers,
     )
     config = TcpServerConfig(host=PRIVATE_HOST, port=port)
 

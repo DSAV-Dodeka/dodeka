@@ -752,9 +752,7 @@ def resend_signup_email_handler(
     result = auth_client.send_signup_email_address_verification_code(signup_token)
 
     if isinstance(result, ActionErrorResult):
-        logger.error(
-            f"resend_signup_email: Failed for {email}: {result.error_code}"
-        )
+        logger.error(f"resend_signup_email: Failed for {email}: {result.error_code}")
         return Response.json(
             {"error": "Failed to resend email", "error_code": result.error_code},
             status_code=400,
@@ -798,8 +796,12 @@ def validate_session(
 
     def update_cache(store: Storage) -> None:
         update_session_cache(
-            store, session_token, session.user_id,
-            session.created_at, session.expires_at, timestamp
+            store,
+            session_token,
+            session.user_id,
+            session.created_at,
+            session.expires_at,
+            timestamp,
         )
 
     store_queue.execute(update_cache)

@@ -28,6 +28,7 @@ def create_admin_user(
     names: list[str] | None = None,
 ) -> tuple[str, str]:
     """Create an admin user using direct DB calls."""
+
     # Delete existing user by email (cleanup from previous runs)
     def delete_user_by_email(store: Storage) -> str | None:
         # Clean up newusers table
