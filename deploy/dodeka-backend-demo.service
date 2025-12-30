@@ -1,0 +1,15 @@
+[Unit]
+Description=Dodeka Backend Server - Demo (Python)
+After=network.target dodeka-auth-demo.service
+Wants=dodeka-auth-demo.service
+
+[Service]
+Type=simple
+User=backend
+WorkingDirectory=/home/backend/dodeka/backend
+ExecStart=/home/backend/.local/bin/uv run --frozen --no-dev demo
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
