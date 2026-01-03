@@ -7,7 +7,7 @@ Wants=dodeka-auth-production.service
 Type=simple
 User=backend
 WorkingDirectory=/home/backend/dodeka/backend
-ExecStart=/home/backend/.local/bin/uv run --frozen --no-dev production
+ExecStart=/home/backend/.local/bin/uv run --frozen --no-dev backend --env-file /home/backend/dodeka/backend/envs/production/.env
 Restart=on-failure
 RestartSec=5
 

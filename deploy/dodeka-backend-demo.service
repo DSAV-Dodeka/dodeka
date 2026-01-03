@@ -7,7 +7,7 @@ Wants=dodeka-auth-demo.service
 Type=simple
 User=backend
 WorkingDirectory=/home/backend/dodeka/backend
-ExecStart=/home/backend/.local/bin/uv run --frozen --no-dev demo
+ExecStart=/home/backend/.local/bin/uv run --frozen --no-dev backend --env-file /home/backend/dodeka/backend/envs/demo/.env
 Restart=on-failure
 RestartSec=5
 

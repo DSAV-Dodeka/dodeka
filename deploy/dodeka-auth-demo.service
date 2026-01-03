@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=backend
 WorkingDirectory=/home/backend/dodeka/backend/auth
-ExecStart=/home/backend/dodeka/backend/auth/auth --env-file .env.demo
+ExecStart=/home/backend/dodeka/backend/auth/auth --env-file /home/backend/dodeka/backend/auth/envs/demo/.env
 Restart=on-failure
 RestartSec=5
 
