@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+
+jobs:
+  build-auth:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/auth/go.mod
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build linux/amd64
+        working-directory: backend/auth
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: amd64
+          CC: zig cc -target x86_64-linux-gnu
+          CXX: zig cc -target x86_64-linux-gnu
+        run: go build -o auth-linux-amd64 .
+
+      - name: Build darwin/arm64
+        working-directory: backend/auth
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          GOARCH: arm64
+          CC: zig cc -target aarch64-macos
+          CXX: zig cc -target aarch64-macos
+        run: go build -o auth-darwin-arm64 .
+
+      - name: Build windows/amd64
+        working-directory: backend/auth
+        env:
+          CGO_ENABLED: "1"
+          GOOS: windows
+          GOARCH: amd64
+          CC: zig cc -target x86_64-windows-gnu
+          CXX: zig cc -target x86_64-windows-gnu
+        run: go build -o auth-windows-amd64.exe .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: auth-binaries
+          path: |
+            backend/auth/auth-linux-amd64
+            backend/auth/auth-darwin-arm64
+            backend/auth/auth-windows-amd64.exe

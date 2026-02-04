@@ -1299,18 +1299,18 @@ def run():
 
 
 def run_dev():
-    """Run with .env.test settings."""
-    run_with_settings(load_settings_from_env(Path(".env.test")))
+    """Run with test environment settings."""
+    run_with_settings(load_settings_from_env(Path("envs/test/.env")))
 
 
 def run_demo():
-    """Run with .env.demo settings."""
-    run_with_settings(load_settings_from_env(Path(".env.demo")))
+    """Run with demo environment settings."""
+    run_with_settings(load_settings_from_env(Path("envs/demo/.env")))
 
 
 def run_production():
-    """Run with .env settings."""
-    run_with_settings(load_settings_from_env(Path(".env")))
+    """Run with production environment settings."""
+    run_with_settings(load_settings_from_env(Path("envs/production/.env")))
 
 
 if __name__ == "__main__":
