@@ -7,7 +7,7 @@
 After adding a significant amount of code and before finishing a request, run these checks:
 
 ```bash
-uv run basedpyright          # Type checking
+uv run ty check          # Type checking
 uv format --preview-features format  # Code formatting
 uv run ruff check            # Linting
 ```

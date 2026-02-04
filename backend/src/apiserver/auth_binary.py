@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from apiserver.resources import project_path
+
 GITHUB_REPO = "DSAV-Dodeka/dodeka"
 WORKFLOW_FILE = "ci.yml"
 
@@ -31,8 +33,7 @@ def artifact_name_for_platform() -> str:
 
 
 def auth_dir() -> Path:
-    # backend/src/apiserver/auth_binary.py -> backend/auth/
-    return Path(__file__).resolve().parent.parent.parent / "auth"
+    return project_path / "auth"
 
 
 def get_auth_binary_path() -> Path:

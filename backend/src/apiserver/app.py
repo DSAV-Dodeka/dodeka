@@ -1197,6 +1197,7 @@ class PrefixFormatter(logging.Formatter):
     """Wraps an existing formatter, prepending a prefix to each line."""
 
     def __init__(self, prefix: str, base: logging.Formatter | None):
+        super().__init__()
         self.prefix = prefix
         self.base = base
 
@@ -1330,8 +1331,15 @@ def run_dev():
     auth_process = None
 
     if auth_path.exists():
+        auth_args = [
+            str(auth_path),
+            "--env-file",
+            "envs/test/.env",
+            "--enable-reset",
+            "--interactive",
+        ]
         auth_process = subprocess.Popen(
-            [str(auth_path), "--env-file", "envs/test/.env", "--enable-reset"],
+            auth_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(auth_path.parent),
