@@ -1,0 +1,11 @@
+{greeting}
+
+Er is ingelogd op je account op {timestamp} (UTC).
+
+Was jij dit? Dan hoef je niets te doen.
+
+Was jij dit niet? Wijzig dan direct je wachtwoord.
+
+--
+D.S.A.V. Dodeka
+Delftse Studenten Atletiek Vereniging

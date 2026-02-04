@@ -1,8 +1,0 @@
-# confspawn recipe file
-# Use for upgrading postgres
-
-config = "repl/repl_config.toml"
-
-[[sources]]
-source = "build/deploy/repl"
-target = "use/repl"

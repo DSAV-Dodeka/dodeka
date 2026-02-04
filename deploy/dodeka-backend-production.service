@@ -1,0 +1,15 @@
+[Unit]
+Description=Dodeka Backend Server - Production (Python)
+After=network.target dodeka-auth-production.service
+Wants=dodeka-auth-production.service
+
+[Service]
+Type=simple
+User=backend
+WorkingDirectory=/home/backend/dodeka/backend
+ExecStart=/home/backend/.local/bin/uv run --frozen --no-dev backend --env-file /home/backend/dodeka/backend/envs/production/.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

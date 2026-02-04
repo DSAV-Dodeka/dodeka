@@ -1,20 +1,35 @@
-from loguru import logger
+import json
+from dataclasses import dataclass
 
-from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from freetser import Storage
 
 
-def drop_recreate_database(engine: Engine, db_name: str) -> None:
-    with engine.connect() as connection:
-        terminate_conns = text(f"""
-                               SELECT pg_terminate_backend(pg_stat_activity.pid)
-                                FROM pg_stat_activity
-                                WHERE pg_stat_activity.datname = '{db_name}'
-                                AND pid <> pg_backend_pid();""")
-        connection.execute(terminate_conns)
+ADMIN_CREDENTIALS_KEY = "bootstrap_admin_credentials"
 
-        drop_db = text(f"DROP DATABASE IF EXISTS {db_name}")
-        connection.execute(drop_db)
-        create_db = text(f"CREATE DATABASE {db_name}")
-        connection.execute(create_db)
-        logger.warning("Dropped and recreated database.")
+
+@dataclass
+class AdminCredentials:
+    """Bootstrap admin credentials."""
+
+    email: str
+    password: str
+
+
+def store_admin_credentials(store: Storage, email: str, password: str) -> None:
+    """Store bootstrap admin credentials in the database."""
+    data = json.dumps({"email": email, "password": password}).encode("utf-8")
+
+    # Delete existing and add new
+    store.delete("metadata", ADMIN_CREDENTIALS_KEY)
+    store.add("metadata", ADMIN_CREDENTIALS_KEY, data)
+
+
+def get_admin_credentials(store: Storage) -> AdminCredentials | None:
+    """Get bootstrap admin credentials from the database."""
+    result = store.get("metadata", ADMIN_CREDENTIALS_KEY)
+    if result is None:
+        return None
+
+    data_bytes, _ = result
+    data = json.loads(data_bytes.decode("utf-8"))
+    return AdminCredentials(email=data["email"], password=data["password"])

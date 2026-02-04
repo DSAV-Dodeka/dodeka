@@ -1,0 +1,14 @@
+[Unit]
+Description=Dodeka Auth Server - Production (Go/tiauth-faroe)
+After=network.target
+
+[Service]
+Type=simple
+User=backend
+WorkingDirectory=/home/backend/dodeka/backend/auth
+ExecStart=/home/backend/dodeka/backend/auth/auth --env-file /home/backend/dodeka/backend/auth/envs/production/.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,2 +1,20 @@
+# Ignore all .env files by default
+.env
+
+# But keep the environment-specific ones
+!envs/*/.env
+!auth/envs/*/.env
+
 localenv.toml
 *.local
+
+# Database files
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# tiauth faroe binary
+auth/auth
+
+# saved emails (when SMTP sending is disabled)
+emails/

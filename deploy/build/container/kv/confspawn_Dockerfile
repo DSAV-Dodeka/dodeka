@@ -1,8 +1,0 @@
-# Base redis
-FROM redis:7.4-bookworm
-ADD redis.conf {{ kv.redis_conf_dir }}
-# loadmodule in conf is done on startup
-COPY librejson.so /rejson/librejson.so
-ADD command.sh /command.sh
-WORKDIR /
-CMD [ "./command.sh", "$REDIS_PASSWORD" ]
