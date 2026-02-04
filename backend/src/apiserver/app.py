@@ -1323,42 +1323,57 @@ def run():
     run_with_settings(load_settings_from_env(Path(args.env_file)))
 
 
+def run_test():
+    """Run only the Python backend with test environment settings."""
+    run_with_settings(load_settings_from_env(Path("envs/test/.env")))
+
+
 def run_dev():
     """Run auth server and backend together for local development."""
     ensure_auth_binary()
 
     auth_path = get_auth_binary_path()
-    auth_process = None
-
-    if auth_path.exists():
-        auth_args = [
-            str(auth_path),
-            "--env-file",
-            "envs/test/.env",
-            "--enable-reset",
-            "--interactive",
-        ]
-        auth_process = subprocess.Popen(
-            auth_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=str(auth_path.parent),
+    if not auth_path.exists():
+        msg = (
+            f"Auth binary not found at {auth_path}.\n"
+            "Run 'uv run update-auth' to download it, or build"
+            " it with 'CGO_ENABLED=1 go build -o auth .' in"
+            " backend/auth/."
         )
-        threading.Thread(
-            target=pipe_with_prefix, args=(auth_process.stdout, "[auth]"), daemon=True
-        ).start()
-        threading.Thread(
-            target=pipe_with_prefix, args=(auth_process.stderr, "[auth]"), daemon=True
-        ).start()
+        raise SystemExit(msg)
+
+    auth_args = [
+        str(auth_path),
+        "--env-file",
+        "envs/test/.env",
+        "--enable-reset",
+        "--interactive",
+    ]
+    auth_process = subprocess.Popen(
+        auth_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(auth_path.parent),
+    )
+    threading.Thread(
+        target=pipe_with_prefix,
+        args=(auth_process.stdout, "[auth]"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=pipe_with_prefix,
+        args=(auth_process.stderr, "[auth]"),
+        daemon=True,
+    ).start()
 
     try:
         run_with_settings(
-            load_settings_from_env(Path("envs/test/.env")), log_prefix="[backend]"
+            load_settings_from_env(Path("envs/test/.env")),
+            log_prefix="[backend]",
         )
     finally:
-        if auth_process is not None:
-            auth_process.terminate()
-            auth_process.wait()
+        auth_process.terminate()
+        auth_process.wait()
 
 
 def run_demo():

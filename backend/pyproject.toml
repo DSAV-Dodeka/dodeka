@@ -25,6 +25,7 @@ dependencies = [
 [project.scripts]
 backend = "apiserver.app:run"
 backend-actions = "apiserver.cli:main"
+test = "apiserver.app:run_test"
 dev = "apiserver.app:run_dev"
 update-auth = "apiserver.auth_binary:update_auth"
 demo = "apiserver.app:run_demo"

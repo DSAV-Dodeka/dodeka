@@ -14,7 +14,7 @@ uv sync --frozen --no-dev
 For development (includes linting/type checking tools):
 
 ```bash
-uv sync
+uv sync --frozen
 ```
 
 ## Running
