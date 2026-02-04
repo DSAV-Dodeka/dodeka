@@ -1,5 +1,5 @@
 # Dodeka database backups - every 12 minutes
-# Install with: crontab ~/dodeka/deploy/crontab
+# Install with: crontab ~/dodeka/deploy/dodeka_crontab
 
-*/12 * * * * /home/backend/dodeka/deploy/dodeka-db-cron.sh production >> /var/log/dodeka-backup.log 2>&1
-6-59/12 * * * * /home/backend/dodeka/deploy/dodeka-db-cron.sh demo >> /var/log/dodeka-backup.log 2>&1
+*/12 * * * * /home/backend/dodeka/deploy/dodeka-db-cron.sh production >> /home/backend/log/backup.log 2>&1
+6-59/12 * * * * /home/backend/dodeka/deploy/dodeka-db-cron.sh demo >> /home/backend/log/backup.log 2>&1
