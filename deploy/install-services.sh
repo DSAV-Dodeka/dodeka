@@ -39,6 +39,15 @@ case "$ENV" in
 esac
 
 echo ""
+echo "Installing backup crontab..."
+mkdir -p ~/log
+chmod +x "$SCRIPT_DIR"/dodeka-db-*.sh
+crontab "$SCRIPT_DIR/dodeka_crontab"
+
+echo "Installing logrotate config..."
+sudo cp "$SCRIPT_DIR/dodeka-backup-logrotate" /etc/logrotate.d/dodeka-backup
+
+echo ""
 echo "Reloading systemd daemon..."
 sudo systemctl daemon-reload
 
