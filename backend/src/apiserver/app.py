@@ -2,13 +2,16 @@ import enum
 import json
 import logging
 import secrets
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
 from pathlib import Path
-from typing import Callable, Literal
+from typing import IO, Callable, Literal
 from urllib.parse import parse_qs, urlparse
+
+from apiserver.auth_binary import ensure_auth_binary, get_auth_binary_path
 
 from freetser import (
     Request,
@@ -1190,7 +1193,26 @@ def get_session_token_handler(headers: dict[str, str]) -> Response:
     return Response.json({"session_token": session_token})
 
 
-def run_with_settings(settings: Settings):
+class PrefixFormatter(logging.Formatter):
+    """Wraps an existing formatter, prepending a prefix to each line."""
+
+    def __init__(self, prefix: str, base: logging.Formatter | None):
+        self.prefix = prefix
+        self.base = base
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = self.base.format(record) if self.base else super().format(record)
+        return f"{self.prefix} {msg}"
+
+
+def pipe_with_prefix(pipe: "IO[bytes]", prefix: str) -> None:
+    """Read lines from a byte pipe and print them with a prefix."""
+    for line in iter(pipe.readline, b""):
+        print(f"{prefix} {line.decode().rstrip()}", flush=True)
+    pipe.close()
+
+
+def run_with_settings(settings: Settings, *, log_prefix: str = ""):
     log_listener = setup_logging()
     log_listener.start()
 
@@ -1201,6 +1223,8 @@ def run_with_settings(settings: Settings):
     # Also set handler levels (setup_logging may have set handlers with higher levels)
     for h in root_logger.handlers:
         h.setLevel(log_level)
+        if log_prefix:
+            h.setFormatter(PrefixFormatter(log_prefix, h.formatter))
 
     logger.info(
         f"Running with settings:\n\t- frontend_origin={settings.frontend_origin}"
@@ -1299,8 +1323,34 @@ def run():
 
 
 def run_dev():
-    """Run with test environment settings."""
-    run_with_settings(load_settings_from_env(Path("envs/test/.env")))
+    """Run auth server and backend together for local development."""
+    ensure_auth_binary()
+
+    auth_path = get_auth_binary_path()
+    auth_process = None
+
+    if auth_path.exists():
+        auth_process = subprocess.Popen(
+            [str(auth_path), "--env-file", "envs/test/.env", "--enable-reset"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(auth_path.parent),
+        )
+        threading.Thread(
+            target=pipe_with_prefix, args=(auth_process.stdout, "[auth]"), daemon=True
+        ).start()
+        threading.Thread(
+            target=pipe_with_prefix, args=(auth_process.stderr, "[auth]"), daemon=True
+        ).start()
+
+    try:
+        run_with_settings(
+            load_settings_from_env(Path("envs/test/.env")), log_prefix="[backend]"
+        )
+    finally:
+        if auth_process is not None:
+            auth_process.terminate()
+            auth_process.wait()
 
 
 def run_demo():
