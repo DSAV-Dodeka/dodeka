@@ -1,0 +1,7 @@
+/home/backend/log/backup.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+}
