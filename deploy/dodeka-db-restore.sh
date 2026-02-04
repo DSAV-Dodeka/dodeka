@@ -72,6 +72,7 @@ printf "Restoring snapshot %s…\n" "$SNAPSHOT_ID"
 RESTORE_DIR=$(mktemp -d)
 trap 'rm -rf "$RESTORE_DIR"' EXIT
 
+printf "  Downloading from restic repository…\n"
 restic_cmd restore "$SNAPSHOT_ID" --target "$RESTORE_DIR"
 
 RESTORED_FILE=$(find "$RESTORE_DIR" -name "*.sqlite.zst" -type f | head -1)
@@ -81,8 +82,10 @@ if [[ -z "$RESTORED_FILE" ]]; then
     exit 1
 fi
 
-zstd -d -q "$RESTORED_FILE" -o "${RESTORE_DIR}/restored.sqlite"
+printf "  Decompressing with zstd…\n"
+zstd -d "$RESTORED_FILE" -o "${RESTORE_DIR}/restored.sqlite"
 
+printf "  Replacing database file…\n"
 rm -f "${TARGET_DB_PATH}-wal" "${TARGET_DB_PATH}-shm"
 mv "${RESTORE_DIR}/restored.sqlite" "$TARGET_DB_PATH"
 

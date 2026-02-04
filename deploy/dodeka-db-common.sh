@@ -40,10 +40,14 @@ backup_db() {
     local temp_dir=$(mktemp -d)
     trap 'rm -rf "$temp_dir"' RETURN
 
+    printf "  Exporting database with VACUUM INTO…\n"
     sqlite3 "$db_path" "VACUUM INTO '${temp_dir}/dodeka-${env}.sqlite'"
-    zstd --rsyncable -q "${temp_dir}/dodeka-${env}.sqlite" -o "${temp_dir}/dodeka-${env}.sqlite.zst"
+
+    printf "  Compressing with zstd…\n"
+    zstd --rsyncable "${temp_dir}/dodeka-${env}.sqlite" -o "${temp_dir}/dodeka-${env}.sqlite.zst"
     rm "${temp_dir}/dodeka-${env}.sqlite"
 
+    printf "  Uploading to restic repository…\n"
     restic_cmd backup \
         --retry-lock 1h \
         --group-by host,tags \
