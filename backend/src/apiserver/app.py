@@ -46,6 +46,7 @@ from apiserver.data.permissions import (
 from apiserver.data.registration_state import (
     RegistrationStateNotFoundForEmail,
     create_registration_state,
+    get_email_send_count_by_email,
     get_registration_state,
     get_registration_token_by_email,
     get_signup_token_by_email,
@@ -61,7 +62,8 @@ from apiserver.data.user import (
     list_all_users,
     update_session_cache,
 )
-from apiserver.private import start_private_server
+from apiserver.private import create_private_handler, start_private_server
+from apiserver.sync import add_system_user
 from apiserver.settings import Settings, load_settings_from_env, parse_args
 from apiserver.tokens import TOKENS_TABLE, TokenWaiter, get_token
 
@@ -645,6 +647,13 @@ def list_newusers_handler(store_queue: StorageQueue) -> Response:
                 "firstname": user.firstname,
                 "lastname": user.lastname,
                 "accepted": user.accepted,
+                "email_send_count": get_email_send_count_by_email(
+                    store, user.email
+                ),
+                "has_signup_token": get_signup_token_by_email(
+                    store, user.email
+                )
+                is not None,
             }
             for user in users
         ]
@@ -1170,9 +1179,10 @@ def bootstrap_admin(
         ["Root", "Admin"],
     )
 
-    # Store credentials in database for retrieval via CLI
+    # Store credentials and mark as system user (excluded from sync)
     def save_credentials(store: Storage) -> None:
         store_admin_credentials(store, root_email, root_password)
+        add_system_user(store, root_email)
 
     store_queue.execute(save_credentials)
 
@@ -1243,6 +1253,9 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
         "registration_state",
         "metadata",
         "session_cache",
+        "userdata",
+        "sync",
+        "system_users",
         TOKENS_TABLE,
     ]
 
@@ -1275,15 +1288,16 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
     }
 
     # Start private TCP server on 127.0.0.2 (Go and CLI connect to this)
-    start_private_server(
-        settings.private_port,
+    private_handler = create_private_handler(
         store_queue,
         token_waiter,
         settings.frontend_origin,
         settings.smtp,
         settings.smtp_send,
         command_handlers,
+        auth_client,
     )
+    start_private_server(settings.private_port, private_handler, store_queue)
 
     # freetser doesn't know about the client, so we create a handler that captures it
     frontend_origin = settings.frontend_origin

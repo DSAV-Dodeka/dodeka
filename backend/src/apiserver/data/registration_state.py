@@ -11,6 +11,7 @@ class RegistrationState:
     email: str
     accepted: bool
     signup_token: str | None
+    email_send_count: int = 0
 
 
 @dataclass
@@ -19,13 +20,17 @@ class RegistrationStateNotFoundForEmail:
 
 
 def _serialize_registration_state(
-    email: str, accepted: bool, signup_token: str | None
+    email: str,
+    accepted: bool,
+    signup_token: str | None,
+    email_send_count: int = 0,
 ) -> bytes:
     """Serialize registration state data to bytes."""
     data = {
         "email": email,
         "accepted": accepted,
         "signup_token": signup_token,
+        "email_send_count": email_send_count,
     }
     return json.dumps(data).encode("utf-8")
 
@@ -71,6 +76,7 @@ def get_registration_state(
         email=state_data["email"],
         accepted=state_data["accepted"],
         signup_token=state_data.get("signup_token"),
+        email_send_count=state_data.get("email_send_count", 0),
     )
 
 
@@ -141,3 +147,43 @@ def get_registration_token_by_email(store: Storage, email: str) -> str | None:
                 return key  # The key IS the registration_token
 
     return None
+
+
+def increment_email_send_count(
+    store: Storage, email: str
+) -> int | None:
+    """Increment email_send_count for the registration state matching email.
+
+    Returns the new count, or None if not found.
+    """
+    for key in store.list_keys("registration_state"):
+        result = store.get("registration_state", key)
+        if result is not None:
+            data_bytes, counter = result
+            state_data = _deserialize_registration_state(data_bytes)
+            if state_data["email"] == email:
+                new_count = state_data.get(
+                    "email_send_count", 0
+                ) + 1
+                state_data["email_send_count"] = new_count
+                updated = json.dumps(state_data).encode("utf-8")
+                store.update(
+                    "registration_state", key,
+                    updated, counter, expires_at=0,
+                )
+                return new_count
+    return None
+
+
+def get_email_send_count_by_email(
+    store: Storage, email: str
+) -> int:
+    """Get email_send_count by email. Returns 0 if not found."""
+    for key in store.list_keys("registration_state"):
+        result = store.get("registration_state", key)
+        if result is not None:
+            data_bytes, _ = result
+            state_data = _deserialize_registration_state(data_bytes)
+            if state_data["email"] == email:
+                return state_data.get("email_send_count", 0)
+    return 0
