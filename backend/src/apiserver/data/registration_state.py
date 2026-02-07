@@ -80,6 +80,34 @@ def get_registration_state(
     )
 
 
+def mark_registration_state_accepted(
+    store: Storage, email: str
+) -> None | RegistrationStateNotFoundForEmail:
+    """Set registration state accepted=True without changing signup_token."""
+    keys = store.list_keys("registration_state")
+
+    for key in keys:
+        result = store.get("registration_state", key)
+        if result is not None:
+            data_bytes, counter = result
+            state_data = _deserialize_registration_state(data_bytes)
+
+            if state_data["email"] == email:
+                state_data["accepted"] = True
+                updated_data = json.dumps(state_data).encode("utf-8")
+
+                store.update(
+                    "registration_state",
+                    key,
+                    updated_data,
+                    counter,
+                    expires_at=0,
+                )
+                return None
+
+    return RegistrationStateNotFoundForEmail(email=email)
+
+
 def update_registration_state_accepted(
     store: Storage, email: str, signup_token: str
 ) -> None | RegistrationStateNotFoundForEmail:
@@ -99,6 +127,37 @@ def update_registration_state_accepted(
             if state_data["email"] == email:
                 # Update this entry
                 state_data["accepted"] = True
+                state_data["signup_token"] = signup_token
+                updated_data = json.dumps(state_data).encode("utf-8")
+
+                store.update(
+                    "registration_state",
+                    key,
+                    updated_data,
+                    counter,
+                    expires_at=0,
+                )
+                return None
+
+    return RegistrationStateNotFoundForEmail(email=email)
+
+
+def update_registration_state_signup_token(
+    store: Storage, email: str, signup_token: str
+) -> None | RegistrationStateNotFoundForEmail:
+    """
+    Update registration state with signup_token WITHOUT changing accepted.
+    Used when signup is created at registration time (accepted is still False).
+    """
+    keys = store.list_keys("registration_state")
+
+    for key in keys:
+        result = store.get("registration_state", key)
+        if result is not None:
+            data_bytes, counter = result
+            state_data = _deserialize_registration_state(data_bytes)
+
+            if state_data["email"] == email:
                 state_data["signup_token"] = signup_token
                 updated_data = json.dumps(state_data).encode("utf-8")
 
@@ -149,9 +208,7 @@ def get_registration_token_by_email(store: Storage, email: str) -> str | None:
     return None
 
 
-def increment_email_send_count(
-    store: Storage, email: str
-) -> int | None:
+def increment_email_send_count(store: Storage, email: str) -> int | None:
     """Increment email_send_count for the registration state matching email.
 
     Returns the new count, or None if not found.
@@ -162,22 +219,21 @@ def increment_email_send_count(
             data_bytes, counter = result
             state_data = _deserialize_registration_state(data_bytes)
             if state_data["email"] == email:
-                new_count = state_data.get(
-                    "email_send_count", 0
-                ) + 1
+                new_count = state_data.get("email_send_count", 0) + 1
                 state_data["email_send_count"] = new_count
                 updated = json.dumps(state_data).encode("utf-8")
                 store.update(
-                    "registration_state", key,
-                    updated, counter, expires_at=0,
+                    "registration_state",
+                    key,
+                    updated,
+                    counter,
+                    expires_at=0,
                 )
                 return new_count
     return None
 
 
-def get_email_send_count_by_email(
-    store: Storage, email: str
-) -> int:
+def get_email_send_count_by_email(store: Storage, email: str) -> int:
     """Get email_send_count by email. Returns 0 if not found."""
     for key in store.list_keys("registration_state"):
         result = store.get("registration_state", key)

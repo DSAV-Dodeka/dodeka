@@ -1,11 +1,20 @@
+"""Sync operations for importing member data from the Atletiekunie CSV export.
+
+Member permission lifecycle:
+  1. Signup grants member permission automatically (see auth.create_user).
+  2. update_existing renews the permission (1-year TTL) each sync cycle.
+  3. remove_departed revokes it when a member leaves or cancels.
+"""
+
 import csv
 import io
+import time as time_mod
 from dataclasses import dataclass
 
 from freetser import Storage
 
 from apiserver.data.newuser import serialize_newuser
-from apiserver.data.permissions import remove_permission
+from apiserver.data.permissions import Permissions, add_permission, remove_permission
 from apiserver.data.registration_state import create_registration_state
 from apiserver.data.userdata import (
     SYNC_TABLE,
@@ -30,6 +39,7 @@ class ExistingPair:
 class SyncGroups:
     departed: list[str]
     new: list[UserDataEntry]
+    pending: list[str]
     existing: list[ExistingPair]
 
 
@@ -72,13 +82,14 @@ def serialize_groups(groups: SyncGroups) -> dict:
             }
             for e in groups.new
         ],
+        "pending": groups.pending,
         "existing": existing,
     }
 
 
 def parse_csv(content: str) -> list[UserDataEntry]:
     """Parse CSV content string into UserDataEntry objects."""
-    # Strip BOM (common in Excel/KNHB exports)
+    # Strip BOM (common in Excel/Atletiekunie exports)
     if content.startswith("\ufeff"):
         content = content[1:]
     entries = []
@@ -97,6 +108,7 @@ def parse_csv(content: str) -> list[UserDataEntry]:
                     geslacht=row.get("Geslacht", "").strip(),
                     geboortedatum=row.get("Geboortedatum", "").strip(),
                     email=email,
+                    opzegdatum=row.get("Club lidmaatschap opzegdatum", "").strip(),
                 )
             )
     return entries
@@ -147,35 +159,73 @@ def cleanup_orphaned_userdata(store: Storage) -> int:
     return count
 
 
+def has_member_permission(store: Storage, timestamp: int, email: str) -> bool:
+    """Check if a registered user has an active member permission."""
+    result = store.get("users_by_email", email)
+    if result is None:
+        return False
+    user_id = result[0].decode("utf-8")
+    perm_key = f"{user_id}:perm:{Permissions.MEMBER}"
+    return store.get("users", perm_key, timestamp=timestamp) is not None
+
+
 def compute_groups(store: Storage) -> SyncGroups:
     """Compare sync table against registered users. Returns grouped results.
 
     System users (see add_system_user) are excluded from comparison.
+    Only users with an active member permission are considered "departed"
+    (users whose permission was already revoked have been handled).
+    Sync entries with a cancellation date (opzegdatum) are treated as departed.
     Runs cleanup_orphaned_userdata as a maintenance step.
     """
     cleanup_orphaned_userdata(store)
+    timestamp = int(time_mod.time())
 
     sync_entries = listall(store, SYNC_TABLE)
-    sync_emails = {e.email.lower() for e in sync_entries}
     sync_by_email = {e.email.lower(): e for e in sync_entries}
 
+    # Split sync entries into active (no cancellation) and cancelled
+    active_sync_emails: set[str] = set()
+    cancelled_sync_emails: set[str] = set()
+    for e in sync_entries:
+        if e.opzegdatum:
+            cancelled_sync_emails.add(e.email.lower())
+        else:
+            active_sync_emails.add(e.email.lower())
+
     registered_emails = set(store.list_keys("users_by_email"))
+    newuser_emails = set(store.list_keys("newusers"))
     system_emails = set(store.list_keys(SYSTEM_USERS_TABLE))
     comparable_emails = registered_emails - system_emails
+    known_emails = registered_emails | newuser_emails
 
-    departed = [email for email in comparable_emails if email not in sync_emails]
+    # Departed: registered users not in active sync OR in cancelled sync,
+    # who still have member permission
+    departed = [
+        email
+        for email in comparable_emails
+        if (email not in active_sync_emails or email in cancelled_sync_emails)
+        and has_member_permission(store, timestamp, email)
+    ]
     new = [
-        sync_by_email[email] for email in sync_emails if email not in registered_emails
+        sync_by_email[email]
+        for email in active_sync_emails
+        if email not in known_emails
+    ]
+    pending = [
+        email
+        for email in active_sync_emails & newuser_emails
+        if email not in registered_emails
     ]
     existing = []
-    for email in sync_emails & comparable_emails:
+    for email in active_sync_emails & comparable_emails:
         existing.append(
             ExistingPair(
                 sync=sync_by_email[email], current=get(store, USERDATA_TABLE, email)
             )
         )
 
-    return SyncGroups(departed=departed, new=new, existing=existing)
+    return SyncGroups(departed=departed, new=new, pending=pending, existing=existing)
 
 
 # --- Single-item helpers used by the combined functions below ---
@@ -217,21 +267,30 @@ def add_accepted(store: Storage, email: str) -> bool:
     return True
 
 
-def sync_userdata(store: Storage, email: str) -> bool:
-    """Copy sync entry data into userdata."""
+def grant_member_permission(store: Storage, timestamp: int, email: str) -> bool:
+    """Grant or renew member permission for a registered user."""
+    result = store.get("users_by_email", email.lower())
+    if result is None:
+        return False
+    user_id = result[0].decode("utf-8")
+    add_permission(store, timestamp, user_id, Permissions.MEMBER)
+    return True
+
+
+def sync_userdata(store: Storage, timestamp: int, email: str) -> bool:
+    """Copy sync entry data into userdata and renew member permission."""
     entry = get(store, SYNC_TABLE, email)
     if entry is None:
         return False
     upsert(store, USERDATA_TABLE, entry)
+    grant_member_permission(store, timestamp, email)
     return True
 
 
 # --- Combined single/all operations (called by commands and routes) ---
 
 
-def remove_departed(
-    store: Storage, timestamp: int, email: str | None = None
-) -> dict:
+def remove_departed(store: Storage, timestamp: int, email: str | None = None) -> dict:
     """Remove single departed user or all departed. Returns result dict."""
     if email:
         if revoke_member(store, timestamp, email):
@@ -262,11 +321,14 @@ def accept_new(store: Storage, email: str | None = None) -> dict:
 
 def update_existing(store: Storage, email: str | None = None) -> dict:
     """Update single existing user or all existing. Returns result dict."""
+    timestamp = int(time_mod.time())
     if email:
-        if sync_userdata(store, email):
+        if sync_userdata(store, timestamp, email):
             return {"updated": 1}
         return {"error": f"No sync entry for {email}"}
 
     groups = compute_groups(store)
-    count = sum(1 for p in groups.existing if sync_userdata(store, p.sync.email))
+    count = sum(
+        1 for p in groups.existing if sync_userdata(store, timestamp, p.sync.email)
+    )
     return {"updated": count}

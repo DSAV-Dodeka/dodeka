@@ -38,6 +38,7 @@ EmailType = Literal[
     "signin_notification",
     "password_updated",
     "email_updated",
+    "account_accepted",
 ]
 
 # Email subjects, titles and preheaders for each type
@@ -72,6 +73,11 @@ EMAIL_CONFIG: dict[EmailType, tuple[str, str, str]] = {
         "Je e-mailadres is gewijzigd",
         "E-mailadres gewijzigd",
         "Je account e-mailadres is gewijzigd",
+    ),
+    "account_accepted": (
+        "Je bent goedgekeurd bij Dodeka",
+        "Lidmaatschap goedgekeurd",
+        "Je aanmelding bij D.S.A.V. Dodeka is goedgekeurd",
     ),
 }
 
@@ -142,6 +148,7 @@ class TemplateCache:
             "signin_notification",
             "password_updated",
             "email_updated",
+            "account_accepted",
         ]
         for email_type in email_types:
             self.templates[email_type] = load_template(email_type)

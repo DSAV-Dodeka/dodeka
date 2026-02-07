@@ -7,7 +7,22 @@ from typing import Any, Literal
 # Private server address - uses 127.0.0.2 for isolation from main loopback
 PRIVATE_HOST = "127.0.0.2"
 
-__all__ = ["PRIVATE_HOST", "Settings", "SmtpConfig", "load_settings_from_env"]
+# Default ports (12xx prefix = dodeka = twelve)
+DEFAULT_AUTH_SERVER_URL = "http://localhost:12770"
+DEFAULT_AUTH_COMMAND_URL = "http://127.0.0.2:12771"
+DEFAULT_PORT = 12780
+DEFAULT_PRIVATE_PORT = 12790
+
+__all__ = [
+    "DEFAULT_AUTH_COMMAND_URL",
+    "DEFAULT_AUTH_SERVER_URL",
+    "DEFAULT_PORT",
+    "DEFAULT_PRIVATE_PORT",
+    "PRIVATE_HOST",
+    "Settings",
+    "SmtpConfig",
+    "load_settings_from_env",
+]
 
 
 @dataclass
@@ -28,13 +43,13 @@ class Settings:
 
     db_file: Path = Path("./db.sqlite")
     environment: Literal["test", "demo", "production"] = "production"
-    auth_server_url: str = "http://localhost:3777"
+    auth_server_url: str = DEFAULT_AUTH_SERVER_URL
     frontend_origin: str = "https://dsavdodeka.nl"
     debug_logs: bool = False
     # Port for main HTTP server (public API)
-    port: int = 8000
+    port: int = DEFAULT_PORT
     # Port for private server (Go-Python communication). Binds to PRIVATE_HOST.
-    private_port: int = 8079
+    private_port: int = DEFAULT_PRIVATE_PORT
     # SMTP configuration for sending emails (None = config not provided)
     smtp: SmtpConfig | None = None
     # Whether to actually send emails via SMTP (False = save to files instead)
@@ -135,12 +150,14 @@ def load_settings_from_env(env_file: Path) -> Settings:
     # Port
     port = get_env(env_map, "BACKEND_PORT", "")
     if port:
-        config["port"] = get_env_int(env_map, "BACKEND_PORT", 8000)
+        config["port"] = get_env_int(env_map, "BACKEND_PORT", DEFAULT_PORT)
 
     # Private port
     private_port = get_env(env_map, "BACKEND_PRIVATE_PORT", "")
     if private_port:
-        config["private_port"] = get_env_int(env_map, "BACKEND_PRIVATE_PORT", 8079)
+        config["private_port"] = get_env_int(
+            env_map, "BACKEND_PRIVATE_PORT", DEFAULT_PRIVATE_PORT
+        )
 
     # SMTP configuration
     smtp_host = get_env(env_map, "BACKEND_SMTP_HOST", "")
@@ -181,7 +198,3 @@ def parse_args() -> argparse.Namespace:
         help="Path to environment file (default: .env)",
     )
     return parser.parse_args()
-
-
-# Default private port for CLI
-DEFAULT_PRIVATE_PORT = 8079

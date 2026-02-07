@@ -17,6 +17,7 @@ class UserDataEntry:
     geslacht: str
     geboortedatum: str
     email: str
+    opzegdatum: str = ""
 
 
 def serialize(entry: UserDataEntry) -> bytes:
@@ -28,6 +29,7 @@ def serialize(entry: UserDataEntry) -> bytes:
         "geslacht": entry.geslacht,
         "geboortedatum": entry.geboortedatum,
         "email": entry.email,
+        "opzegdatum": entry.opzegdatum,
     }
     return json.dumps(data).encode("utf-8")
 
@@ -42,6 +44,7 @@ def deserialize(data: bytes) -> UserDataEntry:
         geslacht=d["geslacht"],
         geboortedatum=d["geboortedatum"],
         email=d["email"],
+        opzegdatum=d.get("opzegdatum", ""),
     )
 
 

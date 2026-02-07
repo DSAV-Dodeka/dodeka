@@ -28,8 +28,13 @@ default-groups = ["dev"]
 [project.scripts]
 backend = "apiserver.app:run"
 backend-actions = "apiserver.cli:main"
+ba = "apiserver.cli:main"
+auth-actions = "apiserver.auth_cli:main"
+aa = "apiserver.auth_cli:main"
+dev-actions = "apiserver.dev_cli:main"
+da = "apiserver.dev_cli:main"
 test = "apiserver.app:run_test"
-dev = "apiserver.app:run_dev"
+dev = "apiserver.dev:run_dev"
 update-auth = "apiserver.auth_binary:update_auth"
 demo = "apiserver.app:run_demo"
 production = "apiserver.app:run_production"
@@ -51,6 +56,7 @@ testpaths = ["tests"]
 [tool.ruff.lint.pylint]
 max-returns = 24
 max-args = 7
+max-statements = 75
 
 [tool.ruff.lint]
 select = ["F", "PL", "E", "W", "RUF"]

@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import override
 
 from freetser import Storage
@@ -18,10 +19,19 @@ from tiauth_faroe.user_server import (
     User,
 )
 
+from apiserver.data.permissions import Permissions, add_permission
+
 logger = logging.getLogger("apiserver.auth")
 
 
 def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
+    """Create a new user account from a completed Faroe signup.
+
+    Users must exist in the newusers table to complete signup. If the user
+    has been accepted (by admin or sync), they are granted the member
+    permission and removed from newusers. If not yet accepted, the user
+    account is created but they remain in newusers for later admin approval.
+    """
     email = effect.email_address
 
     user_id_result = store.get("users_by_email", email)
@@ -41,10 +51,6 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     firstname = newuser_data["firstname"]
     lastname = newuser_data["lastname"]
     accepted = newuser_data["accepted"]
-
-    if not accepted:
-        logger.info(f"User {firstname} {lastname} is not yet accepted")
-        return ActionError("user_not_accepted")
 
     # We store a global counter that tracks the max user_id
     counter_result = store.get("metadata", "user_id_counter")
@@ -84,8 +90,14 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     # This is used as an index to find a user_id by email
     store.add("users_by_email", email, user_id.encode("utf-8"), expires_at=0)
 
-    # Remove newuser entry
-    store.delete("newusers", email)
+    if accepted:
+        # Grant member permission (1-year TTL, renewed by update_existing during sync).
+        timestamp = int(time.time())
+        add_permission(store, timestamp, user_id, Permissions.MEMBER)
+        # Remove newuser entry since acceptance is complete
+        store.delete("newusers", email)
+    else:
+        logger.info(f"User {user_id} created but not yet accepted, staying in newusers")
 
     logger.info(f"Created user {user_id} with email {email}")
     return User(

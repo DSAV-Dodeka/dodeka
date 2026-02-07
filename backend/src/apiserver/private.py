@@ -11,6 +11,7 @@ Routes:
     - prepare_user: create user ready for tiauth-faroe signup flow (testing)
     - get_admin_credentials: return bootstrapped admin email/password
     - get_token: retrieve email verification code (for test automation)
+    - create_accounts: complete signup for all accepted newusers (testing)
 """
 
 import json
@@ -41,21 +42,22 @@ from apiserver.data.newuser import (
     update_accepted_flag,
 )
 from apiserver.data.registration_state import (
+    create_registration_state,
     get_registration_state,
     get_registration_token_by_email,
     increment_email_send_count,
+    mark_registration_state_accepted,
     update_registration_state_accepted,
 )
+from apiserver.data.permissions import add_permission
 from apiserver.sync import (
     SYSTEM_USERS_TABLE,
     accept_new,
     add_system_user,
     compute_groups,
     import_sync,
-    list_system_users,
     parse_csv,
     remove_departed,
-    remove_system_user,
     serialize_groups,
     update_existing,
 )
@@ -146,7 +148,12 @@ def create_private_handler(
             )
         elif req.method == "POST" and req.path == "/command":
             response = handle_command(
-                req, store_queue, command_handlers or {}, auth_client
+                req,
+                store_queue,
+                command_handlers or {},
+                auth_client,
+                token_waiter,
+                (frontend_origin, smtp_config, smtp_send),
             )
         else:
             return Response.text("Not Found", status_code=404)
@@ -221,9 +228,7 @@ def handle_email(
 
     # Store token if this is a verification/reset email type
     if email_type in TOKEN_EMAIL_TYPES and code:
-        store_queue.execute(
-            lambda store: add_token(store, email_type, to_email, code)
-        )
+        store_queue.execute(lambda store: add_token(store, email_type, to_email, code))
         token_waiter.notify()
         logger.debug(f"Stored token: {email_type}:{to_email} code={code}")
 
@@ -250,9 +255,7 @@ def handle_email(
             )
         if email_type == "signup_verification":
             store_queue.execute(
-                lambda store: increment_email_send_count(
-                    store, to_email
-                )
+                lambda store: increment_email_send_count(store, to_email)
             )
 
     return Response.json({"success": True})
@@ -298,6 +301,7 @@ def cmdhandler_prepare_user(
             return f"Invalid names count: {result.names_count}"
         if isinstance(result, EmailExistsInNewUserTable):
             return f"Email already exists in newuser table: {result.email}"
+        create_registration_state(store, email)
         return None
 
     error = store_queue.execute(do_prepare)
@@ -339,9 +343,7 @@ def cmdhandler_get_token(
     return Response.json({"found": True, "code": token["code"]})
 
 
-def cmdhandler_import_sync(
-    store_queue: StorageQueue, csv_content: str
-) -> Response:
+def cmdhandler_import_sync(store_queue: StorageQueue, csv_content: str) -> Response:
     entries = parse_csv(csv_content)
     count = store_queue.execute(lambda store: import_sync(store, entries))
     logger.info(f"import_sync: Imported {count} entries")
@@ -352,7 +354,8 @@ def cmdhandler_compute_groups(store_queue: StorageQueue) -> Response:
     groups = store_queue.execute(compute_groups)
     logger.info(
         f"compute_groups: {len(groups.departed)} departed, "
-        f"{len(groups.new)} new, {len(groups.existing)} existing"
+        f"{len(groups.new)} new, {len(groups.pending)} pending, "
+        f"{len(groups.existing)} existing"
     )
     return Response.json(serialize_groups(groups))
 
@@ -361,9 +364,7 @@ def cmdhandler_remove_departed(
     store_queue: StorageQueue, email: str | None
 ) -> Response:
     timestamp = int(time.time())
-    result = store_queue.execute(
-        lambda store: remove_departed(store, timestamp, email)
-    )
+    result = store_queue.execute(lambda store: remove_departed(store, timestamp, email))
     logger.info(f"remove_departed: {result}")
     return Response.json(result)
 
@@ -374,105 +375,100 @@ def cmdhandler_accept_new(store_queue: StorageQueue, email: str | None) -> Respo
     return Response.json(result)
 
 
-def cmdhandler_accept_new_with_signup(
+def do_accept_new_with_email(
     store_queue: StorageQueue,
-    auth_client: AuthClient | None,
-    email: str | None,
-) -> Response:
-    """Accept new users AND initiate Faroe signup with email suppressed.
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
+    smtp_send: bool,
+    email: str | None = None,
+) -> dict:
+    """Accept new users and send acceptance notification emails.
 
-    Combines accept + find-needing-signup into one DB call,
-    then parallelizes the Faroe create_signup HTTP calls.
+    No Faroe signup creation. Accepts users in newusers table, then sends
+    acceptance emails to those not yet notified (registration_state.accepted
+    still False). Users get a link to create their account.
+
+    Returns result dict with added, skipped, emails_sent, emails_failed.
     """
-    if auth_client is None:
-        return Response.text("Auth client not available", status_code=500)
 
-    # Single DB call: accept new users + find who needs signup
-    def accept_and_find(store: Storage) -> tuple[dict, list[str]]:
+    # Single DB call: accept new users + find who needs notification
+    def accept_and_prepare(
+        store: Storage,
+    ) -> tuple[dict, list[tuple[str, str, str | None]]]:
         result = accept_new(store, email)
-        # Build set of emails that have signup_token in one pass
-        has_token: set[str] = set()
-        for key in store.list_keys("registration_state"):
-            entry = store.get("registration_state", key)
-            if entry is not None:
-                data = json.loads(entry[0].decode("utf-8"))
-                if data.get("signup_token") is not None:
-                    has_token.add(data["email"])
-        # Find accepted users without signup_token
-        needing = [
-            u.email for u in list_new_users(store)
-            if u.accepted and u.email not in has_token
-        ]
-        return result, needing
 
-    accept_result, emails_needing = store_queue.execute(accept_and_find)
+        # Find accepted users without accounts who haven't been notified yet
+        registered = set(store.list_keys("users_by_email"))
+        users = list_new_users(store)
 
-    if not emails_needing:
-        return Response.json({
-            **accept_result,
-            "signup_initiated": 0,
-            "signup_failed": 0,
-        })
+        targets: list[tuple[str, str, str | None]] = []
+        for u in users:
+            if not u.accepted or u.email in registered:
+                continue
 
-    # Suppress all emails before starting parallel signups
-    for e in emails_needing:
-        suppress_email(e)
+            # Check registration_state to avoid re-sending
+            reg_token = get_registration_token_by_email(store, u.email)
+            if reg_token is None:
+                continue
 
-    # Parallel Faroe signup calls
-    signup_tokens: dict[str, str] = {}
-    failed_emails: list[str] = []
+            state = get_registration_state(store, reg_token)
+            if state is not None and state.accepted:
+                continue  # Already notified
 
-    def do_signup(user_email: str) -> tuple[str, str | None]:
-        """Returns (email, signup_token) or (email, None) on failure."""
+            # Mark accepted in registration_state and collect for email
+            mark_registration_state_accepted(store, u.email)
+            targets.append((u.email, u.firstname, reg_token))
+
+        return result, targets
+
+    accept_result, targets = store_queue.execute(accept_and_prepare)
+
+    if not targets:
+        return {**accept_result, "emails_sent": 0, "emails_failed": 0}
+
+    # Send acceptance emails (outside store_queue to avoid deadlock)
+    emails_sent = 0
+    emails_failed = 0
+
+    for user_email, display_name, reg_token in targets:
         try:
-            result = auth_client.create_signup(user_email)
-            if isinstance(result, ActionErrorResult):
-                logger.error(
-                    f"accept_new_with_signup: Faroe failed for "
-                    f"{user_email}: {result.error_code}"
-                )
-                return user_email, None
-            return user_email, result.signup_token
+            link = f"{frontend_origin}/account/signup?token={reg_token}"
+            data = EmailData(
+                email_type="account_accepted",
+                to_email=user_email,
+                display_name=display_name,
+                link=link,
+            )
+            sendemail(smtp_config, data, smtp_send)
+            emails_sent += 1
         except Exception as exc:
             logger.error(
-                f"accept_new_with_signup: {user_email}: {exc}"
+                f"accept_new_with_email: Failed to send to {user_email}: {exc}"
             )
-            return user_email, None
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {
-            pool.submit(do_signup, e): e
-            for e in emails_needing
-        }
-        for future in as_completed(futures):
-            user_email, token = future.result()
-            if token is not None:
-                signup_tokens[user_email] = token
-            else:
-                failed_emails.append(user_email)
-
-    # Unsuppress all
-    for e in emails_needing:
-        unsuppress_email(e)
-
-    # Single DB call: save all signup tokens
-    if signup_tokens:
-        def save_all(store: Storage) -> None:
-            for e, t in signup_tokens.items():
-                update_registration_state_accepted(store, e, t)
-
-        store_queue.execute(save_all)
+            emails_failed += 1
 
     result = {
         **accept_result,
-        "signup_initiated": len(signup_tokens),
-        "signup_failed": len(failed_emails),
+        "emails_sent": emails_sent,
+        "emails_failed": emails_failed,
     }
-    if failed_emails:
-        result["failed_emails"] = failed_emails
+    logger.info(f"accept_new_with_email: {result}")
+    return result
 
-    logger.info(f"accept_new_with_signup: {result}")
-    return Response.json(result)
+
+def cmdhandler_accept_new_with_email(
+    store_queue: StorageQueue,
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
+    smtp_send: bool,
+    email: str | None,
+) -> Response:
+    """Command handler for accept_new with acceptance emails."""
+    return Response.json(
+        do_accept_new_with_email(
+            store_queue, frontend_origin, smtp_config, smtp_send, email
+        )
+    )
 
 
 def cmdhandler_update_existing(
@@ -483,24 +479,47 @@ def cmdhandler_update_existing(
     return Response.json(result)
 
 
-def cmdhandler_initiate_signup(
-    store_queue: StorageQueue, auth_client: AuthClient | None, email: str | None
-) -> Response:
-    """Create Faroe signup for an accepted user and send verification email.
+BOARD_EMAIL = "bestuur@dsavdodeka.nl"
 
-    Calls auth_client.create_signup() OUTSIDE store_queue to avoid deadlock,
-    then updates registration_state with the signup_token inside store_queue.
+
+def cmdhandler_board_setup(
+    store_queue: StorageQueue,
+    auth_client: AuthClient | None,
+) -> Response:
+    """One-time setup for the Bestuur (board) account.
+
+    Prepares bestuur@dsavdodeka.nl as an accepted user, marks it as a
+    system user (excluded from sync), and initiates Faroe signup which
+    sends a verification email so the board can set their password.
+
+    After signup completes, run grant-admin to give admin permission.
     """
-    if not email:
-        return Response.text("Missing email", status_code=400)
     if auth_client is None:
         return Response.text("Auth client not available", status_code=500)
 
-    # Blocking HTTP call — must be outside store_queue.execute
+    email = BOARD_EMAIL
+    names = ["Bestuur", ""]
+
+    # Prepare user as accepted + mark as system user
+    def prepare(store: Storage) -> str | None:
+        result = prepare_user_store(store, email, names)
+        if isinstance(result, EmailExistsInNewUserTable):
+            return f"{email} already exists in newuser table"
+        if isinstance(result, InvalidNamesCount):
+            return f"Invalid names count: {result.names_count}"
+        add_system_user(store, email)
+        return None
+
+    error = store_queue.execute(prepare)
+    if error:
+        return Response.text(error, status_code=400)
+
+    # Initiate Faroe signup (blocking HTTP call — must be outside store_queue)
     signup_result = auth_client.create_signup(email)
     if isinstance(signup_result, ActionErrorResult):
-        logger.error(f"initiate_signup: Faroe signup failed for {email}: "
-                     f"{signup_result.error_code}")
+        logger.error(
+            f"board_setup: Faroe signup failed for {email}: {signup_result.error_code}"
+        )
         return Response.json(
             {"error": "Faroe signup failed", "error_code": signup_result.error_code},
             status_code=500,
@@ -508,7 +527,7 @@ def cmdhandler_initiate_signup(
 
     signup_token = signup_result.signup_token
 
-    def accept(store: Storage) -> str | None:
+    def save_signup(store: Storage) -> str | None:
         result = update_accepted_flag(store, email, True)
         if isinstance(result, EmailNotFoundInNewUserTable):
             return f"Email {email} not found in newuser table"
@@ -517,62 +536,208 @@ def cmdhandler_initiate_signup(
             return f"No registration state found for {email}"
         return None
 
-    error = store_queue.execute(accept)
+    error = store_queue.execute(save_signup)
     if error:
-        logger.warning(f"initiate_signup: {error}")
+        logger.warning(f"board_setup: {error}")
         return Response.text(error, status_code=400)
 
-    logger.info(f"initiate_signup: Signup initiated for {email}")
-    return Response.json({"success": True, "email": email})
-
-
-def cmdhandler_check_registration(
-    store_queue: StorageQueue, email: str | None
-) -> Response:
-    if not email:
-        return Response.text("Missing email", status_code=400)
-
-    def check(store: Storage) -> dict:
-        token = get_registration_token_by_email(store, email)
-        if token is None:
-            return {"found": False}
-        state = get_registration_state(store, token)
-        if state is None:
-            return {"found": False}
-        return {
-            "found": True,
-            "registration_token": state.registration_token,
-            "accepted": state.accepted,
-            "has_signup_token": state.signup_token is not None,
+    logger.info(f"board_setup: Created Bestuur account, signup email sent to {email}")
+    return Response.json(
+        {
+            "success": True,
+            "email": email,
+            "message": "Signup email sent. After signup completes, run grant-admin.",
         }
+    )
 
-    result = store_queue.execute(check)
+
+def cmdhandler_board_renew(
+    store_queue: StorageQueue,
+    auth_client: AuthClient | None,
+) -> Response:
+    """Yearly renewal for the Bestuur account.
+
+    Triggers a password reset (sends temporary password email) and
+    renews the admin permission (1-year TTL).  Run this when the board
+    rotates so the new board can set their own password.
+    """
+    if auth_client is None:
+        return Response.text("Auth client not available", status_code=500)
+
+    email = BOARD_EMAIL
+
+    # Initiate password reset via Faroe (sends temp password email).
+    # Blocking HTTP call — must be outside store_queue.
+    reset_result = auth_client.manage_action_invocation_request(
+        "create_user_password_reset", {"user_email_address": email}
+    )
+    if isinstance(reset_result, ActionErrorResult):
+        logger.error(
+            f"board_renew: Password reset failed for {email}: {reset_result.error_code}"
+        )
+        return Response.json(
+            {
+                "error": "Password reset failed",
+                "error_code": reset_result.error_code,
+            },
+            status_code=500,
+        )
+
+    # Renew admin permission (1-year TTL)
+    timestamp = int(time.time())
+
+    def renew(store: Storage) -> dict:
+        result = store.get("users_by_email", email)
+        if result is None:
+            return {"error": f"No user found with email {email}"}
+        user_id = result[0].decode("utf-8")
+
+        perm_result = add_permission(store, timestamp, user_id, "admin")
+        if perm_result is not None:
+            return {"error": f"Failed to renew admin permission: {perm_result}"}
+
+        return {"user_id": user_id}
+
+    result = store_queue.execute(renew)
+    if "error" in result:
+        logger.warning(f"board_renew: {result['error']}")
+        return Response.json(result, status_code=400)
+
+    logger.info(
+        f"board_renew: Password reset email sent and admin renewed for {email} "
+        f"(user_id={result['user_id']})"
+    )
+    return Response.json(
+        {
+            "success": True,
+            "email": email,
+            "message": "Password reset email sent and admin permission renewed.",
+        }
+    )
+
+
+def cmdhandler_create_accounts(
+    store_queue: StorageQueue,
+    auth_client: AuthClient | None,
+    token_waiter: TokenWaiter | None,
+    password: str | None,
+) -> Response:
+    """Create accounts for all accepted newusers (testing).
+
+    Runs the full signup flow for each: create_signup, verify email,
+    set password, complete signup.  Emails are suppressed so no actual
+    mail is sent.
+    """
+    if auth_client is None:
+        return Response.text("Auth client not available", status_code=500)
+    if token_waiter is None:
+        return Response.text("Token waiter not available", status_code=500)
+    if not password:
+        return Response.text("Missing password", status_code=400)
+
+    # Find accepted newusers that aren't registered yet
+    def find_pending(store: Storage) -> list[str]:
+        registered = set(store.list_keys("users_by_email"))
+        users = list_new_users(store)
+        return [u.email for u in users if u.accepted and u.email not in registered]
+
+    emails = store_queue.execute(find_pending)
+    if not emails:
+        return Response.json({"created": 0, "failed": 0, "message": "No pending users"})
+
+    for e in emails:
+        suppress_email(e)
+
+    created = 0
+    failures: list[dict[str, str]] = []
+
+    def create_one(email: str) -> tuple[str, str | None]:
+        try:
+            # Clear stale verification token to avoid wait_for_token returning old code
+            store_queue.execute(
+                lambda store, e=email: store.delete(
+                    TOKENS_TABLE, f"signup_verification:{e}"
+                )
+            )
+
+            signup_result = auth_client.create_signup(email)
+            if isinstance(signup_result, ActionErrorResult):
+                return email, f"create_signup: {signup_result.error_code}"
+
+            token = signup_result.signup_token
+
+            code = token_waiter.wait_for_token("signup_verification", email)
+
+            verify = auth_client.verify_signup_email_address_verification_code(
+                token, code
+            )
+            if isinstance(verify, ActionErrorResult):
+                return email, f"verify: {verify.error_code}"
+
+            pwd = auth_client.set_signup_password(token, password)
+            if isinstance(pwd, ActionErrorResult):
+                return email, f"set_password: {pwd.error_code}"
+
+            complete = auth_client.complete_signup(token)
+            if isinstance(complete, ActionErrorResult):
+                return email, f"complete: {complete.error_code}"
+
+            return email, None
+        except Exception as exc:
+            return email, str(exc)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(create_one, e): e for e in emails}
+        for future in as_completed(futures):
+            email, error = future.result()
+            if error is None:
+                created += 1
+            else:
+                failures.append({"email": email, "error": error})
+
+    for e in emails:
+        unsuppress_email(e)
+
+    result: dict[str, Any] = {"created": created, "failed": len(failures)}
+    if failures:
+        result["failures"] = failures
+
+    logger.info(f"create_accounts: {created} created, {len(failures)} failed")
     return Response.json(result)
 
 
-def cmdhandler_mark_system_user(
-    store_queue: StorageQueue, email: str | None
-) -> Response:
+def cmdhandler_grant_admin(store_queue: StorageQueue, email: str | None) -> Response:
+    """Grant admin permission and mark as system user.
+
+    The user must have completed signup (have a user_id) before admin
+    permission can be granted.
+    """
     if not email:
         return Response.text("Missing email", status_code=400)
-    marked = store_queue.execute(lambda store: add_system_user(store, email))
-    logger.info(f"mark_system_user: {email} marked={marked}")
-    return Response.json({"marked": marked})
 
+    timestamp = int(time.time())
 
-def cmdhandler_unmark_system_user(
-    store_queue: StorageQueue, email: str | None
-) -> Response:
-    if not email:
-        return Response.text("Missing email", status_code=400)
-    unmarked = store_queue.execute(lambda store: remove_system_user(store, email))
-    logger.info(f"unmark_system_user: {email} unmarked={unmarked}")
-    return Response.json({"unmarked": unmarked})
+    def grant(store: Storage) -> dict:
+        # Look up user_id by email
+        result = store.get("users_by_email", email)
+        if result is None:
+            return {"error": f"No user found with email {email}"}
+        user_id = result[0].decode("utf-8")
 
+        perm_result = add_permission(store, timestamp, user_id, "admin")
+        if perm_result is not None:
+            return {"error": f"Failed to add admin permission: {perm_result}"}
 
-def cmdhandler_list_system_users(store_queue: StorageQueue) -> Response:
-    emails = store_queue.execute(list_system_users)
-    return Response.json({"system_users": emails})
+        add_system_user(store, email)
+        return {"success": True, "user_id": user_id, "email": email}
+
+    result = store_queue.execute(grant)
+    if "error" in result:
+        logger.warning(f"grant_admin: {result['error']}")
+        return Response.json(result, status_code=400)
+
+    logger.info(f"grant_admin: Granted admin to {email} (user_id={result['user_id']})")
+    return Response.json(result)
 
 
 def handle_command(
@@ -580,8 +745,15 @@ def handle_command(
     store_queue: StorageQueue,
     command_handlers: dict[str, Callable[[], str]],
     auth_client: AuthClient | None = None,
+    token_waiter: TokenWaiter | None = None,
+    email_settings: tuple[str, SmtpConfig | None, bool] = ("", None, False),
 ) -> Response:
-    """Handle management command."""
+    """Handle management command.
+
+    email_settings is (frontend_origin, smtp_config, smtp_send).
+    """
+    frontend_origin, smtp_config, smtp_send = email_settings
+
     try:
         body = json.loads(req.body.decode("utf-8"))
         command = body.get("command")
@@ -611,24 +783,17 @@ def handle_command(
             store_queue, body.get("email")
         ),
         "accept_new": lambda: cmdhandler_accept_new(store_queue, body.get("email")),
-        "accept_new_with_signup": lambda: cmdhandler_accept_new_with_signup(
-            store_queue, auth_client, body.get("email")
+        "accept_new_with_signup": lambda: cmdhandler_accept_new_with_email(
+            store_queue, frontend_origin, smtp_config, smtp_send, body.get("email")
         ),
         "update_existing": lambda: cmdhandler_update_existing(
             store_queue, body.get("email")
         ),
-        "mark_system_user": lambda: cmdhandler_mark_system_user(
-            store_queue, body.get("email")
-        ),
-        "unmark_system_user": lambda: cmdhandler_unmark_system_user(
-            store_queue, body.get("email")
-        ),
-        "list_system_users": lambda: cmdhandler_list_system_users(store_queue),
-        "check_registration": lambda: cmdhandler_check_registration(
-            store_queue, body.get("email")
-        ),
-        "initiate_signup": lambda: cmdhandler_initiate_signup(
-            store_queue, auth_client, body.get("email")
+        "board_setup": lambda: cmdhandler_board_setup(store_queue, auth_client),
+        "board_renew": lambda: cmdhandler_board_renew(store_queue, auth_client),
+        "grant_admin": lambda: cmdhandler_grant_admin(store_queue, body.get("email")),
+        "create_accounts": lambda: cmdhandler_create_accounts(
+            store_queue, auth_client, token_waiter, body.get("password")
         ),
     }
 

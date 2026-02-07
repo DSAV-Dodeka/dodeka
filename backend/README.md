@@ -49,10 +49,11 @@ Settings are loaded from `.env` files. Available environment variables:
 
 - `BACKEND_DB_FILE` - Path to SQLite database (default: `./db.sqlite`)
 - `BACKEND_ENVIRONMENT` - Environment mode: `test`, `demo`, or `production`
-- `BACKEND_AUTH_SERVER_URL` - URL of Go auth server (default: `http://localhost:3777`)
+- `BACKEND_AUTH_SERVER_URL` - URL of Go auth server (default: `http://localhost:12770`)
 - `BACKEND_FRONTEND_ORIGIN` - Frontend origin for CORS
 - `BACKEND_DEBUG_LOGS` - Enable debug logging (`true`/`false`)
-- `BACKEND_PRIVATE_PORT` - Port for Go-Python communication (default: `8079`)
+- `BACKEND_PORT` - Port for public API (default: `12780`)
+- `BACKEND_PRIVATE_PORT` - Port for Go-Python communication (default: `12790`)
 
 SMTP settings (optional):
 
@@ -93,4 +94,4 @@ Available flags:
 - `--env-file` - Path to environment file (default: `.env`)
 - `--enable-reset` - Enable `/reset` endpoint to clear storage
 - `--interactive` - Run in interactive mode with stdin commands
-- `--private-port` - Port for Python backend communication (default: 8079)
+- `--private-port` - Port for Python backend communication (default: 12790)

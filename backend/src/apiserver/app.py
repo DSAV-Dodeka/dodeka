@@ -2,16 +2,14 @@ import enum
 import json
 import logging
 import secrets
-import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
 from pathlib import Path
-from typing import IO, Callable, Literal
+from typing import Callable, Literal
 from urllib.parse import parse_qs, urlparse
 
-from apiserver.auth_binary import ensure_auth_binary, get_auth_binary_path
 
 from freetser import (
     Request,
@@ -37,6 +35,7 @@ from apiserver.data.newuser import (
     update_accepted_flag,
 )
 from apiserver.data.permissions import (
+    Permissions,
     UserNotFoundError,
     add_permission,
     allowed_permission,
@@ -44,13 +43,13 @@ from apiserver.data.permissions import (
     remove_permission,
 )
 from apiserver.data.registration_state import (
-    RegistrationStateNotFoundForEmail,
     create_registration_state,
     get_email_send_count_by_email,
     get_registration_state,
     get_registration_token_by_email,
     get_signup_token_by_email,
-    update_registration_state_accepted,
+    mark_registration_state_accepted,
+    update_registration_state_signup_token,
 )
 from apiserver.data.user import (
     CachedSessionData,
@@ -62,9 +61,24 @@ from apiserver.data.user import (
     list_all_users,
     update_session_cache,
 )
-from apiserver.private import create_private_handler, start_private_server
-from apiserver.sync import add_system_user
-from apiserver.settings import Settings, load_settings_from_env, parse_args
+from apiserver.private import (
+    create_private_handler,
+    do_accept_new_with_email,
+    start_private_server,
+)
+from apiserver.sync import (
+    add_system_user,
+    compute_groups,
+    import_sync,
+    list_system_users,
+    parse_csv,
+    remove_departed,
+    remove_system_user,
+    serialize_groups,
+    update_existing,
+)
+from apiserver.email import EmailData, sendemail
+from apiserver.settings import Settings, SmtpConfig, load_settings_from_env, parse_args
 from apiserver.tokens import TOKENS_TABLE, TokenWaiter, get_token
 
 logger = logging.getLogger("apiserver.app")
@@ -332,6 +346,8 @@ def handler_with_client(
     req: Request,
     store_queue: StorageQueue | None,
     frontend_origin: str,
+    smtp_config: SmtpConfig | None = None,
+    smtp_send: bool = False,
 ) -> Response:
     """
     This function dispatches a request to a specific handler, based on the route. It
@@ -350,7 +366,7 @@ def handler_with_client(
     headers = parse_headers(req.headers)
 
     def h_request_registration():
-        return request_registration(req, store_queue)
+        return request_registration(auth_client, req, store_queue)
 
     def h_set_sess():
         return set_session(auth_client, req, headers, store_queue, frontend_origin)
@@ -371,7 +387,9 @@ def handler_with_client(
         return list_newusers_handler(store_queue)
 
     def h_accept_user():
-        return accept_user_handler(auth_client, req, store_queue)
+        return accept_user_handler(
+            req, store_queue, frontend_origin, smtp_config, smtp_send
+        )
 
     def h_get_reg_status():
         return get_registration_status_handler(req, store_queue)
@@ -385,6 +403,9 @@ def handler_with_client(
     def h_resend_signup_email():
         return resend_signup_email_handler(auth_client, req, store_queue)
 
+    def h_renew_signup():
+        return renew_signup_handler(auth_client, req, store_queue)
+
     def h_list_users():
         return list_users_handler(store_queue)
 
@@ -393,6 +414,33 @@ def handler_with_client(
 
     def h_set_permissions():
         return set_permissions_handler(req, store_queue)
+
+    # Sync route handlers
+    def h_import_sync():
+        return import_sync_handler(req, store_queue)
+
+    def h_sync_status():
+        return sync_status_handler(store_queue)
+
+    def h_accept_new_sync():
+        return accept_new_sync_handler(
+            req, store_queue, frontend_origin, smtp_config, smtp_send
+        )
+
+    def h_remove_departed():
+        return remove_departed_handler(req, store_queue)
+
+    def h_update_existing():
+        return update_existing_handler(req, store_queue)
+
+    def h_list_system_users():
+        return list_system_users_handler(store_queue)
+
+    def h_mark_system_user():
+        return mark_system_user_handler(req, store_queue)
+
+    def h_unmark_system_user():
+        return unmark_system_user_handler(req, store_queue)
 
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
@@ -405,6 +453,9 @@ def handler_with_client(
         },
         "/auth/lookup_registration": {
             "POST": RouteEntry(h_lookup_registration, PermissionConfig.public())
+        },
+        "/auth/renew_signup": {
+            "POST": RouteEntry(h_renew_signup, PermissionConfig.public())
         },
         # We prefix the next with 'admin' to make it clear it's only accessible to
         # admins
@@ -434,6 +485,31 @@ def handler_with_client(
         "/admin/resend_signup_email/": {
             "POST": RouteEntry(h_resend_signup_email, PermissionConfig.require("admin"))
         },
+        # Sync operations
+        "/admin/import_sync/": {
+            "POST": RouteEntry(h_import_sync, PermissionConfig.require("admin"))
+        },
+        "/admin/sync_status/": {
+            "GET": RouteEntry(h_sync_status, PermissionConfig.require("admin"))
+        },
+        "/admin/accept_new_sync/": {
+            "POST": RouteEntry(h_accept_new_sync, PermissionConfig.require("admin"))
+        },
+        "/admin/remove_departed/": {
+            "POST": RouteEntry(h_remove_departed, PermissionConfig.require("admin"))
+        },
+        "/admin/update_existing/": {
+            "POST": RouteEntry(h_update_existing, PermissionConfig.require("admin"))
+        },
+        "/admin/list_system_users/": {
+            "GET": RouteEntry(h_list_system_users, PermissionConfig.require("admin"))
+        },
+        "/admin/mark_system_user/": {
+            "POST": RouteEntry(h_mark_system_user, PermissionConfig.require("admin"))
+        },
+        "/admin/unmark_system_user/": {
+            "POST": RouteEntry(h_unmark_system_user, PermissionConfig.require("admin"))
+        },
         "/auth/session_info/": {
             "GET": RouteEntry(
                 h_sess_info, PermissionConfig.public(), requires_credentials=True
@@ -457,10 +533,22 @@ def handler_with_client(
         },
     }
 
+    def add_cors(response: Response, credentials: bool = False) -> Response:
+        """Add CORS headers to any response."""
+        response.headers.append(
+            (
+                b"Access-Control-Allow-Origin",
+                frontend_origin.encode("utf-8"),
+            )
+        )
+        if credentials:
+            response.headers.append((b"Access-Control-Allow-Credentials", b"true"))
+        return response
+
     route = route_table.get(path)
     if route is None:
         logger.info(f"Route not found: {method} {path}")
-        return Response.text(f"Not Found: {method} {path}", status_code=404)
+        return add_cors(Response.text(f"Not Found: {method} {path}", status_code=404))
 
     # In order to get a useful method when the method is OPTIONS is sent for many other
     # methods in a so-called pre-flight request during CORS), we get this special header
@@ -473,7 +561,9 @@ def handler_with_client(
     route_entry = None if requested_method is None else route.get(requested_method)
     if route_entry is None:
         logger.info(f"Method not supported: {method} {path}")
-        return Response.text(f"Not Found: {method} {path}", status_code=404)
+        return add_cors(Response.text(f"Not Found: {method} {path}", status_code=404))
+
+    credentials = route_entry.needs_credentials()
 
     # Handle OPTIONS preflight for CORS (before auth - preflight has no cookies)
     if method == "OPTIONS":
@@ -486,28 +576,19 @@ def handler_with_client(
         auth_client,
         store_queue,
     ):
-        return error
-
-    # Browsers generally only allow responses that have this set (CORS)
-    allow_origin_header = (
-        b"Access-Control-Allow-Origin",
-        frontend_origin.encode("utf-8"),
-    )
+        return add_cors(error, credentials)
 
     response = route_entry.handler()
-    # This one is basically always necessary for the browser to read it
-    response.headers.append(allow_origin_header)
-    # Add credentials header if this route requires it
-    if route_entry.needs_credentials():
-        response.headers.append((b"Access-Control-Allow-Credentials", b"true"))
-    return response
+    return add_cors(response, credentials)
 
 
-def request_registration(req: Request, store_queue: StorageQueue) -> Response:
+def request_registration(
+    auth_client: AuthClient, req: Request, store_queue: StorageQueue
+) -> Response:
     """
-    Creates a new user registration request with accepted=False.
-    This is important for Dodeka because first the Volta process needs to succeed.
-    Returns a registration_token that can be used to check status.
+    Creates a new user registration request and immediately initiates Faroe signup.
+    Returns both registration_token and signup_token so the user can verify
+    their email and set a password right away (before admin approval).
     """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
@@ -545,18 +626,48 @@ def request_registration(req: Request, store_queue: StorageQueue) -> Response:
         return Response.text(
             "User with e-mail already exists in newuser table", status_code=400
         )
-    else:
-        registration_token = result
-        logger.info(
-            f"request_registration: Registered {email} with token {registration_token}"
+
+    registration_token = result
+
+    # Immediately create Faroe signup (sends verification email)
+    signup_result = auth_client.create_signup(email)
+    if isinstance(signup_result, ActionErrorResult):
+        logger.error(
+            f"request_registration: Faroe signup failed for {email}: "
+            f"{signup_result.error_code}"
         )
+        # Registration was created but signup failed - return registration_token
+        # without signup_token so user can retry via renew_signup
         return Response.json(
             {
                 "success": True,
-                "message": f"Registration request submitted for {email}",
+                "message": (
+                    f"Registration created but signup failed:"
+                    f" {signup_result.error_code}"
+                ),
                 "registration_token": registration_token,
+                "signup_token": None,
             }
         )
+
+    signup_token = signup_result.signup_token
+
+    # Store signup_token in registration_state (without changing accepted)
+    store_queue.execute(
+        lambda store: update_registration_state_signup_token(store, email, signup_token)
+    )
+
+    logger.info(
+        f"request_registration: Registered {email} with token {registration_token}"
+    )
+    return Response.json(
+        {
+            "success": True,
+            "message": f"Registration request submitted for {email}",
+            "registration_token": registration_token,
+            "signup_token": signup_token,
+        }
+    )
 
 
 def get_registration_status_handler(
@@ -641,22 +752,26 @@ def list_newusers_handler(store_queue: StorageQueue) -> Response:
 
     def list_users(store: Storage) -> list:
         users = list_new_users(store)
-        return [
-            {
-                "email": user.email,
-                "firstname": user.firstname,
-                "lastname": user.lastname,
-                "accepted": user.accepted,
-                "email_send_count": get_email_send_count_by_email(
-                    store, user.email
-                ),
-                "has_signup_token": get_signup_token_by_email(
-                    store, user.email
-                )
-                is not None,
-            }
-            for user in users
-        ]
+        result = []
+        for user in users:
+            is_registered = store.get("users_by_email", user.email) is not None
+            reg_token = get_registration_token_by_email(store, user.email)
+            result.append(
+                {
+                    "email": user.email,
+                    "firstname": user.firstname,
+                    "lastname": user.lastname,
+                    "accepted": user.accepted,
+                    "email_send_count": get_email_send_count_by_email(
+                        store, user.email
+                    ),
+                    "has_signup_token": get_signup_token_by_email(store, user.email)
+                    is not None,
+                    "is_registered": is_registered,
+                    "registration_token": reg_token,
+                }
+            )
+        return result
 
     result = store_queue.execute(list_users)
     logger.info(f"list_newusers: Returning {len(result)} users")
@@ -664,10 +779,19 @@ def list_newusers_handler(store_queue: StorageQueue) -> Response:
 
 
 def accept_user_handler(
-    auth_client: AuthClient, req: Request, store_queue: StorageQueue
+    req: Request,
+    store_queue: StorageQueue,
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
+    smtp_send: bool,
 ) -> Response:
-    """Handle /admin/accept_user/ - accepts a user and initiates Faroe signup flow."""
-    # Parse and validate request
+    """Handle /admin/accept_user/ - accept a user and send notification email.
+
+    If the user already completed signup (exists in users table), grants member
+    permission and sends acceptance notification with homepage link.
+    Otherwise marks accepted=True on the newuser entry and sends acceptance
+    email with link to create their account.
+    """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         email = body_data.get("email")
@@ -678,69 +802,86 @@ def accept_user_handler(
         logger.warning(f"accept_user: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
+    timestamp = int(time.time())
+
+    def accept(store: Storage) -> dict:
+        # Check if user already completed signup (exists in users table)
+        user_result = store.get("users_by_email", email)
+        if user_result is not None:
+            # User already has an account — grant member + clean up newuser
+            user_id = user_result[0].decode("utf-8")
+            add_permission(store, timestamp, user_id, Permissions.MEMBER)
+            store.delete("newusers", email)
+            return {
+                "success": True,
+                "has_account": True,
+                "message": f"Member permission granted to {email}",
+            }
+
+        # User hasn't completed signup yet — mark accepted in newusers and
+        # registration_state, get registration_token and display_name for email
+        flag_result = update_accepted_flag(store, email, True)
+        if isinstance(flag_result, EmailNotFoundInNewUserTable):
+            return {"error": f"Email {email} not found in newuser table"}
+
+        mark_registration_state_accepted(store, email)
+        reg_token = get_registration_token_by_email(store, email)
+
+        # Get display name from newuser
+        newuser_data = store.get("newusers", email)
+        display_name = None
+        if newuser_data is not None:
+            data = json.loads(newuser_data[0].decode("utf-8"))
+            display_name = data.get("firstname")
+
+        return {
+            "success": True,
+            "has_account": False,
+            "registration_token": reg_token,
+            "display_name": display_name,
+            "message": f"User {email} marked as accepted (pending signup completion)",
+        }
+
+    result = store_queue.execute(accept)
+    if "error" in result:
+        logger.warning(f"accept_user: {result['error']}")
+        return Response.json(result, status_code=400)
+
+    # Send acceptance email (outside store_queue to avoid deadlock)
     try:
-        # Initiate Faroe signup flow first
-        logger.info(f"accept_user: Creating Faroe signup for {email}")
-        signup_result = auth_client.create_signup(email)
-
-        if isinstance(signup_result, ActionErrorResult):
-            logger.error(
-                f"accept_user: Faroe signup failed for {email}: "
-                f"{signup_result.error_code}"
-            )
-            return Response.json(
-                {
-                    "error": "Faroe signup failed",
-                    "error_code": signup_result.error_code,
-                },
-                status_code=500,
-            )
-
-        signup_token = signup_result.signup_token
-
-        # Update accepted flag and registration state in database
-        def accept(
-            store: Storage,
-        ) -> str | EmailNotFoundInNewUserTable | RegistrationStateNotFoundForEmail:
-            result = update_accepted_flag(store, email, True)
-            if result is not None:
-                return result
-            result = update_registration_state_accepted(store, email, signup_token)
-            if result is not None:
-                return result
-            return f"accepted {email}\n"
-
-        result = store_queue.execute(accept)
-        if isinstance(result, EmailNotFoundInNewUserTable):
-            logger.warning(f"accept_user: Email {email} not found in newuser table")
-            return Response.text(
-                f"Email {email} not found in newuser table", status_code=400
-            )
-        elif isinstance(result, RegistrationStateNotFoundForEmail):
-            logger.warning(f"accept_user: No registration state found for {email}")
-            return Response.text(
-                f"No registration state found for email: {email}", status_code=400
-            )
+        if result.get("has_account"):
+            link = frontend_origin
         else:
-            logger.info(f"accept_user: {result.strip()}")
-
-            # Return signup token from successful result
-            return Response.json(
-                {
-                    "success": True,
-                    "message": f"User {email} accepted and signup initiated",
-                    "signup_token": signup_token,
-                }
+            reg_token = result.get("registration_token")
+            link = (
+                f"{frontend_origin}/account/signup?token={reg_token}"
+                if reg_token
+                else frontend_origin
             )
-    except Exception as e:
-        logger.error(f"accept_user: Failed to create Faroe signup: {e}")
-        return Response.text(f"Failed to create signup: {e}", status_code=500)
+
+        email_data = EmailData(
+            email_type="account_accepted",
+            to_email=email,
+            display_name=result.get("display_name"),
+            link=link,
+        )
+        sendemail(smtp_config, email_data, smtp_send)
+    except Exception as exc:
+        logger.error(f"accept_user: Failed to send acceptance email to {email}: {exc}")
+
+    logger.info(f"accept_user: {result['message']}")
+    return Response.json(result)
 
 
 def resend_signup_email_handler(
     auth_client: AuthClient, req: Request, store_queue: StorageQueue
 ) -> Response:
-    """Handle /admin/resend_signup_email/ - resends signup verification email."""
+    """Handle /admin/resend_signup_email/ - (re)sends signup verification email.
+
+    Faroe signups expire after ~20 minutes.  If the stored signup_token is
+    stale or was never created (accept_new without signup), a new signup is
+    created in Faroe and the token is updated in registration_state.
+    """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         email = body_data.get("email")
@@ -751,27 +892,105 @@ def resend_signup_email_handler(
         logger.warning(f"resend_signup_email: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Look up signup_token by email
-    def get_token(store: Storage) -> str | None:
-        return get_signup_token_by_email(store, email)
+    # Verify user has a registration state (was accepted through the newuser flow)
+    def get_tokens(store: Storage) -> tuple[str | None, str | None]:
+        return (
+            get_signup_token_by_email(store, email),
+            get_registration_token_by_email(store, email),
+        )
 
-    signup_token = store_queue.execute(get_token)
-    if signup_token is None:
-        logger.warning(f"resend_signup_email: No signup token found for {email}")
-        return Response.text(f"No signup token found for {email}", status_code=404)
+    signup_token, registration_token = store_queue.execute(get_tokens)
 
-    # Call Faroe to resend the email
-    result = auth_client.send_signup_email_address_verification_code(signup_token)
-
-    if isinstance(result, ActionErrorResult):
-        logger.error(f"resend_signup_email: Failed for {email}: {result.error_code}")
+    if registration_token is None:
+        logger.warning(f"resend_signup_email: No registration found for {email}")
         return Response.json(
-            {"error": "Failed to resend email", "error_code": result.error_code},
+            {"error": f"No registration found for {email}"}, status_code=404
+        )
+
+    # Try resending with existing token (fast path when signup is still active)
+    if signup_token is not None:
+        result = auth_client.send_signup_email_address_verification_code(signup_token)
+        if not isinstance(result, ActionErrorResult):
+            logger.info(f"resend_signup_email: Resent verification email to {email}")
+            return Response.json(
+                {"success": True, "message": f"Email resent to {email}"}
+            )
+        logger.info(
+            f"resend_signup_email: Token invalid ({result.error_code}), "
+            f"creating new signup for {email}"
+        )
+
+    # Create new signup — Faroe sends the verification email automatically
+    signup_result = auth_client.create_signup(email)
+    if isinstance(signup_result, ActionErrorResult):
+        logger.error(
+            f"resend_signup_email: Failed to create signup for "
+            f"{email}: {signup_result.error_code}"
+        )
+        return Response.json(
+            {
+                "error": "Failed to initiate signup",
+                "error_code": signup_result.error_code,
+            },
             status_code=400,
         )
 
-    logger.info(f"resend_signup_email: Resent verification email to {email}")
-    return Response.json({"success": True, "message": f"Email resent to {email}"})
+    # Store the new token so the next resend can try the fast path
+    new_token = signup_result.signup_token
+    store_queue.execute(
+        lambda store: update_registration_state_signup_token(store, email, new_token)
+    )
+
+    logger.info(f"resend_signup_email: New signup created, email sent to {email}")
+    return Response.json({"success": True, "message": f"Signup email sent to {email}"})
+
+
+def renew_signup_handler(
+    auth_client: AuthClient, req: Request, store_queue: StorageQueue
+) -> Response:
+    """Handle /auth/renew_signup - renew an expired Faroe signup.
+
+    Called by the frontend when email verification fails with invalid_signup_token.
+    Takes the registration_token (from the signup URL) as authentication.
+    Creates a new Faroe signup (which auto-sends a new verification email)
+    and updates the stored signup_token.
+    """
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        registration_token = body_data.get("registration_token")
+        if not registration_token:
+            return Response.text("Missing registration_token", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    # Look up registration state (uses registration_token as key)
+    state = store_queue.execute(
+        lambda store: get_registration_state(store, registration_token)
+    )
+    if state is None:
+        return Response.json({"error": "Registration not found"}, status_code=404)
+
+    email = state.email
+
+    # Create new Faroe signup — sends verification email automatically
+    signup_result = auth_client.create_signup(email)
+    if isinstance(signup_result, ActionErrorResult):
+        logger.error(f"renew_signup: Failed for {email}: {signup_result.error_code}")
+        return Response.json(
+            {
+                "error": "Failed to create signup",
+                "error_code": signup_result.error_code,
+            },
+            status_code=400,
+        )
+
+    new_token = signup_result.signup_token
+    store_queue.execute(
+        lambda store: update_registration_state_signup_token(store, email, new_token)
+    )
+
+    logger.info(f"renew_signup: New signup created for {email}")
+    return Response.json({"success": True, "signup_token": new_token, "email": email})
 
 
 def validate_session(
@@ -950,23 +1169,33 @@ def session_info(
     timestamp = int(time.time())
 
     # Get user info from database
-    def get_session_data(store: Storage) -> SessionInfo | InvalidSession:
+    def get_session_data(
+        store: Storage,
+    ) -> tuple[SessionInfo, bool] | InvalidSession:
         user = get_user_info(store, timestamp, result.user_id)
         if user is None:
             return InvalidSession()
-        return SessionInfo(
-            user=user, created_at=result.created_at, expires_at=result.expires_at
+        pending = store.get("newusers", user.email) is not None
+        return (
+            SessionInfo(
+                user=user,
+                created_at=result.created_at,
+                expires_at=result.expires_at,
+            ),
+            pending,
         )
 
-    session = store_queue.execute(get_session_data)
+    session_result = store_queue.execute(get_session_data)
 
-    if isinstance(session, InvalidSession):
+    if isinstance(session_result, InvalidSession):
         logger.warning(f"session_info: User {result.user_id} not found")
         return Response.json(
             {"error": "invalid_session"},
             status_code=401,
             headers=[make_clear_session_cookie_header(cookie_name)],
         )
+
+    session, pending_approval = session_result
 
     logger.debug(f"session_info: Returning info for user {result.user_id}")
     return Response.json(
@@ -980,6 +1209,7 @@ def session_info(
             },
             "created_at": session.created_at,
             "expires_at": session.expires_at,
+            "pending_approval": pending_approval,
         }
     )
 
@@ -1161,6 +1391,125 @@ def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response
     return Response.json({"results": results})
 
 
+# --- Sync admin routes ---
+
+
+def import_sync_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/import_sync/ - import CSV content into sync table."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        csv_content = body_data.get("csv_content")
+        if not csv_content:
+            return Response.text("Missing csv_content", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    entries = parse_csv(csv_content)
+    count = store_queue.execute(lambda store: import_sync(store, entries))
+    logger.info(f"import_sync: Imported {count} entries")
+    return Response.json({"imported": count})
+
+
+def sync_status_handler(store_queue: StorageQueue) -> Response:
+    """Handle /admin/sync_status/ - compute and return sync groups."""
+    result = store_queue.execute(lambda store: serialize_groups(compute_groups(store)))
+    logger.info(
+        f"sync_status: {len(result['new'])} new, "
+        f"{len(result['pending'])} pending, "
+        f"{len(result['existing'])} existing, "
+        f"{len(result['departed'])} departed"
+    )
+    return Response.json(result)
+
+
+def accept_new_sync_handler(
+    req: Request,
+    store_queue: StorageQueue,
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
+    smtp_send: bool,
+) -> Response:
+    """Handle /admin/accept_new_sync/ - accept new users and send acceptance emails."""
+    email = None
+    if req.body:
+        try:
+            body_data = json.loads(req.body.decode("utf-8"))
+            email = body_data.get("email")
+        except (json.JSONDecodeError, ValueError):
+            pass
+    result = do_accept_new_with_email(
+        store_queue, frontend_origin, smtp_config, smtp_send, email
+    )
+    return Response.json(result)
+
+
+def remove_departed_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/remove_departed/ - remove departed users."""
+    email = None
+    if req.body:
+        try:
+            body_data = json.loads(req.body.decode("utf-8"))
+            email = body_data.get("email")
+        except (json.JSONDecodeError, ValueError):
+            pass
+    timestamp = int(time.time())
+    result = store_queue.execute(lambda store: remove_departed(store, timestamp, email))
+    logger.info(f"remove_departed: {result}")
+    return Response.json(result)
+
+
+def update_existing_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/update_existing/ - update existing user data from sync."""
+    email = None
+    if req.body:
+        try:
+            body_data = json.loads(req.body.decode("utf-8"))
+            email = body_data.get("email")
+        except (json.JSONDecodeError, ValueError):
+            pass
+    result = store_queue.execute(lambda store: update_existing(store, email))
+    logger.info(f"update_existing: {result}")
+    return Response.json(result)
+
+
+def list_system_users_handler(store_queue: StorageQueue) -> Response:
+    """Handle /admin/list_system_users/ - list system users."""
+    users = store_queue.execute(lambda store: list_system_users(store))
+    return Response.json({"system_users": users})
+
+
+def mark_system_user_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/mark_system_user/ - mark email as system user."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        email = body_data.get("email")
+        if not email:
+            return Response.text("Missing email", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+    added = store_queue.execute(lambda store: add_system_user(store, email))
+    if added:
+        logger.info(f"mark_system_user: Marked {email}")
+        return Response.json({"marked": True})
+    return Response.json({"marked": False, "message": "Already a system user"})
+
+
+def unmark_system_user_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/unmark_system_user/ - unmark email as system user."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        email = body_data.get("email")
+        if not email:
+            return Response.text("Missing email", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+    removed = store_queue.execute(lambda store: remove_system_user(store, email))
+    if removed:
+        logger.info(f"unmark_system_user: Unmarked {email}")
+        return Response.json({"unmarked": True})
+    return Response.json({"unmarked": False, "message": "Not a system user"})
+
+
 def bootstrap_admin(
     token_waiter: TokenWaiter,
     auth_client: AuthClient,
@@ -1216,13 +1565,6 @@ class PrefixFormatter(logging.Formatter):
         return f"{self.prefix} {msg}"
 
 
-def pipe_with_prefix(pipe: "IO[bytes]", prefix: str) -> None:
-    """Read lines from a byte pipe and print them with a prefix."""
-    for line in iter(pipe.readline, b""):
-        print(f"{prefix} {line.decode().rstrip()}", flush=True)
-    pipe.close()
-
-
 def run_with_settings(settings: Settings, *, log_prefix: str = ""):
     log_listener = setup_logging()
     log_listener.start()
@@ -1234,7 +1576,13 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
     # Also set handler levels (setup_logging may have set handlers with higher levels)
     for h in root_logger.handlers:
         h.setLevel(log_level)
-        if log_prefix:
+
+    # Set prefix on the QueueListener's console handler (not the QueueHandler).
+    # Setting it on the QueueHandler would bake the prefix into the message
+    # before the console handler adds [threadName], producing
+    # "[Thread-1] [backend] msg" instead of the desired "[backend] [Thread-1] msg".
+    if log_prefix:
+        for h in log_listener.handlers:
             h.setFormatter(PrefixFormatter(log_prefix, h.formatter))
 
     logger.info(
@@ -1301,9 +1649,13 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
 
     # freetser doesn't know about the client, so we create a handler that captures it
     frontend_origin = settings.frontend_origin
+    smtp_config = settings.smtp
+    smtp_send = settings.smtp_send
 
     def handler(req: Request, store_queue: StorageQueue | None) -> Response:
-        return handler_with_client(auth_client, req, store_queue, frontend_origin)
+        return handler_with_client(
+            auth_client, req, store_queue, frontend_origin, smtp_config, smtp_send
+        )
 
     # Create ready event for server startup
     ready_event = threading.Event()
@@ -1313,10 +1665,36 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
         """Execute startup actions after server is ready."""
         ready_event.wait()
         logger.info("Server ready, running startup actions...")
-        try:
-            do_bootstrap_admin()
-        except Exception:
-            pass  # Already logged
+
+        # The auth server (Go binary) is started as a subprocess alongside the
+        # Python backend in dev mode. It can sometimes be slow to start up and
+        # begin accepting connections, causing bootstrap_admin to fail with a
+        # ConnectionError. Retry a few times with backoff to give it time.
+        max_attempts = 8
+        for attempt in range(1, max_attempts + 1):
+            try:
+                do_bootstrap_admin()
+                break
+            except AdminUserCreationError:
+                break  # Auth server responded but returned an error, no point retrying
+            except Exception:
+                if attempt == max_attempts:
+                    logger.error(
+                        "Failed to bootstrap admin after %d attempts, "
+                        "auth server may not be running",
+                        max_attempts,
+                    )
+                    break
+                # Auth server probably hasn't started accepting connections yet,
+                # wait before retrying with linear backoff
+                wait = 0.5 * attempt
+                logger.info(
+                    "Auth server not ready (attempt %d/%d), retrying in %.1fs...",
+                    attempt,
+                    max_attempts,
+                    wait,
+                )
+                time.sleep(wait)
 
     threading.Thread(target=run_startup_actions, daemon=True).start()
 
@@ -1340,54 +1718,6 @@ def run():
 def run_test():
     """Run only the Python backend with test environment settings."""
     run_with_settings(load_settings_from_env(Path("envs/test/.env")))
-
-
-def run_dev():
-    """Run auth server and backend together for local development."""
-    ensure_auth_binary()
-
-    auth_path = get_auth_binary_path()
-    if not auth_path.exists():
-        msg = (
-            f"Auth binary not found at {auth_path}.\n"
-            "Run 'uv run update-auth' to download it, or build"
-            " it with 'CGO_ENABLED=1 go build -o auth .' in"
-            " backend/auth/."
-        )
-        raise SystemExit(msg)
-
-    auth_args = [
-        str(auth_path),
-        "--env-file",
-        "envs/test/.env",
-        "--enable-reset",
-        "--interactive",
-    ]
-    auth_process = subprocess.Popen(
-        auth_args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=str(auth_path.parent),
-    )
-    threading.Thread(
-        target=pipe_with_prefix,
-        args=(auth_process.stdout, "[auth]"),
-        daemon=True,
-    ).start()
-    threading.Thread(
-        target=pipe_with_prefix,
-        args=(auth_process.stderr, "[auth]"),
-        daemon=True,
-    ).start()
-
-    try:
-        run_with_settings(
-            load_settings_from_env(Path("envs/test/.env")),
-            log_prefix="[backend]",
-        )
-    finally:
-        auth_process.terminate()
-        auth_process.wait()
 
 
 def run_demo():

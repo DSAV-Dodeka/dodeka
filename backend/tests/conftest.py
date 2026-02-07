@@ -76,9 +76,9 @@ def command(tmp_path_factory: pytest.TempPathFactory):
 
     try:
         # Wait for auth server to be ready
-        assert waitfor(
-            f"http://localhost:{auth_port}"
-        ), f"Auth server failed to start on port {auth_port}"
+        assert waitfor(f"http://localhost:{auth_port}"), (
+            f"Auth server failed to start on port {auth_port}"
+        )
 
         # Create backend settings with free ports and temp database
         settings = Settings(
@@ -99,9 +99,9 @@ def command(tmp_path_factory: pytest.TempPathFactory):
         ).start()
 
         # Wait for backend server to be ready
-        assert waitfor(
-            f"http://localhost:{backend_port}"
-        ), f"Backend server failed to start on port {backend_port}"
+        assert waitfor(f"http://localhost:{backend_port}"), (
+            f"Backend server failed to start on port {backend_port}"
+        )
 
         # Build command helper
         command_url = f"http://{PRIVATE_HOST}:{private_port}/command"

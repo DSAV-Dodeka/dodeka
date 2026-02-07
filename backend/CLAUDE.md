@@ -1,5 +1,10 @@
 # Claude Development Guidelines
 
+## Project Layout
+
+- Backend: `~/files/dodekap/dodeka/backend/`
+- Frontend: `~/files/dodekap/dodekafrontend/`
+
 ## Architecture
 
 ## Code Quality Checks
@@ -8,11 +13,15 @@ After adding a significant amount of code and before finishing a request, run th
 
 ```bash
 uv run ty check          # Type checking
-uv format --preview-features format  # Code formatting
-uv run ruff check            # Linting
+uv run ruff format       # Code formatting (just run it, accept all changes)
+uv run ruff check        # Linting
 ```
 
 All checks must pass. Try to avoid ignoring warnings without explicit permission from the user.
+
+## Naming Conventions
+
+Never use leading underscores for function names, method names, class names, or variables. No `_my_function`, no `_InteractiveParser`, no `self._field`. Just use plain names without underscores prefix.
 
 ## Database Thread Deadlock Prevention
 
