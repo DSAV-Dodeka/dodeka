@@ -61,14 +61,14 @@ def command(tmp_path_factory: pytest.TempPathFactory):
     auth_env = tmppath / "auth.env"
     auth_env.write_text(
         f"FAROE_PORT={auth_port}\n"
-        f"FAROE_PRIVATE_PORT={private_port}\n"
+        f"FAROE_USER_SERVER_PORT={private_port}\n"
         f"FAROE_DB_PATH={tmppath / 'auth_db.sqlite'}\n"
         f"FAROE_CORS_ALLOW_ORIGIN=http://localhost:3000\n"
     )
 
     # Start auth binary (suppress output to avoid pipe buffer blocking)
     auth_process = subprocess.Popen(
-        [str(auth_path), "--env-file", str(auth_env), "--enable-reset"],
+        [str(auth_path), "--env-file", str(auth_env)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=str(auth_path.parent),

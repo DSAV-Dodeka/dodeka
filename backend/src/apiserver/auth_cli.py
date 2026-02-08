@@ -8,15 +8,21 @@ Run 'uv run auth-actions --help' for a list of available commands.
 
 import argparse
 import json
+import os
 
 import requests
 
 from apiserver.settings import DEFAULT_AUTH_COMMAND_URL
 
 
+def get_auth_command_url() -> str:
+    """Get the auth command URL from env or default."""
+    return os.environ.get("BACKEND_AUTH_COMMAND_URL", DEFAULT_AUTH_COMMAND_URL)
+
+
 def send_auth_command(command: str) -> str:
     """Send a command to the auth server via HTTP."""
-    url = f"{DEFAULT_AUTH_COMMAND_URL}/command"
+    url = f"{get_auth_command_url()}/command"
     payload = {"command": command}
 
     try:
@@ -28,7 +34,7 @@ def send_auth_command(command: str) -> str:
 
 def send_auth_command_json(command: str) -> dict | None:
     """Send a command and parse JSON response."""
-    url = f"{DEFAULT_AUTH_COMMAND_URL}/command"
+    url = f"{get_auth_command_url()}/command"
     payload = {"command": command}
 
     try:

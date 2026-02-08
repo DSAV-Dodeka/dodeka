@@ -92,6 +92,5 @@ CGO_ENABLED=1 go build .
 Available flags:
 
 - `--env-file` - Path to environment file (default: `.env`)
-- `--enable-reset` - Enable `/reset` endpoint to clear storage
-- `--interactive` - Run in interactive mode with stdin commands
-- `--private-port` - Port for Python backend communication (default: 12790)
+- `--user-server-port` - Port where the user server listens (default: 12790)
+- `--command-port` - Port for management commands on 127.0.0.2 (default: 12771)
