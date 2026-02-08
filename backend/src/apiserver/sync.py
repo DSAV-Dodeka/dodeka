@@ -14,7 +14,13 @@ from dataclasses import dataclass
 from freetser import Storage
 
 from apiserver.data.newuser import serialize_newuser
-from apiserver.data.permissions import Permissions, add_permission, remove_permission
+from apiserver.data.permissions import (
+    Permissions,
+    UserNotFoundError,
+    add_permission,
+    read_permissions,
+    remove_permission,
+)
 from apiserver.data.registration_state import create_registration_state
 from apiserver.data.userdata import (
     SYNC_TABLE,
@@ -131,15 +137,6 @@ def add_system_user(store: Storage, email: str) -> bool:
     return True
 
 
-def remove_system_user(store: Storage, email: str) -> bool:
-    """Unmark a user as system-only."""
-    key = email.lower()
-    if store.get(SYSTEM_USERS_TABLE, key) is None:
-        return False
-    store.delete(SYSTEM_USERS_TABLE, key)
-    return True
-
-
 def list_system_users(store: Storage) -> list[str]:
     """Return emails of all system-only users."""
     return store.list_keys(SYSTEM_USERS_TABLE)
@@ -165,8 +162,10 @@ def has_member_permission(store: Storage, timestamp: int, email: str) -> bool:
     if result is None:
         return False
     user_id = result[0].decode("utf-8")
-    perm_key = f"{user_id}:perm:{Permissions.MEMBER}"
-    return store.get("users", perm_key, timestamp=timestamp) is not None
+    perms = read_permissions(store, timestamp, user_id)
+    if isinstance(perms, UserNotFoundError):
+        return False
+    return Permissions.MEMBER in perms
 
 
 def compute_groups(store: Storage) -> SyncGroups:
@@ -228,9 +227,6 @@ def compute_groups(store: Storage) -> SyncGroups:
     return SyncGroups(departed=departed, new=new, pending=pending, existing=existing)
 
 
-# --- Single-item helpers used by the combined functions below ---
-
-
 def revoke_member(store: Storage, timestamp: int, email: str) -> bool:
     """Revoke member permission and delete userdata for a departed user."""
     result = store.get("users_by_email", email.lower())
@@ -285,9 +281,6 @@ def sync_userdata(store: Storage, timestamp: int, email: str) -> bool:
     upsert(store, USERDATA_TABLE, entry)
     grant_member_permission(store, timestamp, email)
     return True
-
-
-# --- Combined single/all operations (called by commands and routes) ---
 
 
 def remove_departed(store: Storage, timestamp: int, email: str | None = None) -> dict:

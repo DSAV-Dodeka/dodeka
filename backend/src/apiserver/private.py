@@ -3,6 +3,10 @@
 Binds to 127.0.0.2 (separate loopback address) for isolation.
 Handles requests from Go tiauth-faroe and CLI.
 
+This module is a command/orchestration layer on top of the data modules
+in apiserver.data and apiserver.sync.  It must not define fundamental
+state such as table names or schema — those belong in the data layer.
+
 Routes:
 - POST /invoke - user action invocation (faroe UserServerClient)
 - POST /email - email sending from tiauth-faroe (stores tokens, sends via SMTP)
@@ -16,23 +20,22 @@ Routes:
 
 import json
 import logging
+import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 from freetser import Request, Response, Storage, TcpServerConfig, start_server
-from freetser.server import StorageQueue
+from freetser.server import Handler, StorageQueue
 from tiauth_faroe.client import ActionErrorResult
 from tiauth_faroe.user_server import handle_request_sync
 
-from apiserver.data.client import AuthClient
-from apiserver.settings import PRIVATE_HOST, SmtpConfig
-from apiserver.email import EmailData, EmailType, TOKEN_EMAIL_TYPES, sendemail
-from apiserver.tokens import TOKENS_TABLE, TokenWaiter, add_token, get_token
-
-from apiserver.data.admin import get_admin_credentials
+from apiserver.actions import AdminUserCreationError, create_admin_user
+from apiserver.data import DB_TABLES
+from apiserver.data.admin import get_admin_credentials, store_admin_credentials
 from apiserver.data.auth import SqliteSyncServer
+from apiserver.data.client import AuthClient
 from apiserver.data.newuser import (
     EmailExistsInNewUserTable,
     EmailNotFoundInNewUserTable,
@@ -41,7 +44,9 @@ from apiserver.data.newuser import (
     prepare_user_store,
     update_accepted_flag,
 )
+from apiserver.data.permissions import Permissions, add_permission
 from apiserver.data.registration_state import (
+    RegistrationStateNotFound,
     create_registration_state,
     get_registration_state,
     get_registration_token_by_email,
@@ -49,9 +54,9 @@ from apiserver.data.registration_state import (
     mark_registration_state_accepted,
     update_registration_state_accepted,
 )
-from apiserver.data.permissions import add_permission
+from apiserver.email import TOKEN_EMAIL_TYPES, EmailData, EmailType, sendemail
+from apiserver.settings import PRIVATE_HOST, SmtpConfig
 from apiserver.sync import (
-    SYSTEM_USERS_TABLE,
     accept_new,
     add_system_user,
     compute_groups,
@@ -61,22 +66,9 @@ from apiserver.sync import (
     serialize_groups,
     update_existing,
 )
+from apiserver.tokens import TOKENS_TABLE, TokenWaiter, add_token, get_token
 
 logger = logging.getLogger("apiserver.private")
-
-# Database tables that can be cleared
-DB_TABLES = [
-    "users",
-    "users_by_email",
-    "newusers",
-    "registration_state",
-    "metadata",
-    "session_cache",
-    "userdata",
-    "sync",
-    SYSTEM_USERS_TABLE,
-    TOKENS_TABLE,
-]
 
 # Thread-safe email suppression for batch accept-new with signup.
 # Emails in this set have their tokens stored but sendemail() skipped.
@@ -129,9 +121,8 @@ def create_private_handler(
     frontend_origin: str,
     smtp_config: SmtpConfig | None,
     smtp_send: bool,
-    command_handlers: dict[str, Callable[[], str]] | None = None,
     auth_client: AuthClient | None = None,
-) -> Any:
+) -> Handler:
     """Create the handler for the private server."""
 
     def handler(req: Request, _: StorageQueue | None) -> Response:
@@ -150,7 +141,6 @@ def create_private_handler(
             response = handle_command(
                 req,
                 store_queue,
-                command_handlers or {},
                 auth_client,
                 token_waiter,
                 (frontend_origin, smtp_config, smtp_send),
@@ -261,11 +251,66 @@ def handle_email(
     return Response.json({"success": True})
 
 
+def bootstrap_admin(
+    token_waiter: TokenWaiter,
+    auth_client: AuthClient,
+    store_queue: StorageQueue,
+) -> tuple[str, str]:
+    """Bootstrap the root admin user."""
+    root_email = "root_admin@localhost"
+    root_password = secrets.token_urlsafe(32)
+
+    user_id, session_token = create_admin_user(
+        store_queue,
+        auth_client,
+        root_email,
+        root_password,
+        token_waiter,
+        ["Root", "Admin"],
+    )
+
+    # Store credentials and mark as system user (excluded from sync)
+    def save_credentials(store: Storage) -> None:
+        store_admin_credentials(store, root_email, root_password)
+        add_system_user(store, root_email)
+
+    store_queue.execute(save_credentials)
+
+    logger.info(f"Root admin bootstrapped: {root_email} (user_id={user_id})")
+    logger.info(f"Root admin credentials: email={root_email}, password={root_password}")
+    return user_id, session_token
+
+
+def bootstrap_admin_on_startup(
+    ready_event: threading.Event,
+    token_waiter: TokenWaiter,
+    auth_server_url: str,
+    store_queue: StorageQueue,
+) -> None:
+    """Wait for server readiness, then bootstrap the admin user.
+
+    Creates a separate AuthClient with connection retries to handle the Go auth
+    server starting up concurrently (ECONNREFUSED until it's ready).
+    """
+    ready_event.wait()
+    logger.info("Server ready, bootstrapping admin...")
+
+    # The Go auth server may still be starting — use connect retries with backoff
+    startup_client = AuthClient(auth_server_url, timeout=10, connect_retries=8)
+    try:
+        bootstrap_admin(token_waiter, startup_client, store_queue)
+    except AdminUserCreationError as e:
+        logger.error(f"Failed to bootstrap root admin: {e}")
+    except Exception:
+        logger.error("Failed to bootstrap admin, auth server may not be running")
+
+
 def cmdhandler_reset(
     store_queue: StorageQueue,
-    command_handlers: dict[str, Callable[[], str]],
+    token_waiter: TokenWaiter | None,
+    auth_client: AuthClient | None,
 ) -> Response:
-    """Handle the reset command."""
+    """Handle the reset command: clear all tables and re-bootstrap admin."""
 
     def clear_tables(store: Storage) -> None:
         for table in DB_TABLES:
@@ -274,16 +319,19 @@ def cmdhandler_reset(
     store_queue.execute(clear_tables)
     logger.info("Tables cleared")
 
-    if "reset" not in command_handlers:
+    if token_waiter is None or auth_client is None:
         return Response.text("Tables cleared")
 
     try:
-        result = command_handlers["reset"]()
-        logger.info(f"Reset handler result: {result}")
-        return Response.text(f"Tables cleared. {result}")
+        bootstrap_admin(token_waiter, auth_client, store_queue)
+        logger.info("Admin re-bootstrapped after reset")
+        return Response.text("Tables cleared. Admin re-bootstrapped")
+    except AdminUserCreationError as e:
+        logger.error(f"Failed to bootstrap root admin: {e}")
+        return Response.text(f"Tables cleared but admin bootstrap failed: {e}")
     except Exception as e:
-        logger.error(f"Reset handler failed: {e}")
-        return Response.text(f"Tables cleared but reset handler failed: {e}")
+        logger.error(f"Unexpected error bootstrapping root admin: {e}")
+        return Response.text(f"Tables cleared but admin bootstrap failed: {e}")
 
 
 def cmdhandler_prepare_user(
@@ -416,7 +464,10 @@ def do_accept_new_with_email(
                 continue  # Already notified
 
             # Mark accepted in registration_state and collect for email
-            mark_registration_state_accepted(store, u.email)
+            mark_result = mark_registration_state_accepted(store, u.email)
+            if isinstance(mark_result, RegistrationStateNotFound):
+                logger.error(f"Registration state missing for {u.email}")
+                continue
             targets.append((u.email, u.firstname, reg_token))
 
         return result, targets
@@ -532,7 +583,7 @@ def cmdhandler_board_setup(
         if isinstance(result, EmailNotFoundInNewUserTable):
             return f"Email {email} not found in newuser table"
         result = update_registration_state_accepted(store, email, signup_token)
-        if result is not None:
+        if isinstance(result, RegistrationStateNotFound):
             return f"No registration state found for {email}"
         return None
 
@@ -740,10 +791,57 @@ def cmdhandler_grant_admin(store_queue: StorageQueue, email: str | None) -> Resp
     return Response.json(result)
 
 
+def cmdhandler_accept_user(store_queue: StorageQueue, email: str | None) -> Response:
+    """Accept a user without HTTP request parsing (for test automation).
+
+    Same logic as accept_user_handler() in app.py:
+    - If user already has account: grant member permission, delete from newusers
+    - If not: mark accepted=True in newusers + registration_state
+    No email sending.
+    """
+    if not email:
+        return Response.text("Missing email for accept_user", status_code=400)
+
+    timestamp = int(time.time())
+
+    def accept(store: Storage) -> dict:
+        user_result = store.get("users_by_email", email)
+        if user_result is not None:
+            user_id = user_result[0].decode("utf-8")
+            add_permission(store, timestamp, user_id, Permissions.MEMBER)
+            store.delete("newusers", email)
+            return {
+                "success": True,
+                "has_account": True,
+                "message": f"Member permission granted to {email}",
+            }
+
+        flag_result = update_accepted_flag(store, email, True)
+        if isinstance(flag_result, EmailNotFoundInNewUserTable):
+            return {"error": f"Email {email} not found in newuser table"}
+
+        mark_result = mark_registration_state_accepted(store, email)
+        if isinstance(mark_result, RegistrationStateNotFound):
+            return {"error": f"No registration state found for {email}"}
+
+        return {
+            "success": True,
+            "has_account": False,
+            "message": f"User {email} marked as accepted",
+        }
+
+    result = store_queue.execute(accept)
+    if "error" in result:
+        logger.warning(f"accept_user: {result['error']}")
+        return Response.json(result, status_code=400)
+
+    logger.info(f"accept_user: {result['message']}")
+    return Response.json(result)
+
+
 def handle_command(
     req: Request,
     store_queue: StorageQueue,
-    command_handlers: dict[str, Callable[[], str]],
     auth_client: AuthClient | None = None,
     token_waiter: TokenWaiter | None = None,
     email_settings: tuple[str, SmtpConfig | None, bool] = ("", None, False),
@@ -767,7 +865,7 @@ def handle_command(
     logger.debug(f"command: Received {command}")
 
     dispatch: dict[str, Callable[[], Response]] = {
-        "reset": lambda: cmdhandler_reset(store_queue, command_handlers),
+        "reset": lambda: cmdhandler_reset(store_queue, token_waiter, auth_client),
         "prepare_user": lambda: cmdhandler_prepare_user(
             store_queue, body.get("email"), body.get("names", [])
         ),
@@ -783,6 +881,7 @@ def handle_command(
             store_queue, body.get("email")
         ),
         "accept_new": lambda: cmdhandler_accept_new(store_queue, body.get("email")),
+        "accept_user": lambda: cmdhandler_accept_user(store_queue, body.get("email")),
         "accept_new_with_signup": lambda: cmdhandler_accept_new_with_email(
             store_queue, frontend_origin, smtp_config, smtp_send, body.get("email")
         ),
@@ -799,14 +898,6 @@ def handle_command(
 
     if command in dispatch:
         return dispatch[command]()
-
-    if command in command_handlers:
-        try:
-            result = command_handlers[command]()
-            return Response.text(result)
-        except Exception as e:
-            logger.error(f"command: Handler for '{command}' failed: {e}")
-            return Response.text(f"Command failed: {e}", status_code=500)
 
     logger.warning(f"command: Unknown command '{command}'")
     return Response.text(f"Unknown command: {command}", status_code=400)

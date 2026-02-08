@@ -2,24 +2,23 @@
 
 Manages the Go auth server and Python backend as subprocesses.  Both
 servers run as separate processes so that ``restart`` (triggered by
-SIGHUP from ``uv run da restart``) reloads all code from disk.
+``uv run da restart``) reloads all code from disk.
 
-Signals:
-    SIGHUP  — restart both servers
-    SIGINT  — graceful shutdown
-    SIGTERM — graceful shutdown
+Control is done via a tiny HTTP server on 127.0.0.1:12795 that accepts
+restart/stop/status commands from the CLI.  Ctrl+C (SIGINT) in the
+terminal also triggers a graceful shutdown.
 """
 
-import os
 import signal
 import subprocess
+import sys
 import threading
-from pathlib import Path
 from typing import IO, Callable
 
-from apiserver.auth_binary import ensure_auth_binary, get_auth_binary_path
+from freetser import Request, Response, TcpServerConfig, start_server
 
-PID_FILE = Path("envs/test/dev.pid")
+from apiserver.auth_binary import ensure_auth_binary, get_auth_binary_path
+from apiserver.settings import DEFAULT_DEV_CONTROL_PORT, PRIVATE_HOST
 
 
 def pipe_with_prefix(
@@ -58,16 +57,26 @@ class ManagedProcess:
             if self.process is not None and self.process.poll() is None:
                 return
 
-            self.process = subprocess.Popen(
-                self.args,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=self.cwd,
-                # Own session so Ctrl+C only reaches the orchestrator, which
-                # then terminates children explicitly.
-                start_new_session=True,
-            )
+            # Isolate child from parent's console/session so Ctrl+C only
+            # reaches the orchestrator, which then terminates children.
+            if sys.platform == "win32":
+                self.process = subprocess.Popen(
+                    self.args,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=self.cwd,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                )
+            else:
+                self.process = subprocess.Popen(
+                    self.args,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=self.cwd,
+                    start_new_session=True,
+                )
 
             threading.Thread(
                 target=pipe_with_prefix,
@@ -99,15 +108,23 @@ class ManagedProcess:
         self.start()
 
 
-def write_pid_file() -> None:
-    """Write the current process PID to the PID file."""
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PID_FILE.write_text(str(os.getpid()))
+def create_control_handler(
+    restart_event: threading.Event, shutdown_event: threading.Event
+) -> Callable[[Request, object], Response]:
+    """Create the handler for the dev control server."""
 
+    def handler(req: Request, _: object) -> Response:
+        if req.method == "POST" and req.path == "/restart":
+            restart_event.set()
+            return Response.text("Restart signal sent.")
+        if req.method == "POST" and req.path == "/stop":
+            shutdown_event.set()
+            return Response.text("Stop signal sent.")
+        if req.method == "GET" and req.path == "/status":
+            return Response.text("running")
+        return Response.text("Not Found", status_code=404)
 
-def remove_pid_file() -> None:
-    """Remove the PID file if it exists."""
-    PID_FILE.unlink(missing_ok=True)
+    return handler
 
 
 def run_dev() -> None:
@@ -115,7 +132,7 @@ def run_dev() -> None:
 
     Both servers run as subprocesses so that restart reloads all code
     from disk.  Use ``uv run da restart`` from another terminal to
-    trigger a restart via SIGHUP.
+    trigger a restart.
     """
     ensure_auth_binary()
 
@@ -132,13 +149,9 @@ def run_dev() -> None:
     shutdown_event = threading.Event()
     restart_event = threading.Event()
 
-    def handle_sighup(signum: int, frame: object) -> None:
-        restart_event.set()
-
     def handle_shutdown(signum: int, frame: object) -> None:
         shutdown_event.set()
 
-    signal.signal(signal.SIGHUP, handle_sighup)
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
 
@@ -162,7 +175,15 @@ def run_dev() -> None:
         write_fn=write_fn,
     )
 
-    write_pid_file()
+    # Start control server for CLI commands (restart/stop/status)
+    control_config = TcpServerConfig(host=PRIVATE_HOST, port=DEFAULT_DEV_CONTROL_PORT)
+    control_handler = create_control_handler(restart_event, shutdown_event)
+    threading.Thread(
+        target=start_server,
+        args=(control_config, control_handler),
+        daemon=True,
+    ).start()
+
     auth.start()
     backend.start()
 
@@ -179,6 +200,5 @@ def run_dev() -> None:
                 backend.start()
                 print("Restart complete.")
     finally:
-        remove_pid_file()
         backend.stop()
         auth.stop()

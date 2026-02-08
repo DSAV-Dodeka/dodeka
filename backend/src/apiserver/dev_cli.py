@@ -7,57 +7,39 @@ Run 'uv run dev-actions --help' for a list of available commands.
 """
 
 import argparse
-import os
-import signal
-from pathlib import Path
 
-PID_FILE = Path("envs/test/dev.pid")
+import requests
 
+from apiserver.settings import DEFAULT_DEV_CONTROL_PORT, PRIVATE_HOST
 
-def read_dev_pid() -> int | None:
-    """Read the dev process PID from the PID file.
-
-    Returns None if the file doesn't exist, is invalid, or the process
-    is no longer running.
-    """
-    if not PID_FILE.exists():
-        return None
-    try:
-        pid = int(PID_FILE.read_text().strip())
-        # Verify the process exists
-        os.kill(pid, 0)
-        return pid
-    except (ValueError, ProcessLookupError, PermissionError):
-        return None
+DEV_CONTROL_URL = f"http://{PRIVATE_HOST}:{DEFAULT_DEV_CONTROL_PORT}"
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
-    """Send SIGHUP to the dev process to trigger a restart."""
-    pid = read_dev_pid()
-    if pid is None:
-        print(f"Dev process not running (no valid PID in {PID_FILE}).")
-        return
-    os.kill(pid, signal.SIGHUP)
-    print(f"Restart signal sent to dev process (PID {pid}).")
+    """Send a restart command to the dev process."""
+    try:
+        response = requests.post(f"{DEV_CONTROL_URL}/restart", timeout=5)
+        print(response.text)
+    except requests.exceptions.ConnectionError:
+        print("Dev process not running (could not connect).")
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
-    """Send SIGTERM to the dev process for graceful shutdown."""
-    pid = read_dev_pid()
-    if pid is None:
-        print(f"Dev process not running (no valid PID in {PID_FILE}).")
-        return
-    os.kill(pid, signal.SIGTERM)
-    print(f"Stop signal sent to dev process (PID {pid}).")
+    """Send a stop command to the dev process."""
+    try:
+        response = requests.post(f"{DEV_CONTROL_URL}/stop", timeout=5)
+        print(response.text)
+    except requests.exceptions.ConnectionError:
+        print("Dev process not running (could not connect).")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
     """Check if the dev process is running."""
-    pid = read_dev_pid()
-    if pid is None:
+    try:
+        requests.get(f"{DEV_CONTROL_URL}/status", timeout=5)
+        print("Dev process is running.")
+    except requests.exceptions.ConnectionError:
         print("Dev process is not running.")
-    else:
-        print(f"Dev process is running (PID {pid}).")
 
 
 def create_dev_parser() -> argparse.ArgumentParser:

@@ -1,3 +1,15 @@
+"""
+This file implements the Faroe user server interface, which means implementing the
+SyncServer (since we use synchronous code) from the tiauth_faroe Python package.
+Be careful modifying it!
+
+What makes our approach different from the simplest possible implementation is the
+newusers table, since we need to synchronize with Volta and ensure the user is really
+a member. Creating a user then requires that a user actually exists in this table.
+If the board has already accepted them (maybe because they were added to newusers
+through sync and hence already accepted), we immediately add their member permissions.
+"""
+
 import json
 import logging
 import time

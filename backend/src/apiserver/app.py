@@ -1,7 +1,7 @@
 import enum
 import json
 import logging
-import secrets
+import logging.handlers
 import threading
 import time
 from dataclasses import dataclass, field
@@ -9,7 +9,6 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Callable, Literal
 from urllib.parse import parse_qs, urlparse
-
 
 from freetser import (
     Request,
@@ -23,8 +22,6 @@ from freetser import (
 from freetser.server import StorageQueue
 from tiauth_faroe.client import ActionErrorResult
 
-from apiserver.actions import AdminUserCreationError, create_admin_user
-from apiserver.data.admin import store_admin_credentials
 from apiserver.data.client import AuthClient
 from apiserver.data.newuser import (
     EmailExistsInNewUserTable,
@@ -39,10 +36,12 @@ from apiserver.data.permissions import (
     UserNotFoundError,
     add_permission,
     allowed_permission,
+    get_all_permissions,
     read_permissions,
     remove_permission,
 )
 from apiserver.data.registration_state import (
+    RegistrationStateNotFound,
     create_registration_state,
     get_email_send_count_by_email,
     get_registration_state,
@@ -55,31 +54,30 @@ from apiserver.data.user import (
     CachedSessionData,
     InvalidSession,
     SessionInfo,
-    get_all_permissions,
     get_cached_session,
     get_user_info,
     list_all_users,
     update_session_cache,
 )
+from apiserver.email import EmailData, sendemail
+from apiserver.data import DB_TABLES
 from apiserver.private import (
+    bootstrap_admin_on_startup,
     create_private_handler,
     do_accept_new_with_email,
     start_private_server,
 )
+from apiserver.settings import Settings, SmtpConfig, load_settings_from_env, parse_args
 from apiserver.sync import (
-    add_system_user,
     compute_groups,
     import_sync,
     list_system_users,
     parse_csv,
     remove_departed,
-    remove_system_user,
     serialize_groups,
     update_existing,
 )
-from apiserver.email import EmailData, sendemail
-from apiserver.settings import Settings, SmtpConfig, load_settings_from_env, parse_args
-from apiserver.tokens import TOKENS_TABLE, TokenWaiter, get_token
+from apiserver.tokens import TokenWaiter, get_token
 
 logger = logging.getLogger("apiserver.app")
 
@@ -165,25 +163,86 @@ class RouteData:
     path: str
 
 
-def parse_headers(req_headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
+@dataclass
+class InvalidHeaders:
+    pass
+
+
+@dataclass(frozen=True)
+class CsrfRejected:
+    """Cross-origin request rejected by CSRF protection."""
+
+    reason: str
+
+
+def check_csrf(
+    method: str,
+    headers: dict[str, str],
+    trusted_origins: list[str],
+) -> CsrfRejected | None:
+    """Check cross-origin request forgery protection.
+
+    Implements Filippo Valsorda's algorithm ("Protecting against CSRF in 2025"):
+    1. Allow safe methods (GET, HEAD, OPTIONS).
+    2. If Origin matches trusted origins allow-list, allow.
+    3. If Sec-Fetch-Site is present: allow same-origin/none, reject otherwise.
+    4. If neither Sec-Fetch-Site nor Origin are present, allow (not a browser).
+    5. If Origin host:port matches Host header, allow; otherwise reject.
+
+    Returns None if allowed, CsrfRejected if blocked.
+    """
+    # 1. Safe methods never change state
+    if method in ("GET", "HEAD", "OPTIONS"):
+        return None
+
+    origin = headers.get("origin")
+    sec_fetch_site = headers.get("sec-fetch-site")
+
+    # 2. Origin in trusted allow-list (simple string equality)
+    if origin is not None and origin in trusted_origins:
+        return None
+
+    # 3. Sec-Fetch-Site present — browser-enforced, cannot be spoofed by JS
+    if sec_fetch_site is not None:
+        if sec_fetch_site in ("same-origin", "none"):
+            return None
+        return CsrfRejected(f"sec-fetch-site={sec_fetch_site}")
+
+    # Sec-Fetch-Site is absent from here on
+
+    # 4. Neither header present — not a (post-2020) browser request
+    if origin is None:
+        return None
+
+    # 5. Origin present but not in allow-list, no Sec-Fetch-Site
+    # (old browser or HTTP origin) — fall back to host comparison
+    host = headers.get("host")
+    if host is not None:
+        parsed = urlparse(origin)
+        origin_host = parsed.hostname or ""
+        origin_port = parsed.port
+        origin_host_port = (
+            f"{origin_host}:{origin_port}" if origin_port else origin_host
+        )
+        if origin_host_port == host:
+            return None
+
+    return CsrfRejected(f"origin={origin}, host={host}")
+
+
+def parse_headers(
+    req_headers: list[tuple[bytes, bytes]],
+) -> dict[str, str] | InvalidHeaders:
     """Parse request headers into a dict. If header keys occur multiple times, we
-    use only the last one."""
+    use only the last one. Returns InvalidHeaders if headers contain non-UTF-8 bytes."""
     headers: dict[str, str] = {}
     try:
         for header_name, header_value in req_headers:
             headers[header_name.lower().decode("utf-8")] = header_value.decode("utf-8")
     except ValueError:
-        # In case there is non-utf-8
         logger.debug("Received request with non-utf-8 headers.")
+        return InvalidHeaders()
     return headers
-
-
-def add_cookie_to_header(existing_cookie: str | None, name: str, value: str) -> str:
-    cookie = SimpleCookie()
-    if existing_cookie:
-        cookie.load(existing_cookie)
-    cookie[name] = value
-    return "; ".join(f"{k}={morsel.value}" for k, morsel in cookie.items())
 
 
 def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
@@ -364,15 +423,17 @@ def handler_with_client(
 
     # Parse headers once for reuse in handlers
     headers = parse_headers(req.headers)
+    if isinstance(headers, InvalidHeaders):
+        return Response.text("Invalid headers", status_code=400)
 
     def h_request_registration():
         return request_registration(auth_client, req, store_queue)
 
     def h_set_sess():
-        return set_session(auth_client, req, headers, store_queue, frontend_origin)
+        return set_session(auth_client, req, headers, store_queue)
 
     def h_clear_sess():
-        return clear_session(req, headers, frontend_origin)
+        return clear_session(req, headers)
 
     def h_sess_info():
         return session_info(auth_client, req, headers, store_queue)
@@ -436,12 +497,6 @@ def handler_with_client(
     def h_list_system_users():
         return list_system_users_handler(store_queue)
 
-    def h_mark_system_user():
-        return mark_system_user_handler(req, store_queue)
-
-    def h_unmark_system_user():
-        return unmark_system_user_handler(req, store_queue)
-
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
         # Dodeka-specific actions related to auth
@@ -504,12 +559,6 @@ def handler_with_client(
         "/admin/list_system_users/": {
             "GET": RouteEntry(h_list_system_users, PermissionConfig.require("admin"))
         },
-        "/admin/mark_system_user/": {
-            "POST": RouteEntry(h_mark_system_user, PermissionConfig.require("admin"))
-        },
-        "/admin/unmark_system_user/": {
-            "POST": RouteEntry(h_unmark_system_user, PermissionConfig.require("admin"))
-        },
         "/auth/session_info/": {
             "GET": RouteEntry(
                 h_sess_info, PermissionConfig.public(), requires_credentials=True
@@ -569,6 +618,12 @@ def handler_with_client(
     if method == "OPTIONS":
         return handle_options_request(route, route_entry, frontend_origin)
 
+    # CSRF protection (Filippo Valsorda's algorithm)
+    csrf = check_csrf(method, headers, [frontend_origin])
+    if csrf is not None:
+        logger.warning(f"CSRF rejected: {method} {path} ({csrf.reason})")
+        return add_cors(Response.text("Cross-origin request blocked", status_code=403))
+
     # Check access (permissions, etc.)
     if error := check_access(
         RouteData(entry=route_entry, method=method, path=path),
@@ -578,6 +633,7 @@ def handler_with_client(
     ):
         return add_cors(error, credentials)
 
+    # It's only here the actual handler is called
     response = route_entry.handler()
     return add_cors(response, credentials)
 
@@ -653,9 +709,12 @@ def request_registration(
     signup_token = signup_result.signup_token
 
     # Store signup_token in registration_state (without changing accepted)
-    store_queue.execute(
+    # Registration state was just created above, so this should always succeed
+    token_result = store_queue.execute(
         lambda store: update_registration_state_signup_token(store, email, signup_token)
     )
+    if isinstance(token_result, RegistrationStateNotFound):
+        logger.error(f"request_registration: Registration state missing for {email}")
 
     logger.info(
         f"request_registration: Registered {email} with token {registration_token}"
@@ -824,7 +883,10 @@ def accept_user_handler(
         if isinstance(flag_result, EmailNotFoundInNewUserTable):
             return {"error": f"Email {email} not found in newuser table"}
 
-        mark_registration_state_accepted(store, email)
+        reg_result = mark_registration_state_accepted(store, email)
+        if isinstance(reg_result, RegistrationStateNotFound):
+            return {"error": f"No registration state found for {email}"}
+
         reg_token = get_registration_token_by_email(store, email)
 
         # Get display name from newuser
@@ -937,9 +999,11 @@ def resend_signup_email_handler(
 
     # Store the new token so the next resend can try the fast path
     new_token = signup_result.signup_token
-    store_queue.execute(
+    token_result = store_queue.execute(
         lambda store: update_registration_state_signup_token(store, email, new_token)
     )
+    if isinstance(token_result, RegistrationStateNotFound):
+        logger.error(f"resend_signup_email: Registration state missing for {email}")
 
     logger.info(f"resend_signup_email: New signup created, email sent to {email}")
     return Response.json({"success": True, "message": f"Signup email sent to {email}"})
@@ -985,9 +1049,11 @@ def renew_signup_handler(
         )
 
     new_token = signup_result.signup_token
-    store_queue.execute(
+    token_result = store_queue.execute(
         lambda store: update_registration_state_signup_token(store, email, new_token)
     )
+    if isinstance(token_result, RegistrationStateNotFound):
+        logger.error(f"renew_signup: Registration state missing for {email}")
 
     logger.info(f"renew_signup: New signup created for {email}")
     return Response.json({"success": True, "signup_token": new_token, "email": email})
@@ -1044,7 +1110,6 @@ def set_session(
     req: Request,
     headers: dict[str, str],
     store_queue: StorageQueue,
-    frontend_origin: str,
 ) -> Response:
     """Handle /auth/set_session/ - validates and sets session cookie.
 
@@ -1052,14 +1117,6 @@ def set_session(
         session_token: The session token to set
         secondary: Optional boolean, if true sets the secondary session cookie
     """
-    # Get Origin header
-    # TODO: should we really perform this check or is it up to browser?
-    origin = headers.get("origin")
-
-    if origin != frontend_origin:
-        logger.warning(f"set_session: Invalid origin {origin}")
-        return Response.text("Invalid origin!", status_code=403)
-
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         session_token = body_data.get("session_token")
@@ -1100,28 +1157,19 @@ def set_session(
     )
 
 
-def clear_session(
-    req: Request, headers: dict[str, str], frontend_origin: str
-) -> Response:
+def clear_session(req: Request, headers: dict[str, str]) -> Response:
     """Handle /auth/clear_session/ - clears session cookie.
 
     Request body (optional):
         secondary: Optional boolean, if true clears the secondary session cookie
     """
-    # Get Origin header
-    origin = headers.get("origin")
-
-    if origin != frontend_origin:
-        logger.warning(f"clear_session: Invalid origin {origin}")
-        return Response.text("Invalid origin!", status_code=403)
-
     # Parse optional body for secondary flag
     secondary = False
     if req.body:
         try:
             body_data = json.loads(req.body.decode("utf-8"))
             secondary = body_data.get("secondary", False)
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             pass  # Ignore invalid body, default to primary
 
     cookie_name = SESSION_COOKIE_SECONDARY if secondary else SESSION_COOKIE_PRIMARY
@@ -1391,9 +1439,6 @@ def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response
     return Response.json({"results": results})
 
 
-# --- Sync admin routes ---
-
-
 def import_sync_handler(req: Request, store_queue: StorageQueue) -> Response:
     """Handle /admin/import_sync/ - import CSV content into sync table."""
     try:
@@ -1435,7 +1480,7 @@ def accept_new_sync_handler(
         try:
             body_data = json.loads(req.body.decode("utf-8"))
             email = body_data.get("email")
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             pass
     result = do_accept_new_with_email(
         store_queue, frontend_origin, smtp_config, smtp_send, email
@@ -1450,7 +1495,7 @@ def remove_departed_handler(req: Request, store_queue: StorageQueue) -> Response
         try:
             body_data = json.loads(req.body.decode("utf-8"))
             email = body_data.get("email")
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             pass
     timestamp = int(time.time())
     result = store_queue.execute(lambda store: remove_departed(store, timestamp, email))
@@ -1465,7 +1510,7 @@ def update_existing_handler(req: Request, store_queue: StorageQueue) -> Response
         try:
             body_data = json.loads(req.body.decode("utf-8"))
             email = body_data.get("email")
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             pass
     result = store_queue.execute(lambda store: update_existing(store, email))
     logger.info(f"update_existing: {result}")
@@ -1474,70 +1519,8 @@ def update_existing_handler(req: Request, store_queue: StorageQueue) -> Response
 
 def list_system_users_handler(store_queue: StorageQueue) -> Response:
     """Handle /admin/list_system_users/ - list system users."""
-    users = store_queue.execute(lambda store: list_system_users(store))
+    users = store_queue.execute(list_system_users)
     return Response.json({"system_users": users})
-
-
-def mark_system_user_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/mark_system_user/ - mark email as system user."""
-    try:
-        body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
-        if not email:
-            return Response.text("Missing email", status_code=400)
-    except (json.JSONDecodeError, ValueError) as e:
-        return Response.text(f"Invalid request: {e}", status_code=400)
-    added = store_queue.execute(lambda store: add_system_user(store, email))
-    if added:
-        logger.info(f"mark_system_user: Marked {email}")
-        return Response.json({"marked": True})
-    return Response.json({"marked": False, "message": "Already a system user"})
-
-
-def unmark_system_user_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/unmark_system_user/ - unmark email as system user."""
-    try:
-        body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
-        if not email:
-            return Response.text("Missing email", status_code=400)
-    except (json.JSONDecodeError, ValueError) as e:
-        return Response.text(f"Invalid request: {e}", status_code=400)
-    removed = store_queue.execute(lambda store: remove_system_user(store, email))
-    if removed:
-        logger.info(f"unmark_system_user: Unmarked {email}")
-        return Response.json({"unmarked": True})
-    return Response.json({"unmarked": False, "message": "Not a system user"})
-
-
-def bootstrap_admin(
-    token_waiter: TokenWaiter,
-    auth_client: AuthClient,
-    store_queue: StorageQueue,
-) -> tuple[str, str]:
-    """Bootstrap the root admin user."""
-    root_email = "root_admin@localhost"
-    root_password = secrets.token_urlsafe(32)
-
-    user_id, session_token = create_admin_user(
-        store_queue,
-        auth_client,
-        root_email,
-        root_password,
-        token_waiter,
-        ["Root", "Admin"],
-    )
-
-    # Store credentials and mark as system user (excluded from sync)
-    def save_credentials(store: Storage) -> None:
-        store_admin_credentials(store, root_email, root_password)
-        add_system_user(store, root_email)
-
-    store_queue.execute(save_credentials)
-
-    logger.info(f"Root admin bootstrapped: {root_email} (user_id={user_id})")
-    logger.info(f"Root admin credentials: email={root_email}, password={root_password}")
-    return user_id, session_token
 
 
 def get_session_token_handler(headers: dict[str, str]) -> Response:
@@ -1565,15 +1548,15 @@ class PrefixFormatter(logging.Formatter):
         return f"{self.prefix} {msg}"
 
 
-def run_with_settings(settings: Settings, *, log_prefix: str = ""):
-    log_listener = setup_logging()
-    log_listener.start()
-
-    # Configure logging level based on debug_logs setting
-    log_level = logging.DEBUG if settings.debug_logs else logging.INFO
+def configure_logging(
+    log_listener: logging.handlers.QueueListener,
+    debug_logs: bool,
+    log_prefix: str,
+) -> None:
+    """Configure log level and optional prefix on the listener's handlers."""
+    log_level = logging.DEBUG if debug_logs else logging.INFO
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
-    # Also set handler levels (setup_logging may have set handlers with higher levels)
     for h in root_logger.handlers:
         h.setLevel(log_level)
 
@@ -1585,6 +1568,17 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
         for h in log_listener.handlers:
             h.setFormatter(PrefixFormatter(log_prefix, h.formatter))
 
+
+def run_with_settings(
+    settings: Settings,
+    *,
+    log_prefix: str = "",
+    ready_event: threading.Event | None = None,
+):
+    log_listener = setup_logging()
+    log_listener.start()
+    configure_logging(log_listener, settings.debug_logs, log_prefix)
+
     logger.info(
         f"Running with settings:\n\t- frontend_origin={settings.frontend_origin}"
         f"\n\t- debug_logs={settings.debug_logs}"
@@ -1594,46 +1588,12 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
 
     auth_client = AuthClient(settings.auth_server_url)
 
-    db_tables = [
-        "users",
-        "users_by_email",
-        "newusers",
-        "registration_state",
-        "metadata",
-        "session_cache",
-        "userdata",
-        "sync",
-        "system_users",
-        TOKENS_TABLE,
-    ]
-
-    # Start storage thread
     store_queue = start_storage_thread(
         db_file=str(settings.db_file),
-        db_tables=db_tables,
+        db_tables=DB_TABLES,
     )
 
-    # Create token waiter for test notifications
     token_waiter = TokenWaiter(store_queue)
-
-    # Helper to bootstrap admin (used on startup and reset)
-    def do_bootstrap_admin() -> str:
-        try:
-            bootstrap_admin(token_waiter, auth_client, store_queue)
-            return "Admin re-bootstrapped"
-        except AdminUserCreationError as e:
-            logger.error(f"Failed to bootstrap root admin: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error bootstrapping root admin: {e}")
-            raise
-
-    # Command handlers that need app.py dependencies (auth_client, token_waiter).
-    # Other commands (prepare_user, get_admin_credentials) only need database
-    # access and are handled directly in private.py.
-    command_handlers = {
-        "reset": do_bootstrap_admin,  # Called after tables are cleared
-    }
 
     # Start private TCP server on 127.0.0.2 (Go and CLI connect to this)
     private_handler = create_private_handler(
@@ -1642,63 +1602,29 @@ def run_with_settings(settings: Settings, *, log_prefix: str = ""):
         settings.frontend_origin,
         settings.smtp,
         settings.smtp_send,
-        command_handlers,
         auth_client,
     )
     start_private_server(settings.private_port, private_handler, store_queue)
 
-    # freetser doesn't know about the client, so we create a handler that captures it
-    frontend_origin = settings.frontend_origin
-    smtp_config = settings.smtp
-    smtp_send = settings.smtp_send
-
     def handler(req: Request, store_queue: StorageQueue | None) -> Response:
         return handler_with_client(
-            auth_client, req, store_queue, frontend_origin, smtp_config, smtp_send
+            auth_client,
+            req,
+            store_queue,
+            settings.frontend_origin,
+            settings.smtp,
+            settings.smtp_send,
         )
 
-    # Create ready event for server startup
-    ready_event = threading.Event()
+    if ready_event is None:
+        ready_event = threading.Event()
 
-    # Run startup actions after server is ready
-    def run_startup_actions():
-        """Execute startup actions after server is ready."""
-        ready_event.wait()
-        logger.info("Server ready, running startup actions...")
+    threading.Thread(
+        target=bootstrap_admin_on_startup,
+        args=(ready_event, token_waiter, settings.auth_server_url, store_queue),
+        daemon=True,
+    ).start()
 
-        # The auth server (Go binary) is started as a subprocess alongside the
-        # Python backend in dev mode. It can sometimes be slow to start up and
-        # begin accepting connections, causing bootstrap_admin to fail with a
-        # ConnectionError. Retry a few times with backoff to give it time.
-        max_attempts = 8
-        for attempt in range(1, max_attempts + 1):
-            try:
-                do_bootstrap_admin()
-                break
-            except AdminUserCreationError:
-                break  # Auth server responded but returned an error, no point retrying
-            except Exception:
-                if attempt == max_attempts:
-                    logger.error(
-                        "Failed to bootstrap admin after %d attempts, "
-                        "auth server may not be running",
-                        max_attempts,
-                    )
-                    break
-                # Auth server probably hasn't started accepting connections yet,
-                # wait before retrying with linear backoff
-                wait = 0.5 * attempt
-                logger.info(
-                    "Auth server not ready (attempt %d/%d), retrying in %.1fs...",
-                    attempt,
-                    max_attempts,
-                    wait,
-                )
-                time.sleep(wait)
-
-    threading.Thread(target=run_startup_actions, daemon=True).start()
-
-    # Create TCP server config
     config = TcpServerConfig(port=settings.port)
 
     try:

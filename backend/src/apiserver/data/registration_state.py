@@ -15,11 +15,11 @@ class RegistrationState:
 
 
 @dataclass
-class RegistrationStateNotFoundForEmail:
+class RegistrationStateNotFound:
     email: str
 
 
-def _serialize_registration_state(
+def serialize_registration_state(
     email: str,
     accepted: bool,
     signup_token: str | None,
@@ -35,7 +35,7 @@ def _serialize_registration_state(
     return json.dumps(data).encode("utf-8")
 
 
-def _deserialize_registration_state(data: bytes) -> dict:
+def deserialize_registration_state(data: bytes) -> dict:
     """Deserialize registration state data from bytes."""
     return json.loads(data.decode("utf-8"))
 
@@ -53,7 +53,7 @@ def create_registration_state(store: Storage, email: str) -> str:
     registration_token = generate_registration_token()
 
     # Create registration state entry
-    data = _serialize_registration_state(email, accepted=False, signup_token=None)
+    data = serialize_registration_state(email, accepted=False, signup_token=None)
     # expires_at = 0 means no expiration
     store.add("registration_state", registration_token, data, expires_at=0)
 
@@ -69,7 +69,7 @@ def get_registration_state(
         return None
 
     data_bytes, _ = result
-    state_data = _deserialize_registration_state(data_bytes)
+    state_data = deserialize_registration_state(data_bytes)
 
     return RegistrationState(
         registration_token=registration_token,
@@ -82,7 +82,7 @@ def get_registration_state(
 
 def mark_registration_state_accepted(
     store: Storage, email: str
-) -> None | RegistrationStateNotFoundForEmail:
+) -> None | RegistrationStateNotFound:
     """Set registration state accepted=True without changing signup_token."""
     keys = store.list_keys("registration_state")
 
@@ -90,7 +90,7 @@ def mark_registration_state_accepted(
         result = store.get("registration_state", key)
         if result is not None:
             data_bytes, counter = result
-            state_data = _deserialize_registration_state(data_bytes)
+            state_data = deserialize_registration_state(data_bytes)
 
             if state_data["email"] == email:
                 state_data["accepted"] = True
@@ -105,12 +105,12 @@ def mark_registration_state_accepted(
                 )
                 return None
 
-    return RegistrationStateNotFoundForEmail(email=email)
+    return RegistrationStateNotFound(email=email)
 
 
 def update_registration_state_accepted(
     store: Storage, email: str, signup_token: str
-) -> None | RegistrationStateNotFoundForEmail:
+) -> None | RegistrationStateNotFound:
     """
     Update registration state to accepted with signup token.
     Finds the registration state by email.
@@ -122,7 +122,7 @@ def update_registration_state_accepted(
         result = store.get("registration_state", key)
         if result is not None:
             data_bytes, counter = result
-            state_data = _deserialize_registration_state(data_bytes)
+            state_data = deserialize_registration_state(data_bytes)
 
             if state_data["email"] == email:
                 # Update this entry
@@ -139,12 +139,12 @@ def update_registration_state_accepted(
                 )
                 return None
 
-    return RegistrationStateNotFoundForEmail(email=email)
+    return RegistrationStateNotFound(email=email)
 
 
 def update_registration_state_signup_token(
     store: Storage, email: str, signup_token: str
-) -> None | RegistrationStateNotFoundForEmail:
+) -> None | RegistrationStateNotFound:
     """
     Update registration state with signup_token WITHOUT changing accepted.
     Used when signup is created at registration time (accepted is still False).
@@ -155,7 +155,7 @@ def update_registration_state_signup_token(
         result = store.get("registration_state", key)
         if result is not None:
             data_bytes, counter = result
-            state_data = _deserialize_registration_state(data_bytes)
+            state_data = deserialize_registration_state(data_bytes)
 
             if state_data["email"] == email:
                 state_data["signup_token"] = signup_token
@@ -170,7 +170,7 @@ def update_registration_state_signup_token(
                 )
                 return None
 
-    return RegistrationStateNotFoundForEmail(email=email)
+    return RegistrationStateNotFound(email=email)
 
 
 def get_signup_token_by_email(store: Storage, email: str) -> str | None:
@@ -181,7 +181,7 @@ def get_signup_token_by_email(store: Storage, email: str) -> str | None:
         result = store.get("registration_state", key)
         if result is not None:
             data_bytes, _ = result
-            state_data = _deserialize_registration_state(data_bytes)
+            state_data = deserialize_registration_state(data_bytes)
 
             if state_data["email"] == email:
                 return state_data.get("signup_token")
@@ -200,7 +200,7 @@ def get_registration_token_by_email(store: Storage, email: str) -> str | None:
         result = store.get("registration_state", key)
         if result is not None:
             data_bytes, _ = result
-            state_data = _deserialize_registration_state(data_bytes)
+            state_data = deserialize_registration_state(data_bytes)
 
             if state_data["email"] == email:
                 return key  # The key IS the registration_token
@@ -217,7 +217,7 @@ def increment_email_send_count(store: Storage, email: str) -> int | None:
         result = store.get("registration_state", key)
         if result is not None:
             data_bytes, counter = result
-            state_data = _deserialize_registration_state(data_bytes)
+            state_data = deserialize_registration_state(data_bytes)
             if state_data["email"] == email:
                 new_count = state_data.get("email_send_count", 0) + 1
                 state_data["email_send_count"] = new_count
@@ -239,7 +239,7 @@ def get_email_send_count_by_email(store: Storage, email: str) -> int:
         result = store.get("registration_state", key)
         if result is not None:
             data_bytes, _ = result
-            state_data = _deserialize_registration_state(data_bytes)
+            state_data = deserialize_registration_state(data_bytes)
             if state_data["email"] == email:
                 return state_data.get("email_send_count", 0)
     return 0

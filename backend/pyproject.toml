@@ -12,7 +12,7 @@ requires-python = ">=3.14"
 dependencies = [
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
-    "freetser==0.3.3",
+    "freetser==0.4.1",
     "requests==2.32.5",
     # pin to exact version since freetser doesn't pin
     "h11==0.16.0"
@@ -41,9 +41,9 @@ production = "apiserver.app:run_production"
 
 [dependency-groups]
 dev = [
-    "ty>=0.0.7",
+    "ty>=0.0.15",
     "pytest>=9.0.1",
-    "ruff>=0.14.6",
+    "ruff>=0.15.0",
 ]
 
 [build-system]

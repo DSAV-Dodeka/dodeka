@@ -1,7 +1,11 @@
 """Test fixtures for integration tests.
 
 Starts the auth server (Go binary) and Python backend on free ports,
-providing a command helper to send requests to the private server.
+providing a TestServers object with helper functions for sending commands,
+making HTTP requests, and calling the Faroe auth API directly.
+
+Each test module gets a clean database: a module-scoped autouse fixture
+resets both the backend and auth server before the first test in each file.
 """
 
 import json
@@ -9,13 +13,16 @@ import socket
 import subprocess
 import threading
 import time
-from typing import Any
+from collections.abc import Generator
+from dataclasses import dataclass
+from typing import Any, Callable
 
 import pytest
 import requests
 
 from apiserver.app import run_with_settings
 from apiserver.auth_binary import get_auth_binary_path
+from apiserver.data.client import AuthClient
 from apiserver.settings import PRIVATE_HOST, Settings
 
 
@@ -38,12 +45,45 @@ def waitfor(url: str, timeout: float = 15) -> bool:
     return False
 
 
-@pytest.fixture(scope="session")
-def command(tmp_path_factory: pytest.TempPathFactory):
-    """Start auth + backend servers and yield a command helper function.
+@dataclass
+class TestServers:
+    """Running test servers with helper functions."""
 
-    The helper sends commands to the backend's private server and returns
-    the parsed JSON response (or raw text if not JSON).
+    command: Callable[..., dict | str]
+    backend_url: str
+    auth_url: str
+    auth_client: AuthClient
+    auth_command_url: str
+
+    def reset_all(self) -> None:
+        """Reset both backend and auth server to a clean state.
+
+        Clears all tables in both servers and re-bootstraps the admin user.
+        """
+        # Reset auth server first (clears Faroe's user/session database)
+        requests.post(
+            f"{self.auth_command_url}/command",
+            json={"command": "reset"},
+            timeout=10,
+        )
+        # Reset backend (clears all tables, re-bootstraps admin)
+        self.command("reset")
+        # Wait for admin bootstrap to complete after reset
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            result = self.command("get_admin_credentials")
+            if isinstance(result, dict) and "email" in result:
+                return
+            time.sleep(0.5)
+        raise TimeoutError("Admin bootstrap did not complete after reset")
+
+
+@pytest.fixture(scope="session")
+def servers(tmp_path_factory: pytest.TempPathFactory) -> Generator[TestServers]:
+    """Start auth + backend servers and yield a TestServers object.
+
+    Provides command helper, backend URL, auth URL, and an AuthClient
+    for direct Faroe API calls.
 
     Skips all tests if the auth binary is not present.
     """
@@ -52,15 +92,18 @@ def command(tmp_path_factory: pytest.TempPathFactory):
         pytest.skip(f"Auth binary not found at {auth_path}")
 
     auth_port = freeport()
+    auth_command_port = freeport(PRIVATE_HOST)
     backend_port = freeport()
     private_port = freeport(PRIVATE_HOST)
 
     tmppath = tmp_path_factory.mktemp("dodeka_test")
 
-    # Write auth env file
+    # Write auth env file — all ports must be dynamic to avoid collisions
+    # with running dev servers or parallel test runs
     auth_env = tmppath / "auth.env"
     auth_env.write_text(
         f"FAROE_PORT={auth_port}\n"
+        f"FAROE_COMMAND_PORT={auth_command_port}\n"
         f"FAROE_USER_SERVER_PORT={private_port}\n"
         f"FAROE_DB_PATH={tmppath / 'auth_db.sqlite'}\n"
         f"FAROE_CORS_ALLOW_ORIGIN=http://localhost:3000\n"
@@ -76,35 +119,41 @@ def command(tmp_path_factory: pytest.TempPathFactory):
 
     try:
         # Wait for auth server to be ready
-        assert waitfor(f"http://localhost:{auth_port}"), (
-            f"Auth server failed to start on port {auth_port}"
-        )
+        auth_url = f"http://localhost:{auth_port}"
+        assert waitfor(auth_url), f"Auth server failed to start on port {auth_port}"
 
         # Create backend settings with free ports and temp database
         settings = Settings(
             db_file=tmppath / "backend_db.sqlite",
             environment="test",
-            auth_server_url=f"http://localhost:{auth_port}",
+            auth_server_url=auth_url,
             frontend_origin="http://localhost:3000",
             debug_logs=True,
             port=backend_port,
             private_port=private_port,
         )
 
+        # Use ready_event for backend readiness instead of HTTP polling
+        ready_event = threading.Event()
+
         # Start backend in daemon thread (run_with_settings blocks)
         threading.Thread(
             target=run_with_settings,
             args=(settings,),
+            kwargs={"ready_event": ready_event},
             daemon=True,
         ).start()
 
         # Wait for backend server to be ready
-        assert waitfor(f"http://localhost:{backend_port}"), (
+        ready_event.wait(timeout=15)
+        assert ready_event.is_set(), (
             f"Backend server failed to start on port {backend_port}"
         )
 
         # Build command helper
         command_url = f"http://{PRIVATE_HOST}:{private_port}/command"
+        backend_url = f"http://localhost:{backend_port}"
+        auth_command_url = f"http://{PRIVATE_HOST}:{auth_command_port}"
 
         def send(name: str, **kwargs: Any) -> dict | str:
             payload = {"command": name, **kwargs}
@@ -124,8 +173,40 @@ def command(tmp_path_factory: pytest.TempPathFactory):
         else:
             pytest.fail("Admin bootstrap did not complete within 20 seconds")
 
-        yield send
+        auth_client = AuthClient(auth_url, timeout=10)
+
+        yield TestServers(
+            command=send,
+            backend_url=backend_url,
+            auth_url=auth_url,
+            auth_client=auth_client,
+            auth_command_url=auth_command_url,
+        )
 
     finally:
         auth_process.terminate()
         auth_process.wait(timeout=5)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def clean_state(servers: TestServers) -> None:
+    """Reset both servers before each test module for isolation."""
+    servers.reset_all()
+
+
+@pytest.fixture(scope="session")
+def command(servers: TestServers) -> Callable[..., dict | str]:
+    """Backward-compatible fixture: send commands to the private server."""
+    return servers.command
+
+
+@pytest.fixture(scope="session")
+def backend_url(servers: TestServers) -> str:
+    """Public backend API URL."""
+    return servers.backend_url
+
+
+@pytest.fixture(scope="session")
+def auth_client(servers: TestServers) -> AuthClient:
+    """AuthClient for direct Faroe API calls."""
+    return servers.auth_client
