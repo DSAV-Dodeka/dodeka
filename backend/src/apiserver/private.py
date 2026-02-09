@@ -54,6 +54,7 @@ from apiserver.data.registration_state import (
     mark_registration_state_accepted,
     update_registration_state_accepted,
 )
+from apiserver.data.userdata import list_birthdays
 from apiserver.email import TOKEN_EMAIL_TYPES, EmailData, EmailType, sendemail
 from apiserver.settings import PRIVATE_HOST, SmtpConfig
 from apiserver.sync import (
@@ -402,7 +403,8 @@ def cmdhandler_compute_groups(store_queue: StorageQueue) -> Response:
     groups = store_queue.execute(compute_groups)
     logger.info(
         f"compute_groups: {len(groups.departed)} departed, "
-        f"{len(groups.new)} new, {len(groups.pending)} pending, "
+        f"{len(groups.to_accept)} to_accept, "
+        f"{len(groups.pending_signup)} pending_signup, "
         f"{len(groups.existing)} existing"
     )
     return Response.json(serialize_groups(groups))
@@ -432,9 +434,8 @@ def do_accept_new_with_email(
 ) -> dict:
     """Accept new users and send acceptance notification emails.
 
-    No Faroe signup creation. Accepts users in newusers table, then sends
-    acceptance emails to those not yet notified (registration_state.accepted
-    still False). Users get a link to create their account.
+    Sends sync_please_register to users who still need to create an account,
+    and account_accepted_self to users who already have one.
 
     Returns result dict with added, skipped, emails_sent, emails_failed.
     """
@@ -442,14 +443,27 @@ def do_accept_new_with_email(
     # Single DB call: accept new users + find who needs notification
     def accept_and_prepare(
         store: Storage,
-    ) -> tuple[dict, list[tuple[str, str, str | None]]]:
+    ) -> tuple[
+        dict,
+        list[tuple[str, str, str | None]],
+        list[tuple[str, str]],
+    ]:
+        registered = set(store.list_keys("users_by_email"))
+
+        # accept_new deletes the newusers entry for users who already have
+        # an account, so we won't be able to see them afterwards. Snapshot
+        # them now so we can send acceptance emails after.
+        pending_with_account: dict[str, str] = {}
+        for u in list_new_users(store):
+            if not u.accepted and u.email in registered:
+                pending_with_account[u.email] = u.firstname
+
         result = accept_new(store, email)
 
         # Find accepted users without accounts who haven't been notified yet
-        registered = set(store.list_keys("users_by_email"))
         users = list_new_users(store)
 
-        targets: list[tuple[str, str, str | None]] = []
+        signup_targets: list[tuple[str, str, str | None]] = []
         for u in users:
             if not u.accepted or u.email in registered:
                 continue
@@ -468,27 +482,48 @@ def do_accept_new_with_email(
             if isinstance(mark_result, RegistrationStateNotFound):
                 logger.error(f"Registration state missing for {u.email}")
                 continue
-            targets.append((u.email, u.firstname, reg_token))
+            signup_targets.append((u.email, u.firstname, reg_token))
 
-        return result, targets
+        # Users who already had an account and were just accepted
+        # (newusers entry removed by accept_new).
+        accepted_targets: list[tuple[str, str]] = []
+        for acc_email, firstname in pending_with_account.items():
+            if store.get("newusers", acc_email) is None:
+                accepted_targets.append((acc_email, firstname))
 
-    accept_result, targets = store_queue.execute(accept_and_prepare)
+        return result, signup_targets, accepted_targets
 
-    if not targets:
-        return {**accept_result, "emails_sent": 0, "emails_failed": 0}
+    accept_result, signup_targets, accepted_targets = store_queue.execute(
+        accept_and_prepare
+    )
 
-    # Send acceptance emails (outside store_queue to avoid deadlock)
     emails_sent = 0
     emails_failed = 0
 
-    for user_email, display_name, reg_token in targets:
+    for user_email, display_name, reg_token in signup_targets:
         try:
             link = f"{frontend_origin}/account/signup?token={reg_token}"
             data = EmailData(
-                email_type="account_accepted",
+                email_type="sync_please_register",
                 to_email=user_email,
                 display_name=display_name,
                 link=link,
+            )
+            sendemail(smtp_config, data, smtp_send)
+            emails_sent += 1
+        except Exception as exc:
+            logger.error(
+                f"accept_new_with_email: Failed to send to {user_email}: {exc}"
+            )
+            emails_failed += 1
+
+    for user_email, display_name in accepted_targets:
+        try:
+            data = EmailData(
+                email_type="account_accepted_self",
+                to_email=user_email,
+                display_name=display_name,
+                link=frontend_origin,
             )
             sendemail(smtp_config, data, smtp_send)
             emails_sent += 1
@@ -820,7 +855,9 @@ def cmdhandler_accept_user(store_queue: StorageQueue, email: str | None) -> Resp
         if isinstance(flag_result, EmailNotFoundInNewUserTable):
             return {"error": f"Email {email} not found in newuser table"}
 
-        mark_result = mark_registration_state_accepted(store, email)
+        mark_result = mark_registration_state_accepted(
+            store, email, notify_on_completion=True
+        )
         if isinstance(mark_result, RegistrationStateNotFound):
             return {"error": f"No registration state found for {email}"}
 
@@ -836,6 +873,12 @@ def cmdhandler_accept_user(store_queue: StorageQueue, email: str | None) -> Resp
         return Response.json(result, status_code=400)
 
     logger.info(f"accept_user: {result['message']}")
+    return Response.json(result)
+
+
+def cmdhandler_list_birthdays(store_queue: StorageQueue) -> Response:
+    """Return all birthday entries."""
+    result = store_queue.execute(list_birthdays)
     return Response.json(result)
 
 
@@ -894,6 +937,7 @@ def handle_command(
         "create_accounts": lambda: cmdhandler_create_accounts(
             store_queue, auth_client, token_waiter, body.get("password")
         ),
+        "list_birthdays": lambda: cmdhandler_list_birthdays(store_queue),
     }
 
     if command in dispatch:

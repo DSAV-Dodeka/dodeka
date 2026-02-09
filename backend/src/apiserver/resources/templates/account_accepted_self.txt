@@ -1,6 +1,6 @@
 {greeting}
 
-Je aanmelding bij D.S.A.V. Dodeka is goedgekeurd!
+Je lidmaatschap bij D.S.A.V. Dodeka is goedgekeurd!
 
 Klik op onderstaande link om verder te gaan:
 {link}

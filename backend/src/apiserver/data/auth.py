@@ -32,6 +32,7 @@ from tiauth_faroe.user_server import (
 )
 
 from apiserver.data.permissions import Permissions, add_permission
+from apiserver.data.registration_state import delete_registration_state
 
 logger = logging.getLogger("apiserver.auth")
 
@@ -110,6 +111,9 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
         store.delete("newusers", email)
     else:
         logger.info(f"User {user_id} created but not yet accepted, staying in newusers")
+
+    # Registration state is no longer needed once the account exists
+    delete_registration_state(store, email)
 
     logger.info(f"Created user {user_id} with email {email}")
     return User(

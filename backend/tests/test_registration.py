@@ -258,7 +258,7 @@ def test_sync_imported_flow(command, auth_client):
 
     # Step 2: Compute groups — should show 1 new user
     groups = command("compute_groups")
-    new_emails = [u["email"] for u in groups["new"]]
+    new_emails = [u["email"] for u in groups["to_accept"]]
     assert email in new_emails
 
     # Step 3: Accept new users — creates newuser(accepted=True) + registration_state
@@ -269,8 +269,8 @@ def test_sync_imported_flow(command, auth_client):
     # Step 4: Compute groups — user moves from "new" to "pending"
     # "new" is list[dict] with "email" key, "pending" is list[str]
     groups = command("compute_groups")
-    assert email not in [u["email"] for u in groups["new"]]
-    assert email in groups["pending"]
+    assert email not in [u["email"] for u in groups["to_accept"]]
+    assert email in groups["pending_signup"]
 
     # Step 5: Create Faroe signup for the user
     # In the real flow, accept_new_with_signup or resend_signup_email does this.
@@ -291,7 +291,7 @@ def test_sync_imported_flow(command, auth_client):
 
     # Step 9: Verify user removed from newusers (auth.py:103-104)
     groups = command("compute_groups")
-    assert email not in groups.get("pending", [])
+    assert email not in groups.get("pending_signup", [])
 
 
 # ── Edge case: Accept before signup completion ──────────────────────────
@@ -339,7 +339,7 @@ def test_accepted_before_signup_completion(command, backend_url, auth_client):
 
     # Step 5: Verify removed from newusers (accepted=True path in auth.py:103)
     groups = command("compute_groups")
-    assert email not in groups.get("pending", [])
+    assert email not in groups.get("pending_signup", [])
 
 
 # ── Registration status reflects acceptance ─────────────────────────────
@@ -424,3 +424,78 @@ def test_renew_expired_signup(command, backend_url, auth_client):
     command("accept_user", email=email)
     result = complete_signup_flow(command, auth_client, new_signup_token, email)
     assert result.session_token is not None
+
+
+# ── Scenario 4: Self-registered user also in sync CSV ────────────────────
+
+
+def test_scenario4_selfreg_then_sync_accept(command, backend_url, auth_client):
+    """Scenario 4: Self-registered user also appears in sync CSV.
+
+    The user registers on the website (accepted=False), then their email
+    also appears in a CSV import. When the admin calls accept_new for that
+    email, it detects the existing newusers entry and updates accepted to
+    True. When the user completes signup, create_user sees accepted=True
+    and grants member permission immediately.
+
+    References:
+        - add_accepted(): sync.py — checks newusers, updates accepted flag
+        - create_user(): data/auth.py — reads accepted from newusers
+    """
+    email = "scenario4@example.com"
+
+    # Step 1: User self-registers (accepted=False)
+    resp = requests.post(
+        f"{backend_url}/auth/request_registration",
+        json={"email": email, "firstname": "Scenario", "lastname": "Four"},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    reg_data = resp.json()
+    signup_token = reg_data["signup_token"]
+    registration_token = reg_data["registration_token"]
+
+    # Verify pending (accepted=False)
+    resp = requests.post(
+        f"{backend_url}/auth/registration_status",
+        json={"registration_token": registration_token},
+        timeout=10,
+    )
+    assert resp.json()["accepted"] is False
+
+    # Step 2: Same email appears in sync CSV
+    csv_content = make_au_csv(
+        [
+            {
+                "Bondsnummer": "5001",
+                "Voornaam": "Scenario",
+                "Achternaam": "Four",
+                "Geslacht": "V",
+                "Geboortedatum": "01/01/2000",
+                "Email": email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_content)
+
+    # User appears in to_accept group (unaccepted newuser in sync)
+    groups = command("compute_groups")
+    to_accept_emails = [e["email"] for e in groups["to_accept"]]
+    assert email in to_accept_emails
+
+    # Step 3: Admin runs accept_new for this specific email
+    # add_accepted detects email in newusers -> updates to accepted=True
+    result = command("accept_new", email=email)
+    assert result["added"] == 1
+
+    # Step 4: Complete signup with original signup_token
+    # create_user reads newuser.accepted=True -> grants member + removes newuser
+    result = complete_signup_flow(command, auth_client, signup_token, email)
+    assert result.session_token is not None
+
+    # Step 5: Verify member permission granted (user removed from newusers)
+    groups = command("compute_groups")
+    assert email not in groups.get("pending_signup", [])
+    # User now in existing (registered + in sync)
+    existing_emails = {e["sync"]["email"] for e in groups["existing"]}
+    assert email in existing_emails

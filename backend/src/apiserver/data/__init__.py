@@ -17,6 +17,8 @@ DB_TABLES = [
     "session_cache",
     "userdata",
     "sync",
+    "users_by_bondsnummer",
+    "birthdays",
     SYSTEM_USERS_TABLE,
     TOKENS_TABLE,
 ]

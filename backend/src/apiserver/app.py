@@ -42,8 +42,10 @@ from apiserver.data.permissions import (
 )
 from apiserver.data.registration_state import (
     RegistrationStateNotFound,
+    clear_notify_on_completion,
     create_registration_state,
     get_email_send_count_by_email,
+    get_notify_on_completion,
     get_registration_state,
     get_registration_token_by_email,
     get_signup_token_by_email,
@@ -61,6 +63,7 @@ from apiserver.data.user import (
 )
 from apiserver.email import EmailData, sendemail
 from apiserver.data import DB_TABLES
+from apiserver.data.userdata import list_birthdays
 from apiserver.private import (
     bootstrap_admin_on_startup,
     create_private_handler,
@@ -430,7 +433,15 @@ def handler_with_client(
         return request_registration(auth_client, req, store_queue)
 
     def h_set_sess():
-        return set_session(auth_client, req, headers, store_queue)
+        return set_session(
+            auth_client,
+            req,
+            headers,
+            store_queue,
+            smtp_config,
+            smtp_send,
+            frontend_origin,
+        )
 
     def h_clear_sess():
         return clear_session(req, headers)
@@ -497,6 +508,9 @@ def handler_with_client(
     def h_list_system_users():
         return list_system_users_handler(store_queue)
 
+    def h_birthdays():
+        return birthdays_handler(store_queue)
+
     # This table maps each route to a specific handler (the RouteEntry)
     route_table = {
         # Dodeka-specific actions related to auth
@@ -558,6 +572,10 @@ def handler_with_client(
         },
         "/admin/list_system_users/": {
             "GET": RouteEntry(h_list_system_users, PermissionConfig.require("admin"))
+        },
+        # Member routes
+        "/members/birthdays/": {
+            "GET": RouteEntry(h_birthdays, PermissionConfig.require("member"))
         },
         "/auth/session_info/": {
             "GET": RouteEntry(
@@ -756,6 +774,7 @@ def get_registration_status_handler(
             "email": state.email,
             "accepted": state.accepted,
             "signup_token": state.signup_token,
+            "notify_on_completion": state.notify_on_completion,
         }
 
     result = store_queue.execute(get_status)
@@ -878,12 +897,15 @@ def accept_user_handler(
             }
 
         # User hasn't completed signup yet — mark accepted in newusers and
-        # registration_state, get registration_token and display_name for email
+        # registration_state. Set notify_on_completion so set_session sends
+        # the deferred acceptance email after signup completes.
         flag_result = update_accepted_flag(store, email, True)
         if isinstance(flag_result, EmailNotFoundInNewUserTable):
             return {"error": f"Email {email} not found in newuser table"}
 
-        reg_result = mark_registration_state_accepted(store, email)
+        reg_result = mark_registration_state_accepted(
+            store, email, notify_on_completion=True
+        )
         if isinstance(reg_result, RegistrationStateNotFound):
             return {"error": f"No registration state found for {email}"}
 
@@ -909,27 +931,23 @@ def accept_user_handler(
         logger.warning(f"accept_user: {result['error']}")
         return Response.json(result, status_code=400)
 
-    # Send acceptance email (outside store_queue to avoid deadlock)
-    try:
-        if result.get("has_account"):
+    # Send acceptance email only if user already has an account.
+    # If they haven't completed signup yet, the email is deferred to
+    # set_session via the notify_on_completion flag (Scenario 1).
+    if result.get("has_account"):
+        try:
             link = frontend_origin
-        else:
-            reg_token = result.get("registration_token")
-            link = (
-                f"{frontend_origin}/account/signup?token={reg_token}"
-                if reg_token
-                else frontend_origin
+            email_data = EmailData(
+                email_type="account_accepted_self",
+                to_email=email,
+                display_name=result.get("display_name"),
+                link=link,
             )
-
-        email_data = EmailData(
-            email_type="account_accepted",
-            to_email=email,
-            display_name=result.get("display_name"),
-            link=link,
-        )
-        sendemail(smtp_config, email_data, smtp_send)
-    except Exception as exc:
-        logger.error(f"accept_user: Failed to send acceptance email to {email}: {exc}")
+            sendemail(smtp_config, email_data, smtp_send)
+        except Exception as exc:
+            logger.error(
+                f"accept_user: Failed to send acceptance email to {email}: {exc}"
+            )
 
     logger.info(f"accept_user: {result['message']}")
     return Response.json(result)
@@ -1110,8 +1128,17 @@ def set_session(
     req: Request,
     headers: dict[str, str],
     store_queue: StorageQueue,
+    smtp_config: SmtpConfig | None = None,
+    smtp_send: bool = False,
+    frontend_origin: str = "",
 ) -> Response:
     """Handle /auth/set_session/ - validates and sets session cookie.
+
+    Also handles deferred acceptance emails (Scenario 1): if the user was
+    accepted before completing signup, notify_on_completion is set in their
+    registration state. On the first set_session after signup completes,
+    this function detects the flag, sends the account_accepted_self email,
+    and clears it.
 
     Request body:
         session_token: The session token to set
@@ -1133,6 +1160,33 @@ def set_session(
     if isinstance(result, InvalidSessionToken):
         logger.info("set_session: Session validation failed")
         return Response.text("Invalid session_token", status_code=401)
+
+    # Check for deferred acceptance email (Scenario 1)
+    def check_and_clear_notify(store: Storage) -> tuple[bool, str | None]:
+        user_info = get_user_info(store, int(time.time()), result.user_id)
+        if user_info is None:
+            return False, None
+        email = user_info.email
+        if get_notify_on_completion(store, email):
+            clear_notify_on_completion(store, email)
+            return True, email
+        return False, None
+
+    should_notify, user_email = store_queue.execute(check_and_clear_notify)
+    if should_notify and user_email:
+        try:
+            link = frontend_origin
+            email_data = EmailData(
+                email_type="account_accepted_self",
+                to_email=user_email,
+                link=link,
+            )
+            sendemail(smtp_config, email_data, smtp_send)
+            logger.info(f"set_session: Sent deferred acceptance email to {user_email}")
+        except Exception as exc:
+            logger.error(
+                f"set_session: Failed to send deferred email to {user_email}: {exc}"
+            )
 
     cookie_name = SESSION_COOKIE_SECONDARY if secondary else SESSION_COOKIE_PRIMARY
     logger.info(f"set_session: Setting {cookie_name} cookie for user {result.user_id}")
@@ -1459,8 +1513,8 @@ def sync_status_handler(store_queue: StorageQueue) -> Response:
     """Handle /admin/sync_status/ - compute and return sync groups."""
     result = store_queue.execute(lambda store: serialize_groups(compute_groups(store)))
     logger.info(
-        f"sync_status: {len(result['new'])} new, "
-        f"{len(result['pending'])} pending, "
+        f"sync_status: {len(result['to_accept'])} to_accept, "
+        f"{len(result['pending_signup'])} pending_signup, "
         f"{len(result['existing'])} existing, "
         f"{len(result['departed'])} departed"
     )
@@ -1521,6 +1575,13 @@ def list_system_users_handler(store_queue: StorageQueue) -> Response:
     """Handle /admin/list_system_users/ - list system users."""
     users = store_queue.execute(list_system_users)
     return Response.json({"system_users": users})
+
+
+def birthdays_handler(store_queue: StorageQueue) -> Response:
+    """Handle /members/birthdays/ - list all member birthdays."""
+    result = store_queue.execute(list_birthdays)
+    logger.info(f"birthdays: Returning {len(result)} entries")
+    return Response.json(result)
 
 
 def get_session_token_handler(headers: dict[str, str]) -> Response:

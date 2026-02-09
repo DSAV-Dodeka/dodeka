@@ -37,7 +37,7 @@ def poll_for_token(command, action, email, timeout=10):
         result = command("get_token", action=action, email=email)
         if isinstance(result, dict) and result.get("found"):
             return result["code"]
-        time.sleep(0.2)
+        time.sleep(0.05)
     raise TimeoutError(f"Token {action} for {email} not found within {timeout}s")
 
 
