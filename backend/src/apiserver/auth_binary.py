@@ -1,4 +1,8 @@
-"""Download the auth binary from GitHub Actions artifacts using the gh CLI."""
+"""
+Download the auth binary from GitHub Actions artifacts using the gh CLI.
+Vibe code level: HIGH (don't try to modify this yourself, you can just observe the
+results)
+"""
 
 import hashlib
 import json

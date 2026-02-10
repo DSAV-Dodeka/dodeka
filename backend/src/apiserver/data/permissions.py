@@ -1,3 +1,22 @@
+"""User permissions stored in the "users" table.
+
+Storage schema:
+    Key:   "{user_id}:perm:{permission_name}"
+    Value: empty bytes (b"")
+    TTL:   1 year from grant (expires_at = timestamp + 365 days)
+
+Permissions expire automatically after 1 year. The sync cycle
+(update_existing) renews member permissions each import. Admin and role
+permissions are renewed manually or via board-renew.
+
+read_permissions passes `timestamp` to store.get so that expired entries
+are filtered out by the storage layer.
+
+Permission types:
+    Core:  "member" (grants site access), "admin" (grants admin panel)
+    Role:  committee/group tags with no special system behavior
+"""
+
 from dataclasses import dataclass
 from typing import final
 
@@ -46,6 +65,11 @@ def allowed_permission(permission: str) -> bool:
     return permission in all_permissions
 
 
+def get_all_permissions() -> list[str]:
+    """Get list of all valid permissions."""
+    return sorted(all_permissions)
+
+
 year_time = 86400 * 365
 
 
@@ -69,8 +93,6 @@ def add_permission(
 ) -> None | UserNotFoundError:
     if store.get("users", f"{user_id}:email") is None:
         return UserNotFoundError(user_id=user_id)
-
-    assert allowed_permission(permission_name)
 
     expires_at = timestamp + year_time
     perm_key = f"{user_id}:perm:{permission_name}"
@@ -103,8 +125,6 @@ def remove_permission(
     """Remove a permission from a user."""
     if store.get("users", f"{user_id}:email") is None:
         return UserNotFoundError(user_id=user_id)
-
-    assert allowed_permission(permission_name)
 
     perm_key = f"{user_id}:perm:{permission_name}"
     store.delete("users", perm_key)

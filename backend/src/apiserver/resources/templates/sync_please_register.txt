@@ -1,0 +1,12 @@
+{greeting}
+
+Je inschrijving bij D.S.A.V. Dodeka is afgerond! Welkom bij de club.
+
+Maak nu een account aan op de Dodeka website om toegang te krijgen tot het ledenportaal, trainingsschema's, evenementen en meer.
+
+Klik op onderstaande link om je account aan te maken:
+{link}
+
+--
+D.S.A.V. Dodeka
+Delftse Studenten Atletiek Vereniging

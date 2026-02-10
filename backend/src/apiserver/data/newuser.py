@@ -127,14 +127,17 @@ def delete_new_user(store: Storage, email: str) -> bool:
     return True
 
 
+MAX_NAMES = 2
+
+
 def prepare_user_store(
     store: Storage, email: str, names: list[str]
 ) -> None | InvalidNamesCount | EmailExistsInNewUserTable:
     """Prepare a user entry in the newuser table with accepted=True."""
     # Validate names list length
-    if len(names) > 2:  # noqa: PLR2004
+    if len(names) > MAX_NAMES:
         return InvalidNamesCount(names_count=len(names))
-    elif len(names) == 2:  # noqa: PLR2004
+    elif len(names) == MAX_NAMES:
         firstname = names[0]
         lastname = names[1]
     elif len(names) == 1:
@@ -142,7 +145,7 @@ def prepare_user_store(
         lastname = ""
     else:
         # If no names provided, use email prefix as firstname
-        email_prefix = email.split("@")[0]
+        email_prefix = email.split("@", maxsplit=1)[0]
         firstname = email_prefix
         lastname = ""
 

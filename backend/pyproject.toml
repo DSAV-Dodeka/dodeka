@@ -12,11 +12,14 @@ requires-python = ">=3.14"
 dependencies = [
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
-    "freetser==0.3.3",
+    "freetser==0.4.1",
     "requests==2.32.5",
     # pin to exact version since freetser doesn't pin
     "h11==0.16.0"
 ]
+
+[tool.uv]
+default-groups = ["dev"]
 
 [tool.uv.sources]
 "tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/user-server", rev = "602a7f9c369795259cb11e205c2a89e772233550" }
@@ -25,26 +28,38 @@ dependencies = [
 [project.scripts]
 backend = "apiserver.app:run"
 backend-actions = "apiserver.cli:main"
+ba = "apiserver.cli:main"
+auth-actions = "apiserver.auth_cli:main"
+aa = "apiserver.auth_cli:main"
+dev-actions = "apiserver.dev_cli:main"
+da = "apiserver.dev_cli:main"
 test = "apiserver.app:run_test"
-dev = "apiserver.app:run_dev"
+dev = "apiserver.dev:run_dev"
 update-auth = "apiserver.auth_binary:update_auth"
 demo = "apiserver.app:run_demo"
 production = "apiserver.app:run_production"
 
 [dependency-groups]
 dev = [
-    "ty>=0.0.7",
+    "ty>=0.0.15",
     "pytest>=9.0.1",
-    "ruff>=0.14.6",
+    "ruff>=0.15.0",
 ]
 
 [build-system]
 requires = ["uv_build>=0.9.11,<0.10.0"]
 build-backend = "uv_build"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff.lint.pylint]
-max-returns = 10
+max-returns = 24
 max-args = 7
+max-statements = 75
 
 [tool.ruff.lint]
 select = ["F", "PL", "E", "W", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004"]

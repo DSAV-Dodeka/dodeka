@@ -5,7 +5,6 @@ from freetser import Storage
 
 from apiserver.data.permissions import (
     UserNotFoundError,
-    all_permissions,
     read_permissions,
 )
 
@@ -185,8 +184,3 @@ def list_all_users(store: Storage, timestamp: int) -> list[UserInfo]:
             users.append(user_info)
 
     return users
-
-
-def get_all_permissions() -> list[str]:
-    """Get list of all valid permissions."""
-    return sorted(all_permissions)

@@ -1,33 +1,24 @@
-# # from apiserver.data.source import Source, get_kv, get_conn
-# # from apiserver.data.api import user
-# # from apiserver.data.api import key
-# # from apiserver.data.api import refreshtoken
-# # from apiserver.data.api import file
-# # from apiserver.data.api import classifications
-# # from apiserver.data.api import scope
-# # from apiserver.data.api.ud import userdata as ud
-# # from apiserver.data.api.ud import birthday
+"""Data layer — database table definitions and operations.
 
-# # from apiserver.data import schema
-# # from apiserver.data import trs
-# # from apiserver.data import special
+DB_TABLES lists every table used by the application. It is the single
+source of truth for both storage initialisation (start_storage_thread)
+and full-reset (cmdhandler_reset).
+"""
 
-# ops = schema.OPS
+from apiserver.sync import SYSTEM_USERS_TABLE
+from apiserver.tokens import TOKENS_TABLE
 
-__all__ = [
-    # "Source",
-    # "birthday",
-    # "classifications",
-    # "file",
-    # "get_conn",
-    # "get_kv",
-    # "key",
-    # "ops",
-    # "refreshtoken",
-    # "schema",
-    # "scope",
-    # "special",
-    # "trs",
-    # "ud",
-    # "user",
+DB_TABLES = [
+    "users",
+    "users_by_email",
+    "newusers",
+    "registration_state",
+    "metadata",
+    "session_cache",
+    "userdata",
+    "sync",
+    "users_by_bondsnummer",
+    "birthdays",
+    SYSTEM_USERS_TABLE,
+    TOKENS_TABLE,
 ]

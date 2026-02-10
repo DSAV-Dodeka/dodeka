@@ -1,0 +1,10 @@
+{greeting}
+
+Je lidmaatschap bij D.S.A.V. Dodeka is goedgekeurd!
+
+Klik op onderstaande link om verder te gaan:
+{link}
+
+--
+D.S.A.V. Dodeka
+Delftse Studenten Atletiek Vereniging
