@@ -19,7 +19,7 @@ from typing import IO, Callable
 from freetser import Request, Response, TcpServerConfig, start_server
 
 from apiserver.auth_binary import ensure_auth_binary, get_auth_binary_path
-from apiserver.settings import DEFAULT_DEV_CONTROL_PORT, PRIVATE_HOST
+from apiserver.settings import DEFAULT_DEV_CONTROL_PORT, resolve_private_host
 
 
 def pipe_with_prefix(
@@ -152,6 +152,15 @@ def run_dev() -> None:
     from disk.  Use ``uv run da restart`` from another terminal to
     trigger a restart.
     """
+    if sys.platform == "darwin":
+        os.environ.setdefault("BACKEND_PRIVATE_LOCALHOST", "true")
+
+    private_host = resolve_private_host()
+
+    # Propagate to Go auth server env var so child process picks it up
+    if private_host != "127.0.0.2":
+        os.environ.setdefault("FAROE_PRIVATE_HOST", private_host)
+
     ensure_auth_binary()
 
     auth_path = get_auth_binary_path()
@@ -194,7 +203,7 @@ def run_dev() -> None:
     )
 
     # Start control server for CLI commands (restart/stop/status)
-    control_config = TcpServerConfig(host=PRIVATE_HOST, port=DEFAULT_DEV_CONTROL_PORT)
+    control_config = TcpServerConfig(host=private_host, port=DEFAULT_DEV_CONTROL_PORT)
     control_handler = create_control_handler(restart_event, shutdown_event)
     threading.Thread(
         target=start_server,

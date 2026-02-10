@@ -21,6 +21,7 @@ Routes:
 import json
 import logging
 import secrets
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -960,6 +961,12 @@ def start_private_server(
     config = TcpServerConfig(host=PRIVATE_HOST, port=port)
 
     def run():
+        if PRIVATE_HOST == "127.0.0.1" and sys.platform != "darwin":
+            logger.warning(
+                "Private server bound to 127.0.0.1 (shared loopback)."
+                " Any local process can connect. Set BACKEND_PRIVATE_LOCALHOST"
+                " only when 127.0.0.2 is unavailable (e.g. macOS)."
+            )
         logger.info(f"Private server listening on {PRIVATE_HOST}:{port}")
         start_server(config, handler, store_queue=store_queue)
 

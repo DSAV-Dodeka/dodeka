@@ -4,17 +4,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-# Private server address - uses 127.0.0.2 for isolation from main loopback
-PRIVATE_HOST = "127.0.0.2"
-
 # Default ports (12xx prefix = dodeka = twelve)
 DEFAULT_AUTH_SERVER_URL = "http://localhost:12770"
-DEFAULT_AUTH_COMMAND_URL = "http://127.0.0.2:12771"
 DEFAULT_PORT = 12780
+DEFAULT_AUTH_COMMAND_PORT = 12771
 DEFAULT_PRIVATE_PORT = 12790
 DEFAULT_DEV_CONTROL_PORT = 12795
 
+
+def resolve_private_host() -> str:
+    """Determine private server host from environment.
+
+    Returns 127.0.0.1 if BACKEND_PRIVATE_LOCALHOST is enabled, otherwise 127.0.0.2.
+    macOS does not enable 127.0.0.2 by default, so this override is needed there.
+    """
+    if os.environ.get("BACKEND_PRIVATE_LOCALHOST", "").lower() in ("true", "1", "yes"):
+        return "127.0.0.1"
+    return "127.0.0.2"
+
+
+# Private server address - uses 127.0.0.2 for isolation from main loopback.
+# Set BACKEND_PRIVATE_LOCALHOST=true to use 127.0.0.1 instead (needed on macOS).
+PRIVATE_HOST = resolve_private_host()
+DEFAULT_AUTH_COMMAND_URL = f"http://{PRIVATE_HOST}:{DEFAULT_AUTH_COMMAND_PORT}"
+
 __all__ = [
+    "DEFAULT_AUTH_COMMAND_PORT",
     "DEFAULT_AUTH_COMMAND_URL",
     "DEFAULT_AUTH_SERVER_URL",
     "DEFAULT_DEV_CONTROL_PORT",
@@ -24,6 +39,7 @@ __all__ = [
     "Settings",
     "SmtpConfig",
     "load_settings_from_env",
+    "resolve_private_host",
 ]
 
 
