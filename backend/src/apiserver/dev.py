@@ -9,6 +9,7 @@ restart/stop/status commands from the CLI.  Ctrl+C (SIGINT) in the
 terminal also triggers a graceful shutdown.
 """
 
+import os
 import signal
 import subprocess
 import sys
@@ -90,14 +91,31 @@ class ManagedProcess:
             ).start()
 
     def stop(self) -> None:
-        """Terminate the subprocess and wait for it to exit."""
+        """Terminate the subprocess tree and wait for it to exit."""
         with self.lock:
             if self.process is None:
                 return
-            self.process.terminate()
+            if sys.platform == "win32":
+                # taskkill /T kills the entire process tree.
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            else:
+                try:
+                    os.killpg(self.process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
+                if sys.platform != "win32":
+                    try:
+                        os.killpg(self.process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                 self.process.kill()
                 self.process.wait()
             self.process = None
