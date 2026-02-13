@@ -1,0 +1,64 @@
+name: Auth Release
+
+on:
+  push:
+    tags:
+      - 'auth/v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary_name: auth-linux-amd64
+          - os: macos-latest
+            binary_name: auth-darwin-arm64
+          - os: windows-latest
+            binary_name: auth-windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/auth/go.mod
+          cache-dependency-path: backend/auth/go.sum
+
+      - name: Build
+        working-directory: backend/auth
+        run: go build -o ${{ matrix.binary_name }} .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary_name }}
+          path: backend/auth/${{ matrix.binary_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect assets
+        run: |
+          mkdir -p release-assets
+          for dir in artifacts/*/; do
+            cp "$dir"* release-assets/
+          done
+          ls -la release-assets/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" release-assets/* \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

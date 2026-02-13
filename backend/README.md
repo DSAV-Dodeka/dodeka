@@ -132,7 +132,28 @@ Sends commands to the Go auth server's command port.
 
 ## Auth Server (Go)
 
-The auth server binary is in `/auth`. If you use `uv run dev` you do not have to worry about building it, it will be downloaded from a recent GitHub CI run.
+The auth server binary is in `/auth`. If you use `uv run dev` you do not have to worry about building it, it will be automatically downloaded from the pinned GitHub release (specified in `auth/auth-binary.sum`).
+
+### Creating a release
+
+After pushing changes to `backend/auth/`, create a release by tagging:
+
+```bash
+git tag auth/v1.0.0
+git push origin auth/v1.0.0
+```
+
+This triggers the `auth-release.yml` workflow, which builds binaries for all platforms and creates a GitHub release with them as assets.
+
+### Updating the pinned version
+
+After the release workflow completes, update the pinned binary version:
+
+```bash
+uv run update-auth auth/v1.0.0
+```
+
+This downloads all platform binaries from the release, computes their SHA256 hashes, and writes `auth/auth-binary.sum`. Commit that file to pin the version for all developers.
 
 ### Building
 

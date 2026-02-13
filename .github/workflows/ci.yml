@@ -31,19 +31,3 @@ jobs:
       - name: Build
         working-directory: backend/auth
         run: go build -o ${{ matrix.binary_name }} .
-
-      - name: Compute checksum
-        working-directory: backend/auth
-        shell: bash
-        run: |
-          (sha256sum "${{ matrix.binary_name }}" 2>/dev/null || shasum -a 256 "${{ matrix.binary_name }}") | cut -d ' ' -f 1 > "${{ matrix.binary_name }}.sha256"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.binary_name }}
-          path: backend/auth/${{ matrix.binary_name }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.binary_name }}.sha256
-          path: backend/auth/${{ matrix.binary_name }}.sha256

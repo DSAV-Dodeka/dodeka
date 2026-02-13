@@ -1,11 +1,11 @@
 """
-Download the auth binary from GitHub Actions artifacts using the gh CLI.
+Download the auth binary from GitHub releases using the gh CLI.
 Vibe code level: HIGH (don't try to modify this yourself, you can just observe the
 results)
 """
 
 import hashlib
-import json
+
 import platform
 import shutil
 import stat
@@ -17,9 +17,9 @@ from pathlib import Path
 from apiserver.resources import project_path
 
 GITHUB_REPO = "DSAV-Dodeka/dodeka"
-WORKFLOW_FILE = "ci.yml"
+CHECKSUM_FILE = "auth-binary.sum"
 
-# Map (sys.platform, machine) to CI artifact name
+# Map (sys.platform, machine) to release asset name
 ARTIFACT_MAP: dict[tuple[str, str], str] = {
     ("linux", "x86_64"): "auth-linux-amd64",
     ("darwin", "arm64"): "auth-darwin-arm64",
@@ -45,6 +45,10 @@ def get_auth_binary_path() -> Path:
     return auth_dir() / name
 
 
+def checksum_file_path() -> Path:
+    return auth_dir() / CHECKSUM_FILE
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -62,75 +66,81 @@ def gh(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def find_latest_run() -> dict[str, str | int] | None:
-    """Find the latest successful CI workflow run. Returns dict with keys
-    databaseId, headSha, number, or None if no runs found."""
-    result = gh(
-        "run",
-        "list",
-        "--repo",
-        GITHUB_REPO,
-        "--workflow",
-        WORKFLOW_FILE,
-        "--status",
-        "success",
-        "--limit",
-        "1",
-        "--json",
-        "databaseId,headSha,number",
-    )
-    runs = json.loads(result.stdout)
-    if not runs:
-        return None
-    return runs[0]
+def read_checksums() -> tuple[str | None, dict[str, str]]:
+    """Read auth-binary.sum. Returns (release_tag, {artifact_name: hash}).
+
+    Returns (None, {}) if the file doesn't exist."""
+    path = checksum_file_path()
+    if not path.exists():
+        return None, {}
+    tag = None
+    checksums: dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("# tag="):
+            tag = stripped[6:]
+        elif stripped and not stripped.startswith("#"):
+            hash_val, _, name = stripped.partition("  ")
+            if name:
+                checksums[name] = hash_val
+    return tag, checksums
 
 
-def download_artifact(run_id: str, artifact_name: str, dest: str) -> bool:
-    """Download a single artifact from a run into dest directory."""
+def write_checksums(tag: str, checksums: dict[str, str]) -> None:
+    """Write auth-binary.sum."""
+    path = checksum_file_path()
+    lines = [f"# tag={tag}"]
+    for name in sorted(checksums):
+        lines.append(f"{checksums[name]}  {name}")
+    lines.append("")
+    path.write_text("\n".join(lines))
+
+
+def download_release_asset(tag: str, pattern: str, dest: str) -> bool:
+    """Download release assets matching a glob pattern into dest directory."""
     try:
         gh(
-            "run",
+            "release",
             "download",
-            run_id,
+            tag,
             "--repo",
             GITHUB_REPO,
-            "-n",
-            artifact_name,
+            "--pattern",
+            pattern,
             "-D",
             dest,
         )
     except subprocess.CalledProcessError as e:
-        print(f"Failed to download artifact '{artifact_name}': {e.stderr.strip()}")
+        print(f"Failed to download '{pattern}' from release {tag}: {e.stderr.strip()}")
         return False
     return True
 
 
-def find_downloaded_file(tmpdir: Path, expected_name: str) -> Path | None:
-    """Find the downloaded file in a temp directory."""
-    path = tmpdir / expected_name
-    if path.exists():
-        return path
-    # gh may extract with a different structure
-    files = list(tmpdir.iterdir())
-    if len(files) == 1:
-        return files[0]
-    print(f"Unexpected artifact contents: {[f.name for f in files]}")
-    return None
-
-
 def download_auth_binary(*, force: bool = False) -> bool:
-    """Download the auth binary from the latest successful CI run.
+    """Download the auth binary from the GitHub release pinned in auth-binary.sum.
 
-    When force=False, skips if the binary already exists.
-    When force=True, downloads the remote checksum first and skips only if
-    the local binary already matches.
+    When force=False, skips if the binary already exists and hash matches.
+    When force=True, always re-downloads (still verifies hash after download).
+
+    Requires auth-binary.sum to exist with a pinned release tag.
 
     Returns True if a binary was downloaded, False if skipped.
     """
     binary_path = get_auth_binary_path()
+    name = artifact_name_for_platform()
+    pinned_tag, checksums = read_checksums()
+    expected_hash = checksums.get(name)
 
-    if not force and binary_path.exists():
+    if pinned_tag is None or expected_hash is None:
+        print(
+            "No pinned auth binary version found.\n"
+            "Run 'uv run update-auth <tag>' to pin a release first."
+        )
         return False
+
+    if binary_path.exists() and not force:
+        if sha256_file(binary_path) == expected_hash:
+            return False
 
     if not has_gh():
         print(
@@ -140,40 +150,24 @@ def download_auth_binary(*, force: bool = False) -> bool:
         )
         return False
 
-    name = artifact_name_for_platform()
+    print(f"Downloading auth binary ({name}) from release {pinned_tag}...")
 
-    # Find latest successful CI run
-    run = find_latest_run()
-    if run is None:
-        print("No successful CI runs found.")
-        return False
-
-    run_id = str(run["databaseId"])
-    head_sha = str(run["headSha"])
-    print(f"Found CI run #{run['number']} (commit {head_sha[:8]})")
-
-    # Download checksum artifact first to check if update is needed
-    checksum_artifact = f"{name}.sha256"
     with tempfile.TemporaryDirectory() as tmpdir:
-        if download_artifact(run_id, checksum_artifact, tmpdir):
-            hash_file = find_downloaded_file(Path(tmpdir), f"{name}.sha256")
-            if hash_file is not None:
-                remote_hash = hash_file.read_text().strip()
-
-                if binary_path.exists():
-                    local_hash = sha256_file(binary_path)
-                    if local_hash == remote_hash:
-                        print("Auth binary is up to date.")
-                        return False
-
-    # Download the binary
-    print(f"Downloading auth binary ({name})...")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        if not download_artifact(run_id, name, tmpdir):
+        if not download_release_asset(pinned_tag, name, tmpdir):
             return False
 
-        downloaded = find_downloaded_file(Path(tmpdir), name)
-        if downloaded is None:
+        downloaded = Path(tmpdir) / name
+        if not downloaded.exists():
+            print(f"Expected file {name} not found in download.")
+            return False
+
+        actual_hash = sha256_file(downloaded)
+        if actual_hash != expected_hash:
+            print(
+                f"Hash mismatch! Expected {expected_hash[:16]}...,"
+                f" got {actual_hash[:16]}..."
+            )
+            print("Run 'uv run update-auth <tag>' to refresh the pinned checksums.")
             return False
 
         binary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,14 +182,77 @@ def download_auth_binary(*, force: bool = False) -> bool:
 
 
 def ensure_auth_binary() -> None:
-    """Check for the auth binary and download if missing."""
+    """Check for the auth binary and download if missing or outdated."""
     binary_path = get_auth_binary_path()
-    if binary_path.exists():
+    name = artifact_name_for_platform()
+    pinned_tag, checksums = read_checksums()
+    expected_hash = checksums.get(name)
+
+    if pinned_tag is None or expected_hash is None:
+        if binary_path.exists():
+            return
+        print(
+            "Auth binary not found and no version is pinned.\n"
+            "Run 'uv run update-auth <tag>' to pin a release,"
+            " then re-run."
+        )
         return
-    print("Auth binary not found, attempting to download...")
-    download_auth_binary()
+
+    if binary_path.exists():
+        if sha256_file(binary_path) == expected_hash:
+            return
+        print("Auth binary does not match pinned version, re-downloading...")
+    else:
+        print("Auth binary not found, attempting to download...")
+
+    download_auth_binary(force=True)
 
 
 def update_auth() -> None:
-    """Entry point for `uv run update-auth`. Force-downloads the latest binary."""
-    download_auth_binary(force=True)
+    """Entry point for `uv run update-auth`.
+
+    Downloads all binaries from a release, computes their SHA256 hashes,
+    and writes auth-binary.sum.
+
+    Usage:
+        uv run update-auth auth/v1.0.0
+    """
+    args = sys.argv[1:]
+    if not args:
+        print("Usage: uv run update-auth <release-tag>")
+        print("Example: uv run update-auth auth/v1.0.0")
+        return
+
+    tag = args[0]
+
+    if not has_gh():
+        print(
+            "The 'gh' CLI is required.\n"
+            "Install from https://cli.github.com/ and run 'gh auth login'."
+        )
+        return
+
+    print(f"Downloading binaries from release {tag} to compute checksums...")
+
+    checksums: dict[str, str] = {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if not download_release_asset(tag, "auth-*", tmpdir):
+            print("Failed to download binaries from release.")
+            return
+
+        for artifact_name in ARTIFACT_MAP.values():
+            binary_path = Path(tmpdir) / artifact_name
+            if binary_path.exists():
+                checksums[artifact_name] = sha256_file(binary_path)
+                print(f"  {artifact_name}: {checksums[artifact_name][:16]}...")
+            else:
+                print(f"  {artifact_name}: not found in release")
+
+    if not checksums:
+        print("No binaries found in release.")
+        return
+
+    write_checksums(tag, checksums)
+    path = checksum_file_path()
+    print(f"\nUpdated {path}")
+    print(f"Commit this file to pin auth binary to release {tag}.")
