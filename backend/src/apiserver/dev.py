@@ -151,7 +151,12 @@ def run_dev() -> None:
     Both servers run as subprocesses so that restart reloads all code
     from disk.  Use ``uv run da restart`` from another terminal to
     trigger a restart.
+
+    Pass ``--local-auth`` to skip the auth binary checksum verification
+    (useful when you've compiled the binary locally).
     """
+    local_auth = "--local-auth" in sys.argv[1:]
+
     if sys.platform == "darwin":
         os.environ.setdefault("BACKEND_PRIVATE_LOCALHOST", "true")
 
@@ -161,7 +166,8 @@ def run_dev() -> None:
     if private_host != "127.0.0.2":
         os.environ.setdefault("FAROE_PRIVATE_HOST", private_host)
 
-    ensure_auth_binary()
+    if not local_auth:
+        ensure_auth_binary()
 
     auth_path = get_auth_binary_path()
     if not auth_path.exists():
