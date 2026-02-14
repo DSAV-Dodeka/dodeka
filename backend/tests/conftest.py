@@ -9,21 +9,36 @@ resets both the backend and auth server before the first test in each file.
 """
 
 import json
+import os
 import socket
 import subprocess
 import threading
 import time
 from collections.abc import Generator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 import requests
 
 from apiserver.app import run_with_settings
-from apiserver.tooling.auth_binary import get_auth_binary_path
 from apiserver.data.client import AuthClient
 from apiserver.settings import PRIVATE_HOST, Settings
+from apiserver.tooling.auth_binary import get_auth_binary_path
+
+# Set by the servers fixture, read by pytest_terminal_summary on failure.
+log_files: dict[str, Path] = {}
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add --save-server-logs option, auto-enabled when CI env var is set."""
+    parser.addoption(
+        "--save-server-logs",
+        action="store_true",
+        default=bool(os.environ.get("CI")),
+        help="Save auth server logs to file and print on failure (auto-enabled in CI)",
+    )
 
 
 def freeport(host: str = "") -> int:
@@ -79,7 +94,9 @@ class TestServers:
 
 
 @pytest.fixture(scope="session")
-def servers(tmp_path_factory: pytest.TempPathFactory) -> Generator[TestServers]:
+def servers(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> Generator[TestServers]:
     """Start auth + backend servers and yield a TestServers object.
 
     Provides command helper, backend URL, auth URL, and an AuthClient
@@ -109,11 +126,25 @@ def servers(tmp_path_factory: pytest.TempPathFactory) -> Generator[TestServers]:
         f"FAROE_CORS_ALLOW_ORIGIN=http://localhost:3000\n"
     )
 
-    # Start auth binary (suppress output to avoid pipe buffer blocking)
+    # In CI (or with --save-server-logs), capture server logs to files
+    # for printing on failure. Locally, discard output.
+    save_logs = request.config.getoption("--save-server-logs")
+    if save_logs:
+        auth_log_path = tmppath / "auth_server.log"
+        log_files["auth"] = auth_log_path
+        auth_log_handle = auth_log_path.open("w")
+        auth_out = auth_log_handle
+        backend_log_path = tmppath / "backend_server.log"
+        log_files["backend"] = backend_log_path
+    else:
+        auth_log_handle = None
+        auth_out = subprocess.DEVNULL
+        backend_log_path = None
+
     auth_process = subprocess.Popen(
         [str(auth_path), "--env-file", str(auth_env)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=auth_out,
+        stderr=subprocess.STDOUT,
         cwd=str(auth_path.parent),
     )
 
@@ -140,7 +171,7 @@ def servers(tmp_path_factory: pytest.TempPathFactory) -> Generator[TestServers]:
         threading.Thread(
             target=run_with_settings,
             args=(settings,),
-            kwargs={"ready_event": ready_event},
+            kwargs={"ready_event": ready_event, "log_file": backend_log_path},
             daemon=True,
         ).start()
 
@@ -186,6 +217,8 @@ def servers(tmp_path_factory: pytest.TempPathFactory) -> Generator[TestServers]:
     finally:
         auth_process.terminate()
         auth_process.wait(timeout=5)
+        if auth_log_handle is not None:
+            auth_log_handle.close()
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -210,3 +243,14 @@ def backend_url(servers: TestServers) -> str:
 def auth_client(servers: TestServers) -> AuthClient:
     """AuthClient for direct Faroe API calls."""
     return servers.auth_client
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter, exitstatus: int, config: pytest.Config
+) -> None:
+    """Print server logs when tests fail."""
+    if exitstatus != 0:
+        for name, path in log_files.items():
+            if path.exists():
+                terminalreporter.section(f"{name} server log")
+                terminalreporter.write(path.read_text())

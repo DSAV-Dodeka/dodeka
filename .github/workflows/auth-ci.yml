@@ -1,15 +1,18 @@
-name: CI
+name: Auth CI
 
 on:
   push:
-    branches:
-      - '**'
+    branches: ['**']
     paths:
       - backend/auth/**
-      - .github/workflows/ci.yml
+      - .github/workflows/auth-ci.yml
+  pull_request:
+    paths:
+      - backend/auth/**
+      - .github/workflows/auth-ci.yml
 
 jobs:
-  build-auth:
+  build:
     strategy:
       matrix:
         include:

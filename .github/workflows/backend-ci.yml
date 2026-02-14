@@ -1,0 +1,83 @@
+name: Backend CI
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - backend/src/**
+      - backend/tests/**
+      - backend/pyproject.toml
+      - backend/uv.lock
+      - backend/auth/auth-binary.sum
+      - .github/workflows/backend-ci.yml
+  pull_request:
+    paths:
+      - backend/src/**
+      - backend/tests/**
+      - backend/pyproject.toml
+      - backend/uv.lock
+      - backend/auth/auth-binary.sum
+      - .github/workflows/backend-ci.yml
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          version: "0.9.11"
+          prune-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.14t
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Check formatting
+        working-directory: backend
+        run: uv run ruff format --check
+
+      - name: Run linter
+        working-directory: backend
+        run: uv run ruff check
+
+      - name: Run type checker
+        working-directory: backend
+        run: uv run ty check
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          version: "0.9.11"
+          prune-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.14t
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Download auth binary
+        working-directory: backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python -c "from apiserver.tooling.auth_binary import download_auth_binary; download_auth_binary(force=True)"
+
+      - name: Run tests
+        working-directory: backend
+        run: uv run pytest -v

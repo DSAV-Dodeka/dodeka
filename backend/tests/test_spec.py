@@ -24,6 +24,24 @@ from tiauth_faroe.client import (
 TEST_PASSWORD = "Str0ng_T3st_P@ss!2024"
 
 
+def get_session_info(backend_url, session_token):
+    """Get session info by passing the session token directly as a Cookie header.
+
+    The requests library filters out Secure cookies over HTTP connections,
+    so we cannot rely on resp.cookies from set_session (which sets Secure=True).
+    Constructing the Cookie header manually bypasses the CookieJar policy.
+    """
+    resp = requests.get(
+        f"{backend_url}/auth/session_info/",
+        headers={"Cookie": f"session_token={session_token}"},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    info = resp.json()
+    assert "user" in info, f"session_info should return user data, got: {info}"
+    return info
+
+
 def poll_for_token(command, action, email, timeout=10):
     """Poll the private server for a verification code."""
     deadline = time.monotonic() + timeout
@@ -406,24 +424,9 @@ def test_session_info_no_disabled_field(command, backend_url, auth_client):
         command, auth_client, signup_result.signup_token, email
     )
 
-    # Set session and check session_info
-    resp = requests.post(
-        f"{backend_url}/cookies/set_session/",
-        json={"session_token": result.session_token},
-        timeout=10,
-    )
-    assert resp.status_code == 200
+    info = get_session_info(backend_url, result.session_token)
 
-    # Get session info using the cookie
-    resp = requests.get(
-        f"{backend_url}/auth/session_info/",
-        cookies=resp.cookies,
-        timeout=10,
-    )
-    assert resp.status_code == 200
-    info = resp.json()
-
-    assert "disabled" not in info.get("user", {}), (
+    assert "disabled" not in info["user"], (
         "session_info user object should not contain 'disabled' field"
     )
 
@@ -511,3 +514,348 @@ def test_scenario1_set_session_sends_deferred_email(command, backend_url, auth_c
     assert resp.status_code == 404, (
         "registration_state should be deleted after account creation"
     )
+
+
+# -- Scenario 2: accept_new upgrades self-registered newusers entry -----------
+
+
+def test_scenario2_accept_new_upgrades_selfreg(command, backend_url, auth_client):
+    """accept_new should upgrade an existing newusers entry to accepted=True
+    when a self-registered user (no account yet) appears in the sync CSV.
+    After signup completes, the user should have member permission.
+
+    Spec: Registration scenarios > Scenario 2
+    """
+    email = "spec_scenario2_accept@example.com"
+
+    # Step 1: Self-register (creates newusers with accepted=False)
+    resp = requests.post(
+        f"{backend_url}/auth/request_registration",
+        json={"email": email, "firstname": "Scenario", "lastname": "Two"},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    signup_token = resp.json()["signup_token"]
+
+    # Step 2: Same email appears in sync CSV
+    csv_content = make_au_csv(
+        [
+            {
+                "Bondsnummer": "7100",
+                "Voornaam": "Scenario",
+                "Achternaam": "Two",
+                "Geslacht": "V",
+                "Geboortedatum": "01/01/2000",
+                "Email": email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_content)
+
+    # Step 3: Accept -- should upgrade existing newusers entry
+    result = command("accept_new", email=email)
+    assert result["added"] >= 1
+
+    # Step 4: Complete signup -- since accepted=True now, create_user
+    # should grant member permission
+    complete = complete_signup_flow(command, auth_client, signup_token, email)
+
+    # Step 5: Verify member permission was granted
+    info = get_session_info(backend_url, complete.session_token)
+    assert "member" in info["user"]["permissions"], (
+        "User should have member permission after signup with accepted=True"
+    )
+
+
+# -- update_existing ----------------------------------------------------------
+
+
+def test_update_existing_syncs_data(command, backend_url, auth_client):
+    """update_existing should copy sync data to userdata, update the user
+    profile (names), renew member permission, and populate the birthday table.
+
+    Spec: Sync lifecycle > Update existing
+    """
+    email = "spec_update_existing@example.com"
+
+    # Step 1: Create user via sync flow
+    csv_content = make_au_csv(
+        [
+            {
+                "Bondsnummer": "7101",
+                "Voornaam": "Original",
+                "Achternaam": "Name",
+                "Geslacht": "V",
+                "Geboortedatum": "15/03/1995",
+                "Email": email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_content)
+    command("accept_new", email=email)
+
+    signup_result = auth_client.create_signup(email)
+    assert isinstance(signup_result, CreateSignupActionSuccessResult)
+    complete = complete_signup_flow(
+        command, auth_client, signup_result.signup_token, email
+    )
+
+    # Step 2: Import CSV with updated name and run update_existing
+    csv_updated = make_au_csv(
+        [
+            {
+                "Bondsnummer": "7101",
+                "Voornaam": "Updated",
+                "Tussenvoegsel": "van",
+                "Achternaam": "Name",
+                "Geslacht": "V",
+                "Geboortedatum": "15/03/1995",
+                "Email": email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_updated)
+    result = command("update_existing")
+    assert result["updated"] >= 1
+
+    # Step 3: Verify profile was updated via session_info
+    info = get_session_info(backend_url, complete.session_token)
+    assert info["user"]["firstname"] == "Updated"
+    assert info["user"]["lastname"] == "van Name"
+
+    # Step 4: Verify member permission is still active
+    assert "member" in info["user"]["permissions"]
+
+    # Step 5: Verify birthday was populated
+    # list_birthdays returns entries keyed by email but the email is the
+    # storage key, not part of the value. Check by matching the name/dob.
+    birthdays = command("list_birthdays")
+    found = any(
+        b["voornaam"] == "Updated" and b["geboortedatum"] == "15/03/1995"
+        for b in birthdays
+    )
+    assert found, "Birthday entry should be populated by update_existing"
+
+
+# -- Bondsnummer matching / email changes --------------------------------------
+
+
+def test_bondsnummer_email_change(command, backend_url, auth_client):
+    """When a bondsnummer maps to a different email in a new CSV import,
+    compute_groups should report it in email_changes and update_existing
+    should migrate all references.
+
+    Spec: Bondsnummer matching
+    """
+    old_email = "spec_bns_old@example.com"
+    new_email = "spec_bns_new@example.com"
+    bondsnummer = "7110"
+
+    # Step 1: Create user via sync flow with old_email
+    csv_content = make_au_csv(
+        [
+            {
+                "Bondsnummer": bondsnummer,
+                "Voornaam": "Bns",
+                "Achternaam": "User",
+                "Geslacht": "V",
+                "Geboortedatum": "01/06/1990",
+                "Email": old_email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_content)
+    command("accept_new", email=old_email)
+
+    signup_result = auth_client.create_signup(old_email)
+    assert isinstance(signup_result, CreateSignupActionSuccessResult)
+    complete_signup_flow(command, auth_client, signup_result.signup_token, old_email)
+
+    # Run update_existing to populate bondsnummer index
+    command("update_existing")
+
+    # Step 2: Import CSV with same bondsnummer but different email
+    csv_changed = make_au_csv(
+        [
+            {
+                "Bondsnummer": bondsnummer,
+                "Voornaam": "Bns",
+                "Achternaam": "User",
+                "Geslacht": "V",
+                "Geboortedatum": "01/06/1990",
+                "Email": new_email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_changed)
+
+    # Step 3: compute_groups should detect email change
+    groups = command("compute_groups")
+    change_entries = groups.get("email_changes", [])
+    found = any(
+        ec["old_email"] == old_email
+        and ec["new_email"] == new_email
+        and ec["bondsnummer"] == int(bondsnummer)
+        for ec in change_entries
+    )
+    assert found, (
+        f"email_changes should contain {old_email} -> {new_email} "
+        f"for bondsnummer {bondsnummer}"
+    )
+
+    # old_email should NOT appear as departed (being email-changed, not leaving)
+    assert old_email not in groups.get("departed", [])
+
+    # Step 4: update_existing should apply the email change
+    result = command("update_existing")
+    assert result.get("email_changes_applied", 0) >= 1
+
+    # Step 5: User should be able to sign in with new_email
+    signin = auth_client.create_signin(new_email)
+    assert not isinstance(signin, ActionErrorResult), (
+        f"Sign in with new email {new_email} should succeed after email change"
+    )
+
+
+# -- pending_approval in session_info ------------------------------------------
+
+
+def test_session_info_pending_approval(command, backend_url, auth_client):
+    """session_info should return pending_approval=True for a self-registered
+    user who completed signup but has not been accepted by an admin.
+
+    Spec: Login and sessions > Session info
+    """
+    email = "spec_pending_approval@example.com"
+
+    # Step 1: Self-register (creates newusers with accepted=False)
+    resp = requests.post(
+        f"{backend_url}/auth/request_registration",
+        json={"email": email, "firstname": "Pending", "lastname": "Approval"},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    signup_token = resp.json()["signup_token"]
+
+    # Step 2: Complete signup (accepted=False, so newusers entry is kept)
+    complete = complete_signup_flow(command, auth_client, signup_token, email)
+
+    # Step 3: Check session_info
+    info = get_session_info(backend_url, complete.session_token)
+
+    assert info["pending_approval"] is True, (
+        "session_info should show pending_approval=True for unaccepted user"
+    )
+    assert "member" not in info["user"]["permissions"], (
+        "Unaccepted user should not have member permission"
+    )
+
+
+# -- Cancelled members (opzegdatum) -------------------------------------------
+
+
+def test_cancelled_member_treated_as_departed(command, auth_client):
+    """Members with a past cancellation date (opzegdatum) should be treated
+    as departed even if present in the sync CSV.
+
+    Spec: Sync lifecycle > Compute groups (cancelled members)
+    """
+    email = "spec_cancelled@example.com"
+
+    # Step 1: Create user via sync flow (no cancellation)
+    csv_content = make_au_csv(
+        [
+            {
+                "Bondsnummer": "7120",
+                "Voornaam": "Will",
+                "Achternaam": "Cancel",
+                "Geslacht": "V",
+                "Geboortedatum": "01/01/2000",
+                "Email": email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_content)
+    command("accept_new", email=email)
+
+    signup_result = auth_client.create_signup(email)
+    assert isinstance(signup_result, CreateSignupActionSuccessResult)
+    complete_signup_flow(command, auth_client, signup_result.signup_token, email)
+
+    # Grant member permission via update_existing
+    command("update_existing")
+
+    # Step 2: Import CSV with same member but past cancellation date
+    csv_cancelled = make_au_csv(
+        [
+            {
+                "Bondsnummer": "7120",
+                "Voornaam": "Will",
+                "Achternaam": "Cancel",
+                "Geslacht": "V",
+                "Geboortedatum": "01/01/2000",
+                "Email": email,
+                "Club lidmaatschap opzegdatum": "01/01/2020",
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_cancelled)
+
+    # Step 3: compute_groups should show them as departed
+    groups = command("compute_groups")
+    assert email in groups["departed"], (
+        "Member with past opzegdatum should appear in departed"
+    )
+
+
+# -- Departed members returning ------------------------------------------------
+
+
+def test_departed_member_returns_as_to_accept(command, auth_client):
+    """A departed member returning in a future sync CSV should appear in
+    to_accept, indistinguishable from a first-time user.
+
+    Spec: Registration scenarios > Departed members returning
+    """
+    email = "spec_departed_return@example.com"
+
+    # Step 1: Create user via sync flow
+    csv_content = make_au_csv(
+        [
+            {
+                "Bondsnummer": "7130",
+                "Voornaam": "Departed",
+                "Achternaam": "Returner",
+                "Geslacht": "V",
+                "Geboortedatum": "01/01/2000",
+                "Email": email,
+            }
+        ]
+    )
+    command("import_sync", csv_content=csv_content)
+    command("accept_new", email=email)
+
+    signup_result = auth_client.create_signup(email)
+    assert isinstance(signup_result, CreateSignupActionSuccessResult)
+    complete_signup_flow(command, auth_client, signup_result.signup_token, email)
+    command("update_existing")
+
+    # Step 2: Member departs (empty CSV)
+    command("import_sync", csv_content=make_au_csv([]))
+    groups = command("compute_groups")
+    assert email in groups["departed"]
+    command("remove_departed", email=email)
+
+    # Step 3: Member returns in a new CSV
+    command("import_sync", csv_content=csv_content)
+    groups = command("compute_groups")
+
+    # Should be in to_accept (treated as first-time user)
+    to_accept_emails = [u["email"] for u in groups.get("to_accept", [])]
+    assert email in to_accept_emails, (
+        f"Departed member {email} returning in sync should be in to_accept"
+    )
+
+    # Should NOT be in existing
+    existing_emails = {e["sync"]["email"] for e in groups.get("existing", [])}
+    assert email not in existing_emails

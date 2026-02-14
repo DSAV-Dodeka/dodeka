@@ -355,8 +355,13 @@ def run_with_settings(
     *,
     log_prefix: str = "",
     ready_event: threading.Event | None = None,
+    log_file: Path | None = None,
 ):
     log_listener = setup_logging()
+    if log_file is not None:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter("[%(threadName)s] %(message)s"))
+        log_listener.handlers = (*log_listener.handlers, file_handler)
     log_listener.start()
     configure_logging(log_listener, settings.debug_logs, log_prefix)
 

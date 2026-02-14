@@ -26,8 +26,8 @@ requires-dist = [
     { name = "freetser", specifier = "==0.4.1" },
     { name = "h11", specifier = "==0.16.0" },
     { name = "requests", specifier = "==2.32.5" },
-    { name = "tiauth-faroe-client", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fclient&rev=602a7f9c369795259cb11e205c2a89e772233550" },
-    { name = "tiauth-faroe-user-server", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fuser-server&rev=602a7f9c369795259cb11e205c2a89e772233550" },
+    { name = "tiauth-faroe-client", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fclient&rev=3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" },
+    { name = "tiauth-faroe-user-server", git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fuser-server&rev=3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" },
 ]
 
 [package.metadata.requires-dev]
@@ -205,12 +205,12 @@ wheels = [
 [[package]]
 name = "tiauth-faroe-client"
 version = "0.1.0"
-source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fclient&rev=602a7f9c369795259cb11e205c2a89e772233550#602a7f9c369795259cb11e205c2a89e772233550" }
+source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fclient&rev=3f9c8287f968ccca507e6400c3b1cdbfc2071e1b#3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" }
 
 [[package]]
 name = "tiauth-faroe-user-server"
 version = "0.1.0"
-source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fuser-server&rev=602a7f9c369795259cb11e205c2a89e772233550#602a7f9c369795259cb11e205c2a89e772233550" }
+source = { git = "https://github.com/tiptenbrink/tiauth-faroe?subdirectory=python%2Fuser-server&rev=3f9c8287f968ccca507e6400c3b1cdbfc2071e1b#3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" }
 
 [[package]]
 name = "ty"

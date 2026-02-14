@@ -24,8 +24,8 @@ dependencies = [
 default-groups = ["dev"]
 
 [tool.uv.sources]
-"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/user-server", rev = "602a7f9c369795259cb11e205c2a89e772233550" }
-"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/client", rev = "602a7f9c369795259cb11e205c2a89e772233550" }
+"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/user-server", rev = "3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" }
+"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/client", rev = "3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" }
 
 [project.scripts]
 backend = "apiserver.app:run"
