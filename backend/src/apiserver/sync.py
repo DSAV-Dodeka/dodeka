@@ -25,18 +25,20 @@ from apiserver.data.permissions import (
     remove_permission,
 )
 from apiserver.data.registration_state import create_registration_state
-from apiserver.data.userdata import (
+from apiserver.data.features.birthdays import (
     BIRTHDAYS_TABLE,
+    delete_birthday,
+    set_birthday,
+)
+from apiserver.data.userdata import (
     SYNC_TABLE,
     USERDATA_TABLE,
     UserDataEntry,
     delete,
-    delete_birthday,
     delete_bondsnummer_index,
     get,
     get_email_by_bondsnummer,
     listall,
-    set_birthday,
     set_bondsnummer_index,
     upsert,
 )

@@ -18,7 +18,7 @@ from typing import IO, Callable
 
 from freetser import Request, Response, TcpServerConfig, start_server
 
-from apiserver.auth_binary import ensure_auth_binary, get_auth_binary_path
+from apiserver.tooling.auth_binary import ensure_auth_binary, get_auth_binary_path
 from apiserver.settings import DEFAULT_DEV_CONTROL_PORT, resolve_private_host
 
 

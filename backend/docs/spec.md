@@ -2,7 +2,8 @@
 
 This document specifies the sync, registration, login, and permission flows
 for the D.S.A.V. Dodeka backend. It is the authoritative reference for how
-member accounts are created, maintained, and removed.
+member accounts are created, maintained, and removed. This forms the core of
+the backend application. It does not mention any _features_. 
 
 ## Architecture overview
 

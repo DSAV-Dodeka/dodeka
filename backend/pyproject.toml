@@ -9,6 +9,8 @@ authors = [
     { name = "Senne Drent", email = "sennedrent@gmail.com" }
 ]
 requires-python = ">=3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
@@ -27,27 +29,27 @@ default-groups = ["dev"]
 
 [project.scripts]
 backend = "apiserver.app:run"
-backend-actions = "apiserver.cli:main"
-ba = "apiserver.cli:main"
-auth-actions = "apiserver.auth_cli:main"
-aa = "apiserver.auth_cli:main"
-dev-actions = "apiserver.dev_cli:main"
-da = "apiserver.dev_cli:main"
+backend-actions = "apiserver.tooling.cli:main"
+ba = "apiserver.tooling.cli:main"
+auth-actions = "apiserver.tooling.auth_cli:main"
+aa = "apiserver.tooling.auth_cli:main"
+dev-actions = "apiserver.tooling.dev_cli:main"
+da = "apiserver.tooling.dev_cli:main"
 test = "apiserver.app:run_test"
-dev = "apiserver.dev:run_dev"
-update-auth = "apiserver.auth_binary:update_auth"
+dev = "apiserver.tooling.dev:run_dev"
+update-auth = "apiserver.tooling.auth_binary:update_auth"
 demo = "apiserver.app:run_demo"
 production = "apiserver.app:run_production"
 
 [dependency-groups]
 dev = [
-    "ty>=0.0.15",
+    "ty>=0.0.17",
     "pytest>=9.0.1",
     "ruff>=0.15.0",
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.11,<0.10.0"]
+requires = ["uv_build>=0.9.11,<0.11.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]

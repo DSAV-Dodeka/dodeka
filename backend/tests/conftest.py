@@ -21,7 +21,7 @@ import pytest
 import requests
 
 from apiserver.app import run_with_settings
-from apiserver.auth_binary import get_auth_binary_path
+from apiserver.tooling.auth_binary import get_auth_binary_path
 from apiserver.data.client import AuthClient
 from apiserver.settings import PRIVATE_HOST, Settings
 

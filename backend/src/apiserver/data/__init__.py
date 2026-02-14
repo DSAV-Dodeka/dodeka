@@ -5,8 +5,9 @@ source of truth for both storage initialisation (start_storage_thread)
 and full-reset (cmdhandler_reset).
 """
 
+from apiserver.data.features.birthdays import BIRTHDAYS_TABLE
 from apiserver.sync import SYSTEM_USERS_TABLE
-from apiserver.tokens import TOKENS_TABLE
+from apiserver.tooling.codes import CODES_TABLE
 
 DB_TABLES = [
     "users",
@@ -18,7 +19,7 @@ DB_TABLES = [
     "userdata",
     "sync",
     "users_by_bondsnummer",
-    "birthdays",
+    BIRTHDAYS_TABLE,
     SYSTEM_USERS_TABLE,
-    TOKENS_TABLE,
+    CODES_TABLE,
 ]

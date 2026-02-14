@@ -27,13 +27,19 @@ Port scheme: test = 127xx, demo = 128xx, production = 129xx.
 
 ### Key Files
 
-- `app.py` - Main server, route handlers, CSRF protection, permission checks
-- `private.py` - Private server handlers, command dispatch
-- `commands.py` - CLI command implementations (HTTP client to private server)
-- `dev.py` - Dev orchestrator (manages both Go and Python processes)
+- `app.py` - Server startup, route table, request dispatch
+- `server.py` - HTTP framework (CSRF, CORS, sessions, permissions, routing types)
+- `private.py` - Private server handlers (`/invoke`, `/email`, `/command` dispatch)
+- `handlers/auth.py` - Auth handlers (registration, sessions, cookies)
+- `handlers/admin.py` - Admin handlers (user management, permissions, sync)
+- `handlers/features/birthdays.py` - Birthday feature handler
 - `settings.py` - Configuration loading from .env files
 - `sync.py` - Member sync (CSV import, group computation)
 - `data/` - Database operations (users, permissions, registration state, etc.)
+- `tooling/command_handlers.py` - Private server command implementations (bootstrap, accept, sync, etc.)
+- `tooling/commands.py` - CLI HTTP client to private server
+- `tooling/dev.py` - Dev orchestrator (manages both Go and Python processes)
+- `tooling/auth_binary.py` - Auth binary download and verification
 
 ## Code Quality Checks
 
@@ -79,6 +85,6 @@ def handler(req: Request, store_queue: StorageQueue) -> Response:
     return store_queue.execute(db_procedure)
 ```
 
-See `session_info()` in `src/apiserver/app.py` for an example.
+See `session_info()` in `src/apiserver/handlers/auth.py` for an example.
 
 ## Frontend
