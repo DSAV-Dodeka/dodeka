@@ -87,7 +87,8 @@ is a full member in VoltaClub, but does not have an account on the website.
 ### Self-registration
 
 A user creates their account on their own via the website. They can log in
-immediately, but membership requires admin approval.
+immediately, but membership requires admin approval (to check if they are paying
+members in VoltaClub).
 
 1. **User submits the registration form** -- the backend creates a
    `newusers` entry with `accepted=False` (name from the form) and a

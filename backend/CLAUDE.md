@@ -61,6 +61,10 @@ Never use leading underscores for function names, method names, class names, or 
 
 Never use `None` to signal errors or failure states from functions. Instead, use explicit sentinel dataclasses (e.g. `InvalidHeaders`, `UserNotFound`, `EmailNotFoundInNewUserTable`) and check with `isinstance()`. This makes error paths visible in type signatures and avoids ambiguity with legitimate `None` values.
 
+## Free-Threaded Python Dependencies
+
+This backend runs on free-threaded Python (3.14t, GIL disabled). Do not add dependencies that include C extensions unless they are explicitly built for free-threaded Python. C extensions compiled for regular (GIL-enabled) Python are not compatible and will crash or behave incorrectly at runtime. Pure Python packages are always fine. freetser itself checks at import time that the GIL is disabled and exits with an error if it is not (see `freetser/__init__.py`).
+
 ## Database Thread Deadlock Prevention
 
 Never make blocking calls (HTTP, file I/O, etc.) inside database procedures passed to `store_queue.execute()`. The single-threaded database queue can deadlock if a procedure blocks waiting for a response that needs database access.

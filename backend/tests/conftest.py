@@ -123,7 +123,7 @@ def servers(
         f"FAROE_COMMAND_PORT={auth_command_port}\n"
         f"FAROE_USER_SERVER_PORT={private_port}\n"
         f"FAROE_DB_PATH={tmppath / 'auth_db.sqlite'}\n"
-        f"FAROE_CORS_ALLOW_ORIGIN=http://localhost:3000\n"
+        f"FAROE_CORS_ALLOW_ORIGIN=http://127.0.0.1:3000\n"
     )
 
     # In CI (or with --save-server-logs), capture server logs to files
@@ -158,7 +158,7 @@ def servers(
             db_file=tmppath / "backend_db.sqlite",
             environment="test",
             auth_server_url=auth_url,
-            frontend_origin="http://localhost:3000",
+            frontend_origin="http://127.0.0.1:3000",
             debug_logs=True,
             port=backend_port,
             private_port=private_port,

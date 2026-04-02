@@ -35,6 +35,10 @@ With a custom env file:
 uv run --frozen --no-dev backend --env-file /path/to/.env
 ```
 
+## Free-Threaded Python
+
+This backend runs on free-threaded Python (3.14t, GIL disabled). Do not add dependencies that include C extensions unless they are explicitly built for free-threaded Python. C extensions compiled for regular (GIL-enabled) Python are not compatible and will crash or behave incorrectly at runtime. Pure Python packages are always fine. freetser checks at import time that the GIL is disabled and exits with an error if it is not.
+
 ## Architecture
 
 The backend runs two HTTP servers:

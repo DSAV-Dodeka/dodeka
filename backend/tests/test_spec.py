@@ -14,11 +14,16 @@ import csv
 import io
 import time
 
+import pytest
 import requests
 from tiauth_faroe.client import (
     ActionErrorResult,
     CompleteSignupActionSuccessResult,
     CreateSignupActionSuccessResult,
+)
+
+pytestmark = pytest.mark.skip(
+    reason="Superseded by spec-new.md; see test_spec_new.py."
 )
 
 TEST_PASSWORD = "Str0ng_T3st_P@ss!2024"

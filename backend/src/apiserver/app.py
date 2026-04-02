@@ -366,7 +366,8 @@ def run_with_settings(
     configure_logging(log_listener, settings.debug_logs, log_prefix)
 
     logger.info(
-        f"Running with settings:\n\t- frontend_origin={settings.frontend_origin}"
+        f"Running with settings:"
+        f"\n\t- frontend_origin={settings.frontend_origin}"
         f"\n\t- debug_logs={settings.debug_logs}"
         f"\n\t- port={settings.port}"
         f"\n\t- private_port={settings.private_port}"
