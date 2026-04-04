@@ -1,28 +1,13 @@
-"""Integration tests for user registration flows.
+"""Integration tests for registration flows.
 
-Documents the complete lifecycle of user registration, covering both:
-1. Self-registration (user signs up via website)
-2. Sync-imported registration (admin imports from athletics union CSV)
+These tests exercise the public registration contract end to end for:
+1. Self-registration from the website
+2. Sync-driven registration after CSV import
 
-Each test function walks through a complete flow with detailed step
-comments referencing the source code, serving as executable documentation
-of the registration system.
-
-Registration state machine:
-  ┌──────────┐   register    ┌──────────────┐   verify+complete   ┌──────────────┐
-  │  (none)  │──────────────>│  newuser      │───────────────────>│  user         │
-  │          │               │  accepted=F   │                    │  no member    │
-  └──────────┘               │  reg_state=F  │                    │  still in     │
-                             └──────────────┘                    │  newusers     │
-                                                                  └──────┬───────┘
-                                                                         │ admin accept
-                                                                         v
-                                                                  ┌──────────────┐
-                                                                  │  user         │
-                                                                  │  has member   │
-                                                                  │  not in       │
-                                                                  │  newusers     │
-                                                                  └──────────────┘
+The model under test is the `registrations` lifecycle:
+  none -> registration(accepted=False, account_created=False)
+  -> registration(accepted=True/False, account_created=True)
+  -> user session with or without member access depending on acceptance
 """
 
 import csv
@@ -153,18 +138,18 @@ def test_self_registration_flow(command, backend_url, auth_client):
           complete signup → (no member yet) → admin accept → has member
 
     References:
-        - request_registration(): app.py — creates newuser + registration_state,
-          initiates Faroe signup
+        - request_registration(): creates a pending registration and starts
+          Faroe signup
         - get_registration_status_handler(): app.py — returns accepted flag
-        - create_user(): data/auth.py:33-121 — checks accepted flag to decide
-          whether to grant member permission
-        - cmdhandler_accept_user(): private.py — grants member, removes from newusers
+        - create_user(): checks acceptance state to decide whether to grant
+          member permission
+        - accept_user: grants member access to a completed self-registration
     """
     email = "selfreg@example.com"
 
     # Step 1: Register via public API
-    # app.py:request_registration creates newuser(accepted=False),
-    # registration_state, and immediately calls auth_client.create_signup()
+    # request_registration creates a pending registration and immediately
+    # starts the signup flow with Faroe.
     resp = requests.post(
         f"{backend_url}/auth/request_registration",
         json={"email": email, "firstname": "Self", "lastname": "Register"},
@@ -179,7 +164,6 @@ def test_self_registration_flow(command, backend_url, auth_client):
     assert signup_token is not None
 
     # Step 2: Check registration status — accepted should be False
-    # app.py:get_registration_status_handler reads registration_state
     resp = requests.post(
         f"{backend_url}/auth/registration_status",
         json={"registration_token": registration_token},
@@ -192,25 +176,21 @@ def test_self_registration_flow(command, backend_url, auth_client):
     assert status["signup_token"] == signup_token
 
     # Steps 3-6: Complete the signup flow (verify email, set password, complete)
-    # Faroe calls /invoke → create_user() in auth.py
-    # Because accepted=False, create_user() does NOT grant member permission
-    # and does NOT remove from newusers (auth.py:105-106)
+    # Because accepted=False, the user gets an account but not member access yet.
     result = complete_signup_flow(command, auth_client, signup_token, email)
     session_token = result.session_token
     assert session_token is not None
 
     # Step 7: Verify user exists but has NO member permission
-    # create_user() skipped add_permission because accepted=False
     session_result = auth_client.get_session(session_token)
     assert session_result.ok is True
 
-    # Step 8: Verify user still appears in newusers (pending admin approval)
-    # accept_user with has_account=True proves user is in newusers
-    # (if not in newusers, accept_user would return an error)
+    # Step 8: Admin acceptance should recognize the completed account and grant
+    # member access.
     accept_result = command("accept_user", email=email)
     assert accept_result["success"] is True
-    # has_account=True means the user already completed signup but was
-    # still in the newusers table awaiting admin approval
+    # has_account=True means the user had already completed signup before the
+    # approval step.
     assert accept_result["has_account"] is True
 
     # Step 9: Verify user now has member permission (can sign in)
@@ -233,10 +213,9 @@ def test_sync_imported_flow(command, auth_client):
 
     References:
         - sync.py:import_sync() — stores CSV entries in sync table
-        - sync.py:compute_groups() — compares sync vs users/newusers
-        - sync.py:accept_new() — creates newuser(accepted=True) + registration_state
-        - create_user(): data/auth.py:99-104 — accepted=True grants member + removes
-          from newusers
+        - sync.py:compute_groups() — compares sync vs registrations/users
+        - sync.py:accept_new() — creates an accepted registration
+        - create_user(): accepted=True grants member access on first completion
     """
     email = "syncimport@example.com"
 
@@ -261,8 +240,7 @@ def test_sync_imported_flow(command, auth_client):
     new_emails = [u["email"] for u in groups["to_accept"]]
     assert email in new_emails
 
-    # Step 3: Accept new users — creates newuser(accepted=True) + registration_state
-    # sync.py:accept_new stores newuser with accepted=True
+    # Step 3: Accept new users — this creates an accepted pending registration.
     result = command("accept_new", email=email)
     assert result["added"] == 1
 
@@ -272,24 +250,22 @@ def test_sync_imported_flow(command, auth_client):
     assert email not in [u["email"] for u in groups["to_accept"]]
     assert email in groups["pending_signup"]
 
-    # Step 5: Create Faroe signup for the user
+    # Step 5: Create Faroe signup for the user.
     # In the real flow, accept_new_with_signup or resend_signup_email does this.
-    # Here we call create_signup directly via auth_client.
     signup_result = auth_client.create_signup(email)
     assert isinstance(signup_result, CreateSignupActionSuccessResult)
     signup_token = signup_result.signup_token
 
     # Steps 6-7: Complete signup (verify + password + complete)
-    # create_user() sees accepted=True → grants member + removes newuser
+    # accepted=True means member access is granted immediately.
     result = complete_signup_flow(command, auth_client, signup_token, email)
     assert result.session_token is not None
 
     # Step 8: Verify user has member permission immediately
-    # accepted=True → create_user() called add_permission(MEMBER)
     session = auth_client.get_session(result.session_token)
     assert session.ok is True
 
-    # Step 9: Verify user removed from newusers (auth.py:103-104)
+    # Step 9: Verify the registration is no longer pending signup.
     groups = command("compute_groups")
     assert email not in groups.get("pending_signup", [])
 
@@ -300,17 +276,16 @@ def test_sync_imported_flow(command, auth_client):
 def test_accepted_before_signup_completion(command, backend_url, auth_client):
     """Admin accepts a self-registered user BEFORE they complete signup.
 
-    The user registers (accepted=False), admin accepts (accepted=True),
-    then user completes signup. create_user() sees accepted=True and
-    grants member immediately.
+    The user registers, admin accepts before signup is completed, and the
+    eventual account completion receives member access immediately.
 
     References:
-        - cmdhandler_accept_user(): private.py — marks accepted=True before signup
-        - create_user(): data/auth.py:99-104 — checks accepted at signup time
+        - accept_user: marks the registration as accepted before completion
+        - create_user(): checks accepted state at signup completion time
     """
     email = "earlyaccept@example.com"
 
-    # Step 1: Register — gets signup_token (accepted=False)
+    # Step 1: Register — starts as not yet accepted.
     resp = requests.post(
         f"{backend_url}/auth/request_registration",
         json={"email": email, "firstname": "Early", "lastname": "Accept"},
@@ -321,15 +296,11 @@ def test_accepted_before_signup_completion(command, backend_url, auth_client):
     signup_token = reg_data["signup_token"]
 
     # Step 2: Admin accepts before signup completes
-    # cmdhandler_accept_user: user has no account yet → marks accepted=True
-    # in newusers and registration_state
     accept_result = command("accept_user", email=email)
     assert accept_result["success"] is True
     assert accept_result["has_account"] is False
 
     # Step 3: Complete signup (verify + password + complete)
-    # create_user() in auth.py reads newuser_data["accepted"] == True
-    # → grants member permission immediately (auth.py:99-104)
     result = complete_signup_flow(command, auth_client, signup_token, email)
     assert result.session_token is not None
 
@@ -337,7 +308,7 @@ def test_accepted_before_signup_completion(command, backend_url, auth_client):
     session = auth_client.get_session(result.session_token)
     assert session.ok is True
 
-    # Step 5: Verify removed from newusers (accepted=True path in auth.py:103)
+    # Step 5: Verify there is no longer a pending signup entry for this email.
     groups = command("compute_groups")
     assert email not in groups.get("pending_signup", [])
 
@@ -349,8 +320,9 @@ def test_registration_status_reflects_acceptance(command, backend_url):
     """Registration status endpoint reflects the accepted flag changing.
 
     References:
-        - get_registration_status_handler(): app.py — reads registration_state
-        - cmdhandler_accept_user(): private.py — calls mark_registration_state_accepted
+        - get_registration_status_handler(): returns the canonical registration
+          state
+        - accept_user: updates the accepted flag
     """
     email = "statuscheck@example.com"
 
@@ -390,8 +362,8 @@ def test_renew_expired_signup(command, backend_url, auth_client):
     """Renewing a signup creates a new signup_token for the same registration.
 
     References:
-        - renew_signup_handler(): app.py — creates new Faroe signup,
-          updates registration_state with new signup_token
+        - renew_signup_handler(): app.py — creates a new Faroe signup and
+          updates the registration with the replacement signup_token
     """
     email = "renewtest@example.com"
 
@@ -432,19 +404,18 @@ def test_renew_expired_signup(command, backend_url, auth_client):
 def test_scenario4_selfreg_then_sync_accept(command, backend_url, auth_client):
     """Scenario 4: Self-registered user also appears in sync CSV.
 
-    The user registers on the website (accepted=False), then their email
-    also appears in a CSV import. When the admin calls accept_new for that
-    email, it detects the existing newusers entry and updates accepted to
-    True. When the user completes signup, create_user sees accepted=True
-    and grants member permission immediately.
+    The user registers on the website, then their email also appears in a CSV
+    import. When the admin calls accept_new for that email, the existing
+    registration is upgraded to accepted=True. When the user completes signup,
+    member access is granted immediately.
 
     References:
-        - add_accepted(): sync.py — checks newusers, updates accepted flag
-        - create_user(): data/auth.py — reads accepted from newusers
+        - add_accepted(): sync.py — upgrades an existing registration
+        - create_user(): data/auth.py — reads accepted state at completion time
     """
     email = "scenario4@example.com"
 
-    # Step 1: User self-registers (accepted=False)
+    # Step 1: User self-registers.
     resp = requests.post(
         f"{backend_url}/auth/request_registration",
         json={"email": email, "firstname": "Scenario", "lastname": "Four"},
@@ -478,22 +449,21 @@ def test_scenario4_selfreg_then_sync_accept(command, backend_url, auth_client):
     )
     command("import_sync", csv_content=csv_content)
 
-    # User appears in to_accept group (unaccepted newuser in sync)
+    # User appears in to_accept because the sync entry matches an
+    # unaccepted existing registration.
     groups = command("compute_groups")
     to_accept_emails = [e["email"] for e in groups["to_accept"]]
     assert email in to_accept_emails
 
     # Step 3: Admin runs accept_new for this specific email
-    # add_accepted detects email in newusers -> updates to accepted=True
     result = command("accept_new", email=email)
     assert result["added"] == 1
 
     # Step 4: Complete signup with original signup_token
-    # create_user reads newuser.accepted=True -> grants member + removes newuser
     result = complete_signup_flow(command, auth_client, signup_token, email)
     assert result.session_token is not None
 
-    # Step 5: Verify member permission granted (user removed from newusers)
+    # Step 5: Verify member permission granted and no pending signup remains.
     groups = command("compute_groups")
     assert email not in groups.get("pending_signup", [])
     # User now in existing (registered + in sync)

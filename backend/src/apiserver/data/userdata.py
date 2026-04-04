@@ -52,12 +52,9 @@ def deserialize(data: bytes) -> UserDataEntry:
 def upsert(store: Storage, table: str, entry: UserDataEntry) -> None:
     key = entry.email.lower()
     data = serialize(entry)
-    result = store.get(table, key)
-    if result is None:
-        store.add(table, key, data, expires_at=0)
-    else:
-        _, counter = result
-        store.update(table, key, data, counter, expires_at=0)
+    # This helper is used for canonical row replacement inside one serialized
+    # storage procedure, so overwriting is the intended behavior.
+    store.overwrite(table, key, data, expires_at=0)
 
 
 def get(store: Storage, table: str, email: str) -> UserDataEntry | None:
@@ -92,12 +89,9 @@ def set_bondsnummer_index(store: Storage, bondsnummer: int, email: str) -> None:
     """Upsert bondsnummer → email mapping."""
     key = str(bondsnummer)
     value = email.lower().encode("utf-8")
-    result = store.get(BONDSNUMMER_TABLE, key)
-    if result is None:
-        store.add(BONDSNUMMER_TABLE, key, value, expires_at=0)
-    else:
-        _, counter = result
-        store.update(BONDSNUMMER_TABLE, key, value, counter, expires_at=0)
+    # This is an index-maintenance write: the current canonical email should
+    # replace any previous mapping for the same bondsnummer.
+    store.overwrite(BONDSNUMMER_TABLE, key, value, expires_at=0)
 
 
 def get_email_by_bondsnummer(store: Storage, bondsnummer: int) -> str | None:

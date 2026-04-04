@@ -25,12 +25,9 @@ def set_birthday(
             "achternaam": achternaam,
         }
     ).encode("utf-8")
-    result = store.get(BIRTHDAYS_TABLE, key)
-    if result is None:
-        store.add(BIRTHDAYS_TABLE, key, data, expires_at=0)
-    else:
-        _, counter = result
-        store.update(BIRTHDAYS_TABLE, key, data, counter, expires_at=0)
+    # Birthday rows are regenerated from authoritative member data, so the
+    # latest sync/update should simply replace the stored value.
+    store.overwrite(BIRTHDAYS_TABLE, key, data, expires_at=0)
 
 
 def delete_birthday(store: Storage, email: str) -> None:

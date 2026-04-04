@@ -39,6 +39,16 @@ def get_code(store: Storage, action: str, email: str) -> dict[str, Any] | None:
     return json.loads(value_bytes.decode("utf-8"))
 
 
+def peek_code(store: Storage, action: str, email: str) -> dict[str, Any] | None:
+    """Get a confirmation code from the database without removing it."""
+    key = f"{action}:{email}"
+    result = store.get(CODES_TABLE, key)
+    if result is None:
+        return None
+    value_bytes, _ = result
+    return json.loads(value_bytes.decode("utf-8"))
+
+
 class CodeWaiter:
     """Polls the database for a confirmation code to appear.
 

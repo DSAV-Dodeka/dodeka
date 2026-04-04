@@ -3,10 +3,6 @@
 Binds to 127.0.0.2 (separate loopback address) for isolation.
 Handles requests from Go tiauth-faroe and CLI.
 
-This module is a command/orchestration layer on top of the data modules
-in apiserver.data and apiserver.sync.  It must not define fundamental
-state such as table names or schema — those belong in the data layer.
-
 Routes:
 - POST /invoke - user action invocation (faroe UserServerClient)
 - POST /email - email sending from tiauth-faroe (stores tokens, sends via SMTP)
@@ -15,6 +11,7 @@ Routes:
 
 import json
 import logging
+import smtplib
 import sys
 import threading
 from typing import Callable
@@ -24,9 +21,10 @@ from freetser.server import Handler, StorageQueue
 
 from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.client import AuthClient
-from apiserver.data.registration_state import (
-    get_registration_token_by_email,
-    increment_email_send_count,
+from apiserver.data.registrations import (
+    get_registration,
+    normalize_email,
+    upsert_registration,
 )
 from apiserver.email import TOKEN_EMAIL_TYPES, EmailData, EmailType, sendemail
 from apiserver.settings import PRIVATE_HOST, SmtpConfig
@@ -91,7 +89,6 @@ def create_private_handler(
     """Create the handler for the private server."""
 
     def handler(req: Request, _: StorageQueue | None) -> Response:
-        # Handle CORS preflight
         if req.method == "OPTIONS":
             return handle_options(req.path, frontend_origin)
 
@@ -149,7 +146,7 @@ def handle_email(
     smtp_send: bool,
     frontend_origin: str,
 ) -> Response:
-    """Handle email request from Go - stores tokens and sends email."""
+    """Handle email request from Go — stores tokens and sends email."""
     try:
         body = json.loads(req.body.decode("utf-8"))
         email_type: EmailType = body.get("type")
@@ -161,19 +158,24 @@ def handle_email(
         logger.warning(f"email: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Extract optional fields
+    to_email = normalize_email(to_email)
+
     display_name = body.get("displayName")
     code = body.get("code")
     timestamp = body.get("timestamp")
     new_email = body.get("newEmail")
 
-    # Construct signup link using registration_token (exists from initial registration)
-    # Include the verification code so the form is pre-filled
+    # Construct signup link using registration_token
     link: str | None = None
     if email_type == "signup_verification":
-        registration_token = store_queue.execute(
-            lambda store: get_registration_token_by_email(store, to_email)
-        )
+
+        def get_reg_token(store: Storage) -> str | None:
+            reg = get_registration(store, to_email)
+            if reg is not None:
+                return reg.registration_token
+            return None
+
+        registration_token = store_queue.execute(get_reg_token)
         if registration_token and code:
             link = (
                 f"{frontend_origin}/account/signup"
@@ -202,16 +204,21 @@ def handle_email(
                 link=link,
             )
             sendemail(smtp_config, data, smtp_send)
-        except Exception as e:
+        except (smtplib.SMTPException, OSError) as e:
             logger.error(f"email: Failed to process email: {e}")
             return Response.json(
                 {"success": False, "error": str(e)},
                 status_code=500,
             )
         if email_type == "signup_verification":
-            store_queue.execute(
-                lambda store: increment_email_send_count(store, to_email)
-            )
+
+            def inc_send_count(store: Storage) -> None:
+                reg = get_registration(store, to_email)
+                if reg is not None:
+                    reg.email_send_count += 1
+                    upsert_registration(store, reg)
+
+            store_queue.execute(inc_send_count)
 
     return Response.json({"success": True})
 
@@ -223,10 +230,7 @@ def handle_command(
     code_waiter: CodeWaiter | None = None,
     email_settings: tuple[str, SmtpConfig | None, bool] = ("", None, False),
 ) -> Response:
-    """Handle management command.
-
-    email_settings is (frontend_origin, smtp_config, smtp_send).
-    """
+    """Handle management command."""
     frontend_origin, smtp_config, smtp_send = email_settings
 
     try:
@@ -248,7 +252,10 @@ def handle_command(
         ),
         "get_admin_credentials": lambda: cmdhandler_get_admin_credentials(store_queue),
         "get_token": lambda: cmdhandler_get_code(
-            store_queue, body.get("action"), body.get("email")
+            store_queue,
+            body.get("action"),
+            body.get("email"),
+            body.get("consume", True),
         ),
         "import_sync": lambda: cmdhandler_import_sync(
             store_queue, body.get("csv_content", "")
@@ -286,11 +293,7 @@ def start_private_server(
     handler: Handler,
     store_queue: StorageQueue,
 ) -> None:
-    """Start the private TCP HTTP server in a background thread.
-
-    Binds to PRIVATE_HOST (127.0.0.2) for isolation from the public server.
-    Use create_private_handler() to build the handler.
-    """
+    """Start the private TCP HTTP server in a background thread."""
     config = TcpServerConfig(host=PRIVATE_HOST, port=port)
 
     def run():

@@ -1,9 +1,7 @@
 """Command handler implementations for the private server.
 
 Each ``cmdhandler_*`` function corresponds to a management command
-dispatched by ``handle_command`` in ``apiserver.private``.  Keeping them
-here separates the tooling/admin logic from the core private-server
-request handling (``/invoke``, ``/email``).
+dispatched by ``handle_command`` in ``apiserver.private``.
 """
 
 import logging
@@ -11,6 +9,7 @@ import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict
 from typing import Any
 
 from freetser import Response, Storage
@@ -20,25 +19,17 @@ from tiauth_faroe.client import ActionErrorResult
 from apiserver.data import DB_TABLES
 from apiserver.data.admin import get_admin_credentials, store_admin_credentials
 from apiserver.data.client import AuthClient
-from apiserver.data.newuser import (
-    EmailExistsInNewUserTable,
-    EmailNotFoundInNewUserTable,
-    InvalidNamesCount,
-    list_new_users,
-    prepare_user_store,
-    update_accepted_flag,
-)
 from apiserver.data.permissions import Permissions, add_permission
-from apiserver.data.registration_state import (
-    RegistrationStateNotFound,
-    create_registration_state,
-    get_registration_state,
-    get_registration_token_by_email,
-    mark_registration_state_accepted,
-    update_registration_state_accepted,
+from apiserver.data.registrations import (
+    create_or_reuse_registration,
+    delete_registration,
+    get_registration,
+    list_registrations,
+    normalize_email,
+    upsert_registration,
 )
 from apiserver.data.features.birthdays import list_birthdays
-from apiserver.email import EmailData, sendemail
+from apiserver.handlers.acceptance import do_accept_new_with_email
 from apiserver.settings import SmtpConfig
 from apiserver.sync import (
     accept_new,
@@ -51,7 +42,7 @@ from apiserver.sync import (
     update_existing,
 )
 from apiserver.tooling.actions import AdminUserCreationError, create_admin_user
-from apiserver.tooling.codes import CODES_TABLE, CodeWaiter, get_code
+from apiserver.tooling.codes import CODES_TABLE, CodeWaiter, get_code, peek_code
 
 logger = logging.getLogger("apiserver.command_handlers")
 
@@ -59,25 +50,23 @@ logger = logging.getLogger("apiserver.command_handlers")
 # Email suppression (used by create_accounts to avoid sending real emails)
 # ---------------------------------------------------------------------------
 
-# Thread-safe email suppression for batch accept-new with signup.
-# Emails in this set have their tokens stored but sendemail() skipped.
 suppressed_emails: set[str] = set()
 suppressed_emails_lock = threading.Lock()
 
 
 def suppress_email(email: str) -> None:
     with suppressed_emails_lock:
-        suppressed_emails.add(email.lower())
+        suppressed_emails.add(normalize_email(email))
 
 
 def unsuppress_email(email: str) -> None:
     with suppressed_emails_lock:
-        suppressed_emails.discard(email.lower())
+        suppressed_emails.discard(normalize_email(email))
 
 
 def is_email_suppressed(email: str) -> bool:
     with suppressed_emails_lock:
-        return email.lower() in suppressed_emails
+        return normalize_email(email) in suppressed_emails
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +94,6 @@ def bootstrap_admin(
         ["Root", "Admin"],
     )
 
-    # Store credentials and mark as system user (excluded from sync)
     def save_credentials(store: Storage) -> None:
         store_admin_credentials(store, root_email, root_password)
         add_system_user(store, root_email)
@@ -123,15 +111,10 @@ def bootstrap_admin_on_startup(
     auth_server_url: str,
     store_queue: StorageQueue,
 ) -> None:
-    """Wait for server readiness, then bootstrap the admin user.
-
-    Creates a separate AuthClient with connection retries to handle the Go auth
-    server starting up concurrently (ECONNREFUSED until it's ready).
-    """
+    """Wait for server readiness, then bootstrap the admin user."""
     ready_event.wait()
     logger.info("Server ready, bootstrapping admin...")
 
-    # The Go auth server may still be starting — use connect retries with backoff
     startup_client = AuthClient(auth_server_url, timeout=10, connect_retries=8)
     try:
         bootstrap_admin(code_waiter, startup_client, store_queue)
@@ -139,128 +122,6 @@ def bootstrap_admin_on_startup(
         logger.error(f"Failed to bootstrap root admin: {e}")
     except Exception:
         logger.error("Failed to bootstrap admin, auth server may not be running")
-
-
-# ---------------------------------------------------------------------------
-# Accept new with email (used by both public API and CLI)
-# ---------------------------------------------------------------------------
-
-
-def do_accept_new_with_email(
-    store_queue: StorageQueue,
-    frontend_origin: str,
-    smtp_config: SmtpConfig | None,
-    smtp_send: bool,
-    email: str | None = None,
-) -> dict:
-    """Accept new users and send acceptance notification emails.
-
-    Sends sync_please_register to users who still need to create an account,
-    and account_accepted_self to users who already have one.
-
-    Returns result dict with added, skipped, emails_sent, emails_failed.
-    """
-
-    # Single DB call: accept new users + find who needs notification
-    def accept_and_prepare(
-        store: Storage,
-    ) -> tuple[
-        dict,
-        list[tuple[str, str, str | None]],
-        list[tuple[str, str]],
-    ]:
-        registered = set(store.list_keys("users_by_email"))
-
-        # accept_new deletes the newusers entry for users who already have
-        # an account, so we won't be able to see them afterwards. Snapshot
-        # them now so we can send acceptance emails after.
-        pending_with_account: dict[str, str] = {}
-        for u in list_new_users(store):
-            if not u.accepted and u.email in registered:
-                pending_with_account[u.email] = u.firstname
-
-        result = accept_new(store, email)
-
-        # Find accepted users without accounts who haven't been notified yet
-        users = list_new_users(store)
-
-        signup_targets: list[tuple[str, str, str | None]] = []
-        for u in users:
-            if not u.accepted or u.email in registered:
-                continue
-
-            # Check registration_state to avoid re-sending
-            reg_token = get_registration_token_by_email(store, u.email)
-            if reg_token is None:
-                continue
-
-            state = get_registration_state(store, reg_token)
-            if state is not None and state.accepted:
-                continue  # Already notified
-
-            # Mark accepted in registration_state and collect for email
-            mark_result = mark_registration_state_accepted(store, u.email)
-            if isinstance(mark_result, RegistrationStateNotFound):
-                logger.error(f"Registration state missing for {u.email}")
-                continue
-            signup_targets.append((u.email, u.firstname, reg_token))
-
-        # Users who already had an account and were just accepted
-        # (newusers entry removed by accept_new).
-        accepted_targets: list[tuple[str, str]] = []
-        for acc_email, firstname in pending_with_account.items():
-            if store.get("newusers", acc_email) is None:
-                accepted_targets.append((acc_email, firstname))
-
-        return result, signup_targets, accepted_targets
-
-    accept_result, signup_targets, accepted_targets = store_queue.execute(
-        accept_and_prepare
-    )
-
-    emails_sent = 0
-    emails_failed = 0
-
-    for user_email, display_name, reg_token in signup_targets:
-        try:
-            link = f"{frontend_origin}/account/signup?token={reg_token}"
-            data = EmailData(
-                email_type="sync_please_register",
-                to_email=user_email,
-                display_name=display_name,
-                link=link,
-            )
-            sendemail(smtp_config, data, smtp_send)
-            emails_sent += 1
-        except Exception as exc:
-            logger.error(
-                f"accept_new_with_email: Failed to send to {user_email}: {exc}"
-            )
-            emails_failed += 1
-
-    for user_email, display_name in accepted_targets:
-        try:
-            data = EmailData(
-                email_type="account_accepted_self",
-                to_email=user_email,
-                display_name=display_name,
-                link=frontend_origin,
-            )
-            sendemail(smtp_config, data, smtp_send)
-            emails_sent += 1
-        except Exception as exc:
-            logger.error(
-                f"accept_new_with_email: Failed to send to {user_email}: {exc}"
-            )
-            emails_failed += 1
-
-    result = {
-        **accept_result,
-        "emails_sent": emails_sent,
-        "emails_failed": emails_failed,
-    }
-    logger.info(f"accept_new_with_email: {result}")
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -297,22 +158,38 @@ def cmdhandler_reset(
         return Response.text(f"Tables cleared but admin bootstrap failed: {e}")
 
 
+MAX_NAMES = 2
+
+
 def cmdhandler_prepare_user(
     store_queue: StorageQueue,
     email: str | None,
     names: list[str],
 ) -> Response:
-    """Handle the prepare_user command."""
+    """Handle the prepare_user command — create an accepted registration."""
     if not email:
         return Response.text("Missing email for prepare_user", status_code=400)
 
+    email = normalize_email(email)
+
+    if len(names) > MAX_NAMES:
+        return Response.text(f"Invalid names count: {len(names)}", status_code=400)
+    elif len(names) == MAX_NAMES:
+        firstname = names[0]
+        lastname = names[1]
+    elif len(names) == 1:
+        firstname = names[0]
+        lastname = ""
+    else:
+        email_prefix = email.split("@", maxsplit=1)[0]
+        firstname = email_prefix
+        lastname = ""
+
     def do_prepare(store: Storage) -> str | None:
-        result = prepare_user_store(store, email, names)
-        if isinstance(result, InvalidNamesCount):
-            return f"Invalid names count: {result.names_count}"
-        if isinstance(result, EmailExistsInNewUserTable):
-            return f"Email already exists in newuser table: {result.email}"
-        create_registration_state(store, email)
+        existing = get_registration(store, email)
+        if existing is not None:
+            return f"Registration already exists for {email}"
+        create_or_reuse_registration(store, email, firstname, lastname, accepted=True)
         return None
 
     error = store_queue.execute(do_prepare)
@@ -339,13 +216,15 @@ def cmdhandler_get_code(
     store_queue: StorageQueue,
     action: str | None,
     email: str | None,
+    consume: bool = True,
 ) -> Response:
-    """Handle the get_token command - retrieve confirmation code."""
+    """Handle the get_token command — retrieve confirmation code."""
     if not action or not email:
         logger.warning("get_token: Missing action or email")
         return Response.text("Missing action or email", status_code=400)
 
-    result = store_queue.execute(lambda store: get_code(store, action, email))
+    getter = get_code if consume else peek_code
+    result = store_queue.execute(lambda store: getter(store, action, email))
     if result is None:
         logger.info(f"get_token: No code found for {action}:{email}")
         return Response.json({"found": False})
@@ -395,11 +274,10 @@ def cmdhandler_accept_new_with_email(
     email: str | None,
 ) -> Response:
     """Command handler for accept_new with acceptance emails."""
-    return Response.json(
-        do_accept_new_with_email(
-            store_queue, frontend_origin, smtp_config, smtp_send, email
-        )
+    result = do_accept_new_with_email(
+        store_queue, frontend_origin, smtp_config, smtp_send, email
     )
+    return Response.json(asdict(result))
 
 
 def cmdhandler_update_existing(
@@ -416,25 +294,18 @@ def cmdhandler_board_setup(
 ) -> Response:
     """One-time setup for the Bestuur (board) account.
 
-    Prepares bestuur@dsavdodeka.nl as an accepted user, marks it as a
-    system user (excluded from sync), and initiates Faroe signup which
-    sends a verification email so the board can set their password.
-
-    After signup completes, run grant-admin to give admin permission.
+    Creates an accepted registration, marks as system user, initiates signup.
     """
     if auth_client is None:
         return Response.text("Auth client not available", status_code=500)
 
     email = BOARD_EMAIL
-    names = ["Bestuur", ""]
 
-    # Prepare user as accepted + mark as system user
     def prepare(store: Storage) -> str | None:
-        result = prepare_user_store(store, email, names)
-        if isinstance(result, EmailExistsInNewUserTable):
-            return f"{email} already exists in newuser table"
-        if isinstance(result, InvalidNamesCount):
-            return f"Invalid names count: {result.names_count}"
+        existing = get_registration(store, email)
+        if existing is not None:
+            return f"{email} already has a registration"
+        create_or_reuse_registration(store, email, "Bestuur", "", accepted=True)
         add_system_user(store, email)
         return None
 
@@ -442,7 +313,7 @@ def cmdhandler_board_setup(
     if error:
         return Response.text(error, status_code=400)
 
-    # Initiate Faroe signup (blocking HTTP call — must be outside store_queue)
+    # Initiate Faroe signup (blocking HTTP — outside store_queue)
     signup_result = auth_client.create_signup(email)
     if isinstance(signup_result, ActionErrorResult):
         logger.error(
@@ -455,19 +326,13 @@ def cmdhandler_board_setup(
 
     signup_token = signup_result.signup_token
 
-    def save_signup(store: Storage) -> str | None:
-        result = update_accepted_flag(store, email, True)
-        if isinstance(result, EmailNotFoundInNewUserTable):
-            return f"Email {email} not found in newuser table"
-        result = update_registration_state_accepted(store, email, signup_token)
-        if isinstance(result, RegistrationStateNotFound):
-            return f"No registration state found for {email}"
-        return None
+    def save_signup(store: Storage) -> None:
+        reg = get_registration(store, email)
+        if reg is not None:
+            reg.signup_token = signup_token
+            upsert_registration(store, reg)
 
-    error = store_queue.execute(save_signup)
-    if error:
-        logger.warning(f"board_setup: {error}")
-        return Response.text(error, status_code=400)
+    store_queue.execute(save_signup)
 
     logger.info(f"board_setup: Created Bestuur account, signup email sent to {email}")
     return Response.json(
@@ -483,19 +348,12 @@ def cmdhandler_board_renew(
     store_queue: StorageQueue,
     auth_client: AuthClient | None,
 ) -> Response:
-    """Yearly renewal for the Bestuur account.
-
-    Triggers a password reset (sends temporary password email) and
-    renews the admin permission (1-year TTL).  Run this when the board
-    rotates so the new board can set their own password.
-    """
+    """Yearly renewal for the Bestuur account."""
     if auth_client is None:
         return Response.text("Auth client not available", status_code=500)
 
     email = BOARD_EMAIL
 
-    # Initiate password reset via Faroe (sends temp password email).
-    # Blocking HTTP call — must be outside store_queue.
     reset_result = auth_client.manage_action_invocation_request(
         "create_user_password_reset", {"user_email_address": email}
     )
@@ -511,7 +369,6 @@ def cmdhandler_board_renew(
             status_code=500,
         )
 
-    # Renew admin permission (1-year TTL)
     timestamp = int(time.time())
 
     def renew(store: Storage) -> dict:
@@ -550,11 +407,10 @@ def cmdhandler_create_accounts(
     code_waiter: CodeWaiter | None,
     password: str | None,
 ) -> Response:
-    """Create accounts for all accepted newusers (testing).
+    """Create accounts for all accepted registrations (testing).
 
     Runs the full signup flow for each: create_signup, verify email,
-    set password, complete signup.  Emails are suppressed so no actual
-    mail is sent.
+    set password, complete signup. Emails are suppressed.
     """
     if auth_client is None:
         return Response.text("Auth client not available", status_code=500)
@@ -563,11 +419,14 @@ def cmdhandler_create_accounts(
     if not password:
         return Response.text("Missing password", status_code=400)
 
-    # Find accepted newusers that aren't registered yet
     def find_pending(store: Storage) -> list[str]:
         registered = set(store.list_keys("users_by_email"))
-        users = list_new_users(store)
-        return [u.email for u in users if u.accepted and u.email not in registered]
+        regs = list_registrations(store)
+        return [
+            r.email
+            for r in regs
+            if r.accepted and not r.account_created and r.email not in registered
+        ]
 
     emails = store_queue.execute(find_pending)
     if not emails:
@@ -581,7 +440,6 @@ def cmdhandler_create_accounts(
 
     def create_one(email: str) -> tuple[str, str | None]:
         try:
-            # Clear stale verification token to avoid wait_for_code returning old code
             store_queue.execute(
                 lambda store, e=email: store.delete(
                     CODES_TABLE, f"signup_verification:{e}"
@@ -635,18 +493,14 @@ def cmdhandler_create_accounts(
 
 
 def cmdhandler_grant_admin(store_queue: StorageQueue, email: str | None) -> Response:
-    """Grant admin permission and mark as system user.
-
-    The user must have completed signup (have a user_id) before admin
-    permission can be granted.
-    """
+    """Grant admin permission and mark as system user."""
     if not email:
         return Response.text("Missing email", status_code=400)
 
+    email = normalize_email(email)
     timestamp = int(time.time())
 
     def grant(store: Storage) -> dict:
-        # Look up user_id by email
         result = store.get("users_by_email", email)
         if result is None:
             return {"error": f"No user found with email {email}"}
@@ -671,37 +525,36 @@ def cmdhandler_grant_admin(store_queue: StorageQueue, email: str | None) -> Resp
 def cmdhandler_accept_user(store_queue: StorageQueue, email: str | None) -> Response:
     """Accept a user without HTTP request parsing (for test automation).
 
-    Same logic as accept_user_handler() in app.py:
-    - If user already has account: grant member permission, delete from newusers
-    - If not: mark accepted=True in newusers + registration_state
+    Same logic as accept_user_handler:
+    - If user already has account: grant member, delete registration
+    - If not: mark accepted=True, set notify_on_completion
     No email sending.
     """
     if not email:
         return Response.text("Missing email for accept_user", status_code=400)
 
+    email = normalize_email(email)
     timestamp = int(time.time())
 
     def accept(store: Storage) -> dict:
+        reg = get_registration(store, email)
+        if reg is None:
+            return {"error": f"No registration found for {email}"}
+
         user_result = store.get("users_by_email", email)
         if user_result is not None:
             user_id = user_result[0].decode("utf-8")
             add_permission(store, timestamp, user_id, Permissions.MEMBER)
-            store.delete("newusers", email)
+            delete_registration(store, email)
             return {
                 "success": True,
                 "has_account": True,
                 "message": f"Member permission granted to {email}",
             }
 
-        flag_result = update_accepted_flag(store, email, True)
-        if isinstance(flag_result, EmailNotFoundInNewUserTable):
-            return {"error": f"Email {email} not found in newuser table"}
-
-        mark_result = mark_registration_state_accepted(
-            store, email, notify_on_completion=True
-        )
-        if isinstance(mark_result, RegistrationStateNotFound):
-            return {"error": f"No registration state found for {email}"}
+        reg.accepted = True
+        reg.notify_on_completion = True
+        upsert_registration(store, reg)
 
         return {
             "success": True,

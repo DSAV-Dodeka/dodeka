@@ -5,6 +5,7 @@ Handles registration, signup, session management, and related flows.
 
 import json
 import logging
+import smtplib
 import time
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlparse
@@ -14,20 +15,15 @@ from freetser.server import StorageQueue
 from tiauth_faroe.client import ActionErrorResult
 
 from apiserver.data.client import AuthClient
-from apiserver.data.newuser import (
-    EmailExistsInNewUserTable,
+from apiserver.data.registrations import (
     EmailExistsInUserTable,
-    add_new_user,
-)
-from apiserver.data.registration_state import (
-    RegistrationStateNotFound,
-    clear_notify_on_completion,
-    create_registration_state,
-    get_notify_on_completion,
-    get_registration_state,
-    get_registration_token_by_email,
-    get_signup_token_by_email,
-    update_registration_state_signup_token,
+    Registration,
+    create_or_reuse_registration,
+    delete_registration,
+    get_registration,
+    get_registration_by_token,
+    normalize_email,
+    upsert_registration,
 )
 from apiserver.data.user import InvalidSession, SessionInfo, get_user_info
 from apiserver.email import EmailData, sendemail
@@ -40,7 +36,7 @@ from apiserver.server import (
     validate_session,
 )
 from apiserver.settings import SmtpConfig
-from apiserver.tooling.codes import get_code
+from apiserver.tooling.codes import peek_code
 
 logger = logging.getLogger("apiserver.handlers.auth")
 
@@ -48,31 +44,28 @@ logger = logging.getLogger("apiserver.handlers.auth")
 def request_registration(
     auth_client: AuthClient, req: Request, store_queue: StorageQueue
 ) -> Response:
-    """
-    Creates a new user registration request and immediately initiates Faroe signup.
-    Returns both registration_token and signup_token so the user can verify
-    their email and set a password right away (before admin approval).
+    """Create or reuse a registration row and attempt Faroe signup.
+
+    Returns registration_token (stable) and signup_token (ephemeral).
     """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
+        email_raw = body_data.get("email")
         firstname = body_data.get("firstname", "")
         lastname = body_data.get("lastname", "")
-        if not email:
+        if not email_raw:
             logger.warning("request_registration: Missing email in request")
             return Response.text("Missing email", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"request_registration: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    def register(
-        store: Storage,
-    ) -> str | EmailExistsInUserTable | EmailExistsInNewUserTable:
-        result = add_new_user(store, email, firstname, lastname)
-        if result is not None:
-            return result
-        registration_token = create_registration_state(store, email)
-        return registration_token
+    email = normalize_email(email_raw)
+
+    def register(store: Storage) -> Registration | EmailExistsInUserTable:
+        if store.get("users_by_email", email) is not None:
+            return EmailExistsInUserTable(email=email)
+        return create_or_reuse_registration(store, email, firstname, lastname)
 
     result = store_queue.execute(register)
     if isinstance(result, EmailExistsInUserTable):
@@ -82,25 +75,17 @@ def request_registration(
         return Response.text(
             "User with e-mail already exists in user table", status_code=400
         )
-    elif isinstance(result, EmailExistsInNewUserTable):
-        logger.warning(
-            f"request_registration: Email {email} already exists in newuser table"
-        )
-        return Response.text(
-            "User with e-mail already exists in newuser table", status_code=400
-        )
 
-    registration_token = result
+    reg = result
+    registration_token = reg.registration_token
 
-    # Immediately create Faroe signup (sends verification email)
+    # Attempt Faroe signup (sends verification email)
     signup_result = auth_client.create_signup(email)
     if isinstance(signup_result, ActionErrorResult):
         logger.error(
             f"request_registration: Faroe signup failed for {email}: "
             f"{signup_result.error_code}"
         )
-        # Registration was created but signup failed - return registration_token
-        # without signup_token so user can retry via renew_signup
         return Response.json(
             {
                 "success": True,
@@ -115,13 +100,14 @@ def request_registration(
 
     signup_token = signup_result.signup_token
 
-    # Store signup_token in registration_state (without changing accepted)
-    # Registration state was just created above, so this should always succeed
-    token_result = store_queue.execute(
-        lambda store: update_registration_state_signup_token(store, email, signup_token)
-    )
-    if isinstance(token_result, RegistrationStateNotFound):
-        logger.error(f"request_registration: Registration state missing for {email}")
+    # Store signup_token in registration
+    def save_signup_token(store: Storage) -> None:
+        r = get_registration(store, email)
+        if r is not None:
+            r.signup_token = signup_token
+            upsert_registration(store, r)
+
+    store_queue.execute(save_signup_token)
 
     logger.info(
         f"request_registration: Registered {email} with token {registration_token}"
@@ -139,11 +125,7 @@ def request_registration(
 def get_registration_status_handler(
     req: Request, store_queue: StorageQueue
 ) -> Response:
-    """
-    Handle /auth/registration_status.
-
-    Get registration status by token.
-    """
+    """Handle /auth/registration_status — resolve by registration_token."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         registration_token = body_data.get("registration_token")
@@ -155,15 +137,15 @@ def get_registration_status_handler(
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     def get_status(store: Storage) -> dict | None:
-        state = get_registration_state(store, registration_token)
-        if state is None:
+        reg = get_registration_by_token(store, registration_token)
+        if reg is None:
             return None
-
         return {
-            "email": state.email,
-            "accepted": state.accepted,
-            "signup_token": state.signup_token,
-            "notify_on_completion": state.notify_on_completion,
+            "email": reg.email,
+            "accepted": reg.accepted,
+            "account_created": reg.account_created,
+            "signup_token": reg.signup_token,
+            "notify_on_completion": reg.notify_on_completion,
         }
 
     result = store_queue.execute(get_status)
@@ -179,35 +161,30 @@ def get_registration_status_handler(
 
 
 def lookup_registration_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """
-    Handle /auth/lookup_registration.
-
-    Look up registration token by email and verification code.
-    Used when users don't have the direct link but have received the email.
-    """
+    """Handle /auth/lookup_registration — look up by email and verification code."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
+        email_raw = body_data.get("email")
         code = body_data.get("code")
-        if not email or not code:
+        if not email_raw or not code:
             logger.warning("lookup_registration: Missing email or code")
             return Response.text("Missing email or code", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"lookup_registration: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
+    email = normalize_email(email_raw)
+
     def lookup(store: Storage) -> dict:
-        # First verify the code matches what we have stored
-        stored = get_code(store, "signup_verification", email)
+        stored = peek_code(store, "signup_verification", email)
         if stored is None or stored.get("code") != code:
             return {"found": False}
 
-        # Code matches, get the registration token
-        reg_token = get_registration_token_by_email(store, email)
-        if reg_token is None:
+        reg = get_registration(store, email)
+        if reg is None:
             return {"found": False}
 
-        return {"found": True, "token": reg_token}
+        return {"found": True, "token": reg.registration_token}
 
     result = store_queue.execute(lookup)
     logger.info(f"lookup_registration: email={email}, found={result['found']}")
@@ -217,40 +194,31 @@ def lookup_registration_handler(req: Request, store_queue: StorageQueue) -> Resp
 def resend_signup_email_handler(
     auth_client: AuthClient, req: Request, store_queue: StorageQueue
 ) -> Response:
-    """Handle /admin/resend_signup_email/ - (re)sends signup verification email.
-
-    Faroe signups expire after ~20 minutes.  If the stored signup_token is
-    stale or was never created (accept_new without signup), a new signup is
-    created in Faroe and the token is updated in registration_state.
-    """
+    """Handle /admin/resend_signup_email/ — resend or create new signup."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
-        if not email:
+        email_raw = body_data.get("email")
+        if not email_raw:
             logger.warning("resend_signup_email: Missing email in request")
             return Response.text("Missing email", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"resend_signup_email: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Verify user has a registration state (was accepted through the newuser flow)
-    def get_tokens(store: Storage) -> tuple[str | None, str | None]:
-        return (
-            get_signup_token_by_email(store, email),
-            get_registration_token_by_email(store, email),
-        )
+    email = normalize_email(email_raw)
 
-    signup_token, registration_token = store_queue.execute(get_tokens)
-
-    if registration_token is None:
+    reg = store_queue.execute(lambda store: get_registration(store, email))
+    if reg is None:
         logger.warning(f"resend_signup_email: No registration found for {email}")
         return Response.json(
             {"error": f"No registration found for {email}"}, status_code=404
         )
 
     # Try resending with existing token (fast path when signup is still active)
-    if signup_token is not None:
-        result = auth_client.send_signup_email_address_verification_code(signup_token)
+    if reg.signup_token is not None:
+        result = auth_client.send_signup_email_address_verification_code(
+            reg.signup_token
+        )
         if not isinstance(result, ActionErrorResult):
             logger.info(f"resend_signup_email: Resent verification email to {email}")
             return Response.json(
@@ -261,7 +229,7 @@ def resend_signup_email_handler(
             f"creating new signup for {email}"
         )
 
-    # Create new signup — Faroe sends the verification email automatically
+    # Create new signup
     signup_result = auth_client.create_signup(email)
     if isinstance(signup_result, ActionErrorResult):
         logger.error(
@@ -276,13 +244,15 @@ def resend_signup_email_handler(
             status_code=400,
         )
 
-    # Store the new token so the next resend can try the fast path
     new_token = signup_result.signup_token
-    token_result = store_queue.execute(
-        lambda store: update_registration_state_signup_token(store, email, new_token)
-    )
-    if isinstance(token_result, RegistrationStateNotFound):
-        logger.error(f"resend_signup_email: Registration state missing for {email}")
+
+    def save_token(store: Storage) -> None:
+        r = get_registration(store, email)
+        if r is not None:
+            r.signup_token = new_token
+            upsert_registration(store, r)
+
+    store_queue.execute(save_token)
 
     logger.info(f"resend_signup_email: New signup created, email sent to {email}")
     return Response.json({"success": True, "message": f"Signup email sent to {email}"})
@@ -291,13 +261,7 @@ def resend_signup_email_handler(
 def renew_signup_handler(
     auth_client: AuthClient, req: Request, store_queue: StorageQueue
 ) -> Response:
-    """Handle /auth/renew_signup - renew an expired Faroe signup.
-
-    Called by the frontend when email verification fails with invalid_signup_token.
-    Takes the registration_token (from the signup URL) as authentication.
-    Creates a new Faroe signup (which auto-sends a new verification email)
-    and updates the stored signup_token.
-    """
+    """Handle /auth/renew_signup — create fresh Faroe signup by registration_token."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         registration_token = body_data.get("registration_token")
@@ -306,16 +270,14 @@ def renew_signup_handler(
     except (json.JSONDecodeError, ValueError) as e:
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Look up registration state (uses registration_token as key)
-    state = store_queue.execute(
-        lambda store: get_registration_state(store, registration_token)
+    reg = store_queue.execute(
+        lambda store: get_registration_by_token(store, registration_token)
     )
-    if state is None:
+    if reg is None:
         return Response.json({"error": "Registration not found"}, status_code=404)
 
-    email = state.email
+    email = reg.email
 
-    # Create new Faroe signup — sends verification email automatically
     signup_result = auth_client.create_signup(email)
     if isinstance(signup_result, ActionErrorResult):
         logger.error(f"renew_signup: Failed for {email}: {signup_result.error_code}")
@@ -328,11 +290,14 @@ def renew_signup_handler(
         )
 
     new_token = signup_result.signup_token
-    token_result = store_queue.execute(
-        lambda store: update_registration_state_signup_token(store, email, new_token)
-    )
-    if isinstance(token_result, RegistrationStateNotFound):
-        logger.error(f"renew_signup: Registration state missing for {email}")
+
+    def save_token(store: Storage) -> None:
+        r = get_registration(store, email)
+        if r is not None:
+            r.signup_token = new_token
+            upsert_registration(store, r)
+
+    store_queue.execute(save_token)
 
     logger.info(f"renew_signup: New signup created for {email}")
     return Response.json({"success": True, "signup_token": new_token, "email": email})
@@ -341,23 +306,15 @@ def renew_signup_handler(
 def set_session(
     auth_client: AuthClient,
     req: Request,
-    headers: dict[str, str],
     store_queue: StorageQueue,
     smtp_config: SmtpConfig | None = None,
     smtp_send: bool = False,
     frontend_origin: str = "",
 ) -> Response:
-    """Handle /auth/set_session/ - validates and sets session cookie.
+    """Handle /auth/set_session/ — validate and set session cookie.
 
-    Also handles deferred acceptance emails (Scenario 1): if the user was
-    accepted before completing signup, notify_on_completion is set in their
-    registration state. On the first set_session after signup completes,
-    this function detects the flag, sends the account_accepted_self email,
-    and clears it.
-
-    Request body:
-        session_token: The session token to set
-        secondary: Optional boolean, if true sets the secondary session cookie
+    Also handles deferred acceptance emails: if notify_on_completion is set,
+    sends account_accepted_self and deletes the registration row.
     """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
@@ -370,24 +327,23 @@ def set_session(
         logger.warning(f"set_session: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Validate session with auth server (and cache it)
     result = validate_session(auth_client, session_token, store_queue)
     if isinstance(result, InvalidSessionToken):
         logger.info("set_session: Session validation failed")
         return Response.text("Invalid session_token", status_code=401)
 
-    # Check for deferred acceptance email (Scenario 1)
-    def check_and_clear_notify(store: Storage) -> tuple[bool, str | None]:
+    # Check for deferred acceptance email (don't delete yet — need retry on failure)
+    def check_notify(store: Storage) -> tuple[bool, str | None]:
         user_info = get_user_info(store, int(time.time()), result.user_id)
         if user_info is None:
             return False, None
         email = user_info.email
-        if get_notify_on_completion(store, email):
-            clear_notify_on_completion(store, email)
+        reg = get_registration(store, email)
+        if reg is not None and reg.notify_on_completion:
             return True, email
         return False, None
 
-    should_notify, user_email = store_queue.execute(check_and_clear_notify)
+    should_notify, user_email = store_queue.execute(check_notify)
     if should_notify and user_email:
         try:
             link = frontend_origin
@@ -398,7 +354,8 @@ def set_session(
             )
             sendemail(smtp_config, email_data, smtp_send)
             logger.info(f"set_session: Sent deferred acceptance email to {user_email}")
-        except Exception as exc:
+            store_queue.execute(lambda store: delete_registration(store, user_email))
+        except (smtplib.SMTPException, OSError) as exc:
             logger.error(
                 f"set_session: Failed to send deferred email to {user_email}: {exc}"
             )
@@ -408,7 +365,6 @@ def set_session(
 
     max_session_age = 86400 * 365
 
-    # Build Set-Cookie header using http.cookies
     cookie = SimpleCookie()
     cookie[cookie_name] = session_token
     cookie[cookie_name]["httponly"] = True
@@ -426,20 +382,15 @@ def set_session(
     )
 
 
-def clear_session(req: Request, headers: dict[str, str]) -> Response:
-    """Handle /auth/clear_session/ - clears session cookie.
-
-    Request body (optional):
-        secondary: Optional boolean, if true clears the secondary session cookie
-    """
-    # Parse optional body for secondary flag
+def clear_session(req: Request) -> Response:
+    """Handle /auth/clear_session/ — clear session cookie."""
     secondary = False
     if req.body:
         try:
             body_data = json.loads(req.body.decode("utf-8"))
             secondary = body_data.get("secondary", False)
         except json.JSONDecodeError, ValueError:
-            pass  # Ignore invalid body, default to primary
+            pass
 
     cookie_name = SESSION_COOKIE_SECONDARY if secondary else SESSION_COOKIE_PRIMARY
     logger.info(f"clear_session: Clearing {cookie_name} cookie")
@@ -452,15 +403,11 @@ def session_info(
     headers: dict[str, str],
     store_queue: StorageQueue,
 ) -> Response:
-    """Handle /auth/session_info/ - gets session information.
+    """Handle /auth/session_info/ — returns current user info and permissions.
 
-    Query params:
-        secondary: If "true", check secondary session instead of primary.
-
-    By default checks primary session (the logged-in user). Use secondary=true
-    to check the authorization-only session.
+    pending_approval is True when a registrations row exists with
+    account_created=True and accepted=False.
     """
-    # Parse query params to check for secondary flag
     secondary = False
     if "?" in req.path:
         query = parse_qs(urlparse(req.path).query)
@@ -473,7 +420,6 @@ def session_info(
         logger.debug(f"session_info: No {cookie_name} cookie found")
         return Response.json({"error": "no_session"})
 
-    # Validate session with auth server (and cache it)
     result = validate_session(auth_client, session_token, store_queue)
     if isinstance(result, InvalidSessionToken):
         logger.info(f"session_info: {cookie_name} validation failed")
@@ -485,14 +431,14 @@ def session_info(
 
     timestamp = int(time.time())
 
-    # Get user info from database
     def get_session_data(
         store: Storage,
     ) -> tuple[SessionInfo, bool] | InvalidSession:
         user = get_user_info(store, timestamp, result.user_id)
         if user is None:
             return InvalidSession()
-        pending = store.get("newusers", user.email) is not None
+        reg = get_registration(store, user.email)
+        pending = reg is not None and reg.account_created and not reg.accepted
         return (
             SessionInfo(
                 user=user,
@@ -532,7 +478,7 @@ def session_info(
 
 
 def get_session_token_handler(headers: dict[str, str]) -> Response:
-    """Handle /cookies/session_token/ - returns session token from primary cookie."""
+    """Handle /cookies/session_token/ — returns session token from primary cookie."""
     session_token = get_cookie_value(headers, SESSION_COOKIE_PRIMARY)
 
     if session_token is None:

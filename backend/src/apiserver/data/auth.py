@@ -32,7 +32,12 @@ from tiauth_faroe.user_server import (
 )
 
 from apiserver.data.permissions import Permissions, add_permission
-from apiserver.data.registration_state import delete_registration_state
+from apiserver.data.registrations import (
+    get_registration,
+    normalize_email,
+    upsert_registration,
+    delete_registration,
+)
 
 logger = logging.getLogger("apiserver.auth")
 
@@ -40,30 +45,33 @@ logger = logging.getLogger("apiserver.auth")
 def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     """Create a new user account from a completed Faroe signup.
 
-    Users must exist in the newusers table to complete signup. If the user
-    has been accepted (by admin or sync), they are granted the member
-    permission and removed from newusers. If not yet accepted, the user
-    account is created but they remain in newusers for later admin approval.
+    Requires a registrations[email] row with account_created=False.
+    If accepted=True, grants member permission immediately.
+    Sets account_created=True and clears signup_token.
+
+    Registration row lifecycle after this function:
+    - accepted=True, notify_on_completion=False: delete immediately
+    - accepted=True, notify_on_completion=True: keep until set_session
+    - accepted=False: keep for later admin approval
     """
-    email = effect.email_address
+    email = normalize_email(effect.email_address)
 
     user_id_result = store.get("users_by_email", email)
     if user_id_result is not None:
         logger.info(f"User with email {email} already exists")
         return ActionError("email_address_already_used")
 
-    # We only allow users that have been accepted through the newusers flow
-    newuser_result = store.get("newusers", email)
-    if newuser_result is None:
-        logger.info(f"Could not find user in newusers table with email={email}")
+    reg = get_registration(store, email)
+    if reg is None:
+        logger.info(f"No registration found for email={email}")
         return ActionError("user_not_found")
+    if reg.account_created:
+        logger.info(f"Account already created for email={email}")
+        return ActionError("email_address_already_used")
 
-    newuser_bytes, _ = newuser_result
-    newuser_data = json.loads(newuser_bytes.decode("utf-8"))
-
-    firstname = newuser_data["firstname"]
-    lastname = newuser_data["lastname"]
-    accepted = newuser_data["accepted"]
+    firstname = reg.firstname
+    lastname = reg.lastname
+    accepted = reg.accepted
 
     # We store a global counter that tracks the max user_id
     counter_result = store.get("metadata", "user_id_counter")
@@ -99,21 +107,25 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     store.add("users", f"{user_id}:password", password_bytes, expires_at=0)
     store.add("users", f"{user_id}:disabled", b"0", expires_at=0)
     store.add("users", f"{user_id}:sessions_counter", b"0", expires_at=0)
-    # Permissions are now stored as separate keys with native expiration
-    # This is used as an index to find a user_id by email
     store.add("users_by_email", email, user_id.encode("utf-8"), expires_at=0)
 
+    # Update registration row
+    reg.account_created = True
+    reg.signup_token = None
+
     if accepted:
-        # Grant member permission (1-year TTL, renewed by update_existing during sync).
         timestamp = int(time.time())
         add_permission(store, timestamp, user_id, Permissions.MEMBER)
-        # Remove newuser entry since acceptance is complete
-        store.delete("newusers", email)
+        if not reg.notify_on_completion:
+            # Lifecycle complete — delete registration
+            delete_registration(store, email)
+        else:
+            # Keep until set_session sends the deferred acceptance email
+            upsert_registration(store, reg)
     else:
-        logger.info(f"User {user_id} created but not yet accepted, staying in newusers")
-
-    # Registration state is no longer needed once the account exists
-    delete_registration_state(store, email)
+        # Keep registration for later admin approval
+        upsert_registration(store, reg)
+        logger.info(f"User {user_id} created but not yet accepted")
 
     logger.info(f"Created user {user_id} with email {email}")
     return User(
@@ -198,7 +210,8 @@ def get_user(store: Storage, effect: GetUserEffect) -> EffectResult:
 def get_user_by_email_address(
     store: Storage, effect: GetUserByEmailAddressEffect
 ) -> EffectResult:
-    email_index_result = store.get("users_by_email", effect.email_address)
+    email = normalize_email(effect.email_address)
+    email_index_result = store.get("users_by_email", email)
     if email_index_result is None:
         logger.info(f"User with email {effect.email_address} not found")
         return ActionError("user_not_found")
@@ -219,7 +232,7 @@ def update_user_email_address(
     store: Storage, effect: UpdateUserEmailAddressEffect
 ) -> EffectResult:
     user_id = effect.user_id
-    new_email = effect.email_address
+    new_email = normalize_email(effect.email_address)
 
     # Get current email
     old_email_result = store.get("users", f"{user_id}:email")
@@ -241,15 +254,15 @@ def update_user_email_address(
         logger.info(f"Email {new_email} already in use")
         return ActionError("email_address_already_used")
 
-    # Update email (assert_updated=True by default - will assert on counter mismatch)
+    # Use the non-throwing variant because a missing/stale record
+    # maps to an action error.
     new_email_bytes = new_email.encode("utf-8")
-    updated = store.update(
+    updated = store.try_update(
         "users",
         f"{user_id}:email",
         new_email_bytes,
         effect.user_email_address_counter,
         expires_at=0,
-        assert_updated=False,
     )
     if not updated:
         return ActionError("user_not_found")
@@ -274,13 +287,12 @@ def update_user_password_hash(
     }
     new_password_bytes = json.dumps(password_data).encode("utf-8")
 
-    updated = store.update(
+    updated = store.try_update(
         "users",
         f"{user_id}:password",
         new_password_bytes,
         effect.user_password_hash_counter,
         expires_at=0,
-        assert_updated=False,
     )
 
     if not updated:
@@ -305,15 +317,17 @@ def increment_user_sessions_counter(
     sessions_bytes, _ = sessions_result
     current_count = int(sessions_bytes.decode("utf-8"))
 
-    # Increment sessions counter (assert_updated=True by default)
     new_count_bytes = str(current_count + 1).encode("utf-8")
-    store.update(
+    updated = store.try_update(
         "users",
         f"{user_id}:sessions_counter",
         new_count_bytes,
         effect.user_sessions_counter,
         expires_at=0,
     )
+    if not updated:
+        logger.info(f"Stale sessions counter for user {user_id}")
+        return ActionError("user_not_found")
 
     logger.info(
         f"Incremented sessions counter for user {user_id} to {current_count + 1}"

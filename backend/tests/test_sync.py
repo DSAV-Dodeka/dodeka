@@ -203,7 +203,7 @@ class TestSync:
         assert result["added"] == 3
 
     def test_compute_groups_after_accept(self, command: Command) -> None:
-        """Accepted users move to pending (in newusers, not yet registered)."""
+        """Accepted users move to pending signup until they finish registration."""
         result = command("compute_groups")
         assert len(result["to_accept"]) == 0
         assert len(result["pending_signup"]) == 3
@@ -598,11 +598,12 @@ class TestSync:
         assert by_name["Bob"]["geboortedatum"] == "20/06/1992"
         assert by_name["Bob"]["tussenvoegsel"] == "de"
 
-    def test_userdata_not_populated_at_account_creation(self, command: Command) -> None:
-        """Account creation does not populate userdata or birthdays.
+    def test_accept_new_populates_userdata(self, command: Command) -> None:
+        """accept_new stores userdata and birthdays for new entries.
 
-        Spec: update_existing is the only path that populates userdata
-        and birthdays. Creating an account alone does not.
+        Spec: accept_new stores sync data (userdata, birthday, bondsnummer
+        index) at acceptance time. Creating an account alone (create_user)
+        does not add to these tables.
         """
         new_member = {
             "Bondsnummer": "2001",
@@ -616,19 +617,22 @@ class TestSync:
         csv_content = make_au_csv([alice_new, MEMBERS[1], MEMBERS[2], new_member])
         command("import_sync", csv_content=csv_content)
 
-        # Accept and create account for eve
+        # Accept eve — this stores userdata, birthday, and bondsnummer
         command("accept_new", email="eve@example.com")
+
+        # Create the account
         result = command("create_accounts", password="Str0ng_T3st_P@ss!2024")
         assert result["created"] == 1
 
-        # Eve is in existing (registered) with null current userdata
+        # Eve is in existing with populated current userdata
         groups = command("compute_groups")
         eve_pairs = [
             e for e in groups["existing"] if e["sync"]["email"] == "eve@example.com"
         ]
         assert len(eve_pairs) == 1
-        assert eve_pairs[0]["current"] is None
+        assert eve_pairs[0]["current"] is not None
+        assert eve_pairs[0]["current"]["voornaam"] == "Eve"
 
-        # Eve not in birthdays (not populated until update_existing)
+        # Eve's birthday was populated at accept_new time
         birthdays = command("list_birthdays")
-        assert "Eve" not in {b["voornaam"] for b in birthdays}
+        assert "Eve" in {b["voornaam"] for b in birthdays}

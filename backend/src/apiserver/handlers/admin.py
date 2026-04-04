@@ -5,16 +5,13 @@ Handles user management, permissions, sync operations, and related flows.
 
 import json
 import logging
+import smtplib
 import time
+from dataclasses import asdict
 
 from freetser import Request, Response, Storage
 from freetser.server import StorageQueue
 
-from apiserver.data.newuser import (
-    EmailNotFoundInNewUserTable,
-    list_new_users,
-    update_accepted_flag,
-)
 from apiserver.data.permissions import (
     Permissions,
     UserNotFoundError,
@@ -24,15 +21,16 @@ from apiserver.data.permissions import (
     read_permissions,
     remove_permission,
 )
-from apiserver.data.registration_state import (
-    RegistrationStateNotFound,
-    get_email_send_count_by_email,
-    get_registration_token_by_email,
-    get_signup_token_by_email,
-    mark_registration_state_accepted,
+from apiserver.data.registrations import (
+    delete_registration,
+    get_registration,
+    list_registrations,
+    normalize_email,
+    upsert_registration,
 )
 from apiserver.data.user import list_all_users
 from apiserver.email import EmailData, sendemail
+from apiserver.handlers.acceptance import do_accept_new_with_email
 from apiserver.settings import SmtpConfig
 from apiserver.sync import (
     compute_groups,
@@ -43,39 +41,35 @@ from apiserver.sync import (
     serialize_groups,
     update_existing,
 )
-from apiserver.tooling.command_handlers import do_accept_new_with_email
 
 logger = logging.getLogger("apiserver.handlers.admin")
 
 
 def list_newusers_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/list_newusers/ - lists all pending user registrations."""
+    """Handle /admin/list_newusers/ — lists all pending registrations."""
 
-    def list_users(store: Storage) -> list:
-        users = list_new_users(store)
+    def list_regs(store: Storage) -> list:
+        regs = list_registrations(store)
         result = []
-        for user in users:
-            is_registered = store.get("users_by_email", user.email) is not None
-            reg_token = get_registration_token_by_email(store, user.email)
+        for reg in regs:
+            is_registered = store.get("users_by_email", reg.email) is not None
             result.append(
                 {
-                    "email": user.email,
-                    "firstname": user.firstname,
-                    "lastname": user.lastname,
-                    "accepted": user.accepted,
-                    "email_send_count": get_email_send_count_by_email(
-                        store, user.email
-                    ),
-                    "has_signup_token": get_signup_token_by_email(store, user.email)
-                    is not None,
+                    "email": reg.email,
+                    "firstname": reg.firstname,
+                    "lastname": reg.lastname,
+                    "accepted": reg.accepted,
+                    "account_created": reg.account_created,
+                    "email_send_count": reg.email_send_count,
+                    "has_signup_token": reg.signup_token is not None,
                     "is_registered": is_registered,
-                    "registration_token": reg_token,
+                    "registration_token": reg.registration_token,
                 }
             )
         return result
 
-    result = store_queue.execute(list_users)
-    logger.info(f"list_newusers: Returning {len(result)} users")
+    result = store_queue.execute(list_regs)
+    logger.info(f"list_newusers: Returning {len(result)} registrations")
     return Response.json(result)
 
 
@@ -86,66 +80,52 @@ def accept_user_handler(
     smtp_config: SmtpConfig | None,
     smtp_send: bool,
 ) -> Response:
-    """Handle /admin/accept_user/ - accept a user and send notification email.
+    """Handle /admin/accept_user/ — accept a user.
 
-    If the user already completed signup (exists in users table), grants member
-    permission and sends acceptance notification with homepage link.
-    Otherwise marks accepted=True on the newuser entry and sends acceptance
-    email with link to create their account.
+    If user already has account: grant member, send acceptance email, clean up.
+    If no account yet: mark accepted, set notify_on_completion for deferred email.
     """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
-        email = body_data.get("email")
-        if not email:
+        email_raw = body_data.get("email")
+        if not email_raw:
             logger.warning("accept_user: Missing email in request")
             return Response.text("Missing email", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"accept_user: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
+    email = normalize_email(email_raw)
     timestamp = int(time.time())
 
     def accept(store: Storage) -> dict:
-        # Check if user already completed signup (exists in users table)
+        reg = get_registration(store, email)
+        if reg is None:
+            return {"error": f"No registration found for {email}"}
+
         user_result = store.get("users_by_email", email)
         if user_result is not None:
-            # User already has an account — grant member + clean up newuser
+            # User already has an account — grant member + clean up
             user_id = user_result[0].decode("utf-8")
             add_permission(store, timestamp, user_id, Permissions.MEMBER)
-            store.delete("newusers", email)
+            delete_registration(store, email)
             return {
                 "success": True,
                 "has_account": True,
+                "display_name": reg.firstname,
                 "message": f"Member permission granted to {email}",
             }
 
-        # User hasn't completed signup yet — mark accepted in newusers and
-        # registration_state. Set notify_on_completion so set_session sends
-        # the deferred acceptance email after signup completes.
-        flag_result = update_accepted_flag(store, email, True)
-        if isinstance(flag_result, EmailNotFoundInNewUserTable):
-            return {"error": f"Email {email} not found in newuser table"}
-
-        reg_result = mark_registration_state_accepted(
-            store, email, notify_on_completion=True
-        )
-        if isinstance(reg_result, RegistrationStateNotFound):
-            return {"error": f"No registration state found for {email}"}
-
-        reg_token = get_registration_token_by_email(store, email)
-
-        # Get display name from newuser
-        newuser_data = store.get("newusers", email)
-        display_name = None
-        if newuser_data is not None:
-            data = json.loads(newuser_data[0].decode("utf-8"))
-            display_name = data.get("firstname")
+        # No account yet — mark accepted, set notify_on_completion
+        reg.accepted = True
+        reg.notify_on_completion = True
+        upsert_registration(store, reg)
 
         return {
             "success": True,
             "has_account": False,
-            "registration_token": reg_token,
-            "display_name": display_name,
+            "registration_token": reg.registration_token,
+            "display_name": reg.firstname,
             "message": f"User {email} marked as accepted (pending signup completion)",
         }
 
@@ -154,9 +134,7 @@ def accept_user_handler(
         logger.warning(f"accept_user: {result['error']}")
         return Response.json(result, status_code=400)
 
-    # Send acceptance email only if user already has an account.
-    # If they haven't completed signup yet, the email is deferred to
-    # set_session via the notify_on_completion flag (Scenario 1).
+    # Send acceptance email if user already has an account
     if result.get("has_account"):
         try:
             link = frontend_origin
@@ -167,7 +145,7 @@ def accept_user_handler(
                 link=link,
             )
             sendemail(smtp_config, email_data, smtp_send)
-        except Exception as exc:
+        except (smtplib.SMTPException, OSError) as exc:
             logger.error(
                 f"accept_user: Failed to send acceptance email to {email}: {exc}"
             )
@@ -177,7 +155,7 @@ def accept_user_handler(
 
 
 def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/add_permission/ - adds a permission to a user (except admin)."""
+    """Handle /admin/add_permission/ — adds a permission to a user (except admin)."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         user_id = body_data.get("user_id")
@@ -189,7 +167,6 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
         logger.warning(f"add_user_permission: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Block adding admin permission through public API
     if permission == "admin":
         logger.error(
             f"add_user_permission: Attempted to add admin permission to {user_id}"
@@ -218,7 +195,7 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
 
 
 def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/remove_permission/ - removes a permission from a user."""
+    """Handle /admin/remove_permission/ — removes a permission from a user."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         user_id = body_data.get("user_id")
@@ -250,7 +227,7 @@ def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
 
 
 def list_users_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/list_users/ - lists all users with their permissions."""
+    """Handle /admin/list_users/ — lists all users with their permissions."""
     timestamp = int(time.time())
 
     def get_users(store: Storage) -> list[dict]:
@@ -272,26 +249,13 @@ def list_users_handler(store_queue: StorageQueue) -> Response:
 
 
 def available_permissions_handler() -> Response:
-    """Handle /admin/available_permissions/ - lists all valid permissions."""
+    """Handle /admin/available_permissions/ — lists all valid permissions."""
     permissions = get_all_permissions()
     return Response.json({"permissions": permissions})
 
 
 def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/set_permissions/ - declaratively set permissions for users.
-
-    Request body (JSON):
-        {
-            "permissions": {
-                "user_id_1": ["permission1", "permission2"],
-                "user_id_2": ["permission3"],
-                ...
-            }
-        }
-
-    This will set each user's permissions to exactly the list provided,
-    adding missing permissions and removing extra ones (except 'admin').
-    """
+    """Handle /admin/set_permissions/ — declaratively set permissions for users."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         permissions_map = body_data.get("permissions")
@@ -302,7 +266,6 @@ def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response
         logger.warning(f"set_permissions: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    # Validate all permissions first
     for user_id, perms in permissions_map.items():
         if not isinstance(perms, list):
             return Response.text(
@@ -322,22 +285,17 @@ def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response
     def apply_permissions(store: Storage) -> None:
         for user_id, target_perms in permissions_map.items():
             target_set = set(target_perms)
-
-            # Get current permissions (excluding admin)
             current = read_permissions(store, timestamp, user_id)
             if isinstance(current, UserNotFoundError):
                 results[user_id] = {"error": "user_not_found"}
                 continue
 
-            # Don't touch admin permission
             current_non_admin = current - {"admin"}
             target_non_admin = target_set - {"admin"}
 
-            # Calculate changes
             to_add = target_non_admin - current_non_admin
             to_remove = current_non_admin - target_non_admin
 
-            # Apply changes
             for perm in to_add:
                 add_permission(store, timestamp, user_id, perm)
             for perm in to_remove:
@@ -354,7 +312,7 @@ def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response
 
 
 def import_sync_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/import_sync/ - import CSV content into sync table."""
+    """Handle /admin/import_sync/ — import CSV content into sync table."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         csv_content = body_data.get("csv_content")
@@ -370,7 +328,7 @@ def import_sync_handler(req: Request, store_queue: StorageQueue) -> Response:
 
 
 def sync_status_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/sync_status/ - compute and return sync groups."""
+    """Handle /admin/sync_status/ — compute and return sync groups."""
     result = store_queue.execute(lambda store: serialize_groups(compute_groups(store)))
     logger.info(
         f"sync_status: {len(result['to_accept'])} to_accept, "
@@ -388,27 +346,32 @@ def accept_new_sync_handler(
     smtp_config: SmtpConfig | None,
     smtp_send: bool,
 ) -> Response:
-    """Handle /admin/accept_new_sync/ - accept new users and send acceptance emails."""
+    """Handle /admin/accept_new_sync/ — accept new users and send emails."""
     email = None
     if req.body:
         try:
             body_data = json.loads(req.body.decode("utf-8"))
-            email = body_data.get("email")
+            raw_email = body_data.get("email")
+            if raw_email:
+                email = normalize_email(raw_email)
         except json.JSONDecodeError, ValueError:
             pass
+
     result = do_accept_new_with_email(
         store_queue, frontend_origin, smtp_config, smtp_send, email
     )
-    return Response.json(result)
+    return Response.json(asdict(result))
 
 
 def remove_departed_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/remove_departed/ - remove departed users."""
+    """Handle /admin/remove_departed/ — remove departed users."""
     email = None
     if req.body:
         try:
             body_data = json.loads(req.body.decode("utf-8"))
-            email = body_data.get("email")
+            raw_email = body_data.get("email")
+            if raw_email:
+                email = normalize_email(raw_email)
         except json.JSONDecodeError, ValueError:
             pass
     timestamp = int(time.time())
@@ -418,12 +381,14 @@ def remove_departed_handler(req: Request, store_queue: StorageQueue) -> Response
 
 
 def update_existing_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/update_existing/ - update existing user data from sync."""
+    """Handle /admin/update_existing/ — update existing user data from sync."""
     email = None
     if req.body:
         try:
             body_data = json.loads(req.body.decode("utf-8"))
-            email = body_data.get("email")
+            raw_email = body_data.get("email")
+            if raw_email:
+                email = normalize_email(raw_email)
         except json.JSONDecodeError, ValueError:
             pass
     result = store_queue.execute(lambda store: update_existing(store, email))
@@ -432,6 +397,6 @@ def update_existing_handler(req: Request, store_queue: StorageQueue) -> Response
 
 
 def list_system_users_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/list_system_users/ - list system users."""
+    """Handle /admin/list_system_users/ — list system users."""
     users = store_queue.execute(list_system_users)
     return Response.json({"system_users": users})

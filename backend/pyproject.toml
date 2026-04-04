@@ -14,7 +14,7 @@ license-files = ["LICENSE"]
 dependencies = [
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
-    "freetser==0.4.1",
+    "freetser>=0.5.0",
     "requests==2.32.5",
     # pin to exact version since freetser doesn't pin
     "h11==0.16.0"
@@ -22,7 +22,10 @@ dependencies = [
 
 [tool.uv]
 default-groups = ["dev"]
+# Only allow packages uploaded at least 3 days ago to guard against supply chain attacks
 exclude-newer = "3 days"
+# freetser is our own package, exempt from the delay
+exclude-newer-package = { freetser = false }
 
 [tool.uv.sources]
 "tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/user-server", rev = "3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" }
@@ -44,13 +47,13 @@ production = "apiserver.app:run_production"
 
 [dependency-groups]
 dev = [
-    "ty>=0.0.17",
+    "ty>=0.0.26",
     "pytest>=9.0.1",
     "ruff>=0.15.0",
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.11,<0.11.0"]
+requires = ["uv_build>=0.9.11,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]

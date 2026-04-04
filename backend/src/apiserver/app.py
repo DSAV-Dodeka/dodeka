@@ -96,7 +96,6 @@ def handler_with_client(
         return set_session(
             auth_client,
             req,
-            headers,
             store_queue,
             smtp_config,
             smtp_send,
@@ -104,7 +103,7 @@ def handler_with_client(
         )
 
     def h_clear_sess():
-        return clear_session(req, headers)
+        return clear_session(req)
 
     def h_sess_info():
         return session_info(auth_client, req, headers, store_queue)

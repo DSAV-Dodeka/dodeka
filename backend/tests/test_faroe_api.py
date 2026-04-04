@@ -18,6 +18,7 @@ import secrets
 import time
 
 import pytest
+from freetser import Storage
 from tiauth_faroe.client import (
     ActionErrorResult,
     CompleteSigninActionSuccessResult,
@@ -26,6 +27,13 @@ from tiauth_faroe.client import (
     CreateSignupActionSuccessResult,
     GetSessionActionSuccessResult,
 )
+from tiauth_faroe.user_server import (
+    ActionError,
+    IncrementUserSessionsCounterEffect,
+)
+
+from apiserver.data import DB_TABLES
+from apiserver.data.auth import increment_user_sessions_counter
 
 TEST_PASSWORD = "Str0ng!Pass#2025"
 
@@ -212,3 +220,26 @@ class TestSessionFlow:
         assert isinstance(result, ActionErrorResult)
         assert result.ok is False
         assert result.error_code == "invalid_session_token"
+
+
+def test_increment_sessions_counter_stale_counter_returns_action_error():
+    """Faroe effect contract: stale session counter maps to user_not_found."""
+    storage = Storage(":memory:", DB_TABLES)
+    try:
+        storage.add("users", "user-1:email", b"user@example.com", expires_at=0)
+        storage.add("users", "user-1:sessions_counter", b"1", expires_at=0)
+        storage.update("users", "user-1:sessions_counter", b"1", 0, expires_at=0)
+
+        result = increment_user_sessions_counter(
+            storage,
+            IncrementUserSessionsCounterEffect(
+                action_invocation_id="test",
+                user_id="user-1",
+                user_sessions_counter=0,
+            ),
+        )
+
+        assert isinstance(result, ActionError)
+        assert result.error_code == "user_not_found"
+    finally:
+        storage.close()
