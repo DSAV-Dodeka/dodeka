@@ -4,21 +4,6 @@ This module provides:
 - HTTP client functions for talking to the private server
 - An argparse parser factory for the CLI
 - Command execution functions (one per command) that print output directly
-
-Commands:
-- reset: clear all tables and re-bootstrap admin
-- prepare-user: create user ready for tiauth-faroe signup flow (testing)
-- get-admin-credentials: return bootstrapped admin email/password
-- get-token: retrieve email verification code (for test automation)
-- import-sync: parse CSV export and import into sync table
-- sync-status: compute and display sync groups (departed/new/existing)
-- remove-departed: revoke member permission for departed users
-- accept-new: add new users as board-accepted and initiate signup
-- board-setup: one-time setup for the Bestuur (board) account
-- board-renew: yearly renewal (password reset + admin permission)
-- grant-admin: grant admin permission to a user
-- update-existing: update userdata from sync for existing users
-- create-accounts: complete signup for all accepted newusers (testing)
 """
 
 import argparse
@@ -81,7 +66,7 @@ def cmd_reset(args: argparse.Namespace) -> None:
 
 
 def cmd_prepare_user(args: argparse.Namespace) -> None:
-    """Prepare a user in the newusers table with accepted=True."""
+    """Prepare a user with an accepted registration."""
     names = []
     if args.firstname:
         names.append(args.firstname)
@@ -113,69 +98,68 @@ def cmd_import_sync(args: argparse.Namespace) -> None:
 
 
 def cmd_sync_status(args: argparse.Namespace) -> None:
-    """Compute and display sync groups."""
+    """Compute and display sync status."""
     data = send_command_json("compute_groups")
     if data is None:
         return
 
-    departed = data.get("departed", [])
-    new = data.get("new", [])
-    pending = data.get("pending", [])
+    review = data.get("review_required", [])
+    linked_regs = data.get("linked_registrations", [])
     existing = data.get("existing", [])
+    departed = data.get("departed", [])
 
     print("=== Sync Status ===")
-    print(f"\nDeparted ({len(departed)} users - in system but not in import):")
-    for email in departed:
-        print(f"  {email}")
+    print(f"\nReview Required ({len(review)} rows):")
+    for item in review:
+        bn = item["bondsnummer"]
+        volta = item.get("incoming_volta_data", {})
+        email = volta.get("email", "?")
+        candidates = item.get("candidates", [])
+        print(f"  BN={bn} email={email} ({len(candidates)} candidates)")
 
-    print(f"\nNew ({len(new)} users - in import but not in system):")
-    for entry in new:
-        name = entry.get("voornaam", "")
-        if entry.get("tussenvoegsel"):
-            name += f" {entry['tussenvoegsel']}"
-        name += f" {entry.get('achternaam', '')}"
-        print(f"  {entry['email']} ({name.strip()})")
+    print(f"\nLinked Registrations ({len(linked_regs)} rows):")
+    for item in linked_regs:
+        reg = item.get("registration", {})
+        print(
+            f"  BN={item['bondsnummer']} email={reg.get('email', '?')}"
+            f" email_will_change={item.get('email_will_change', False)}"
+        )
 
-    print(f"\nPending ({len(pending)} users - accepted, awaiting signup):")
-    for email in pending:
-        print(f"  {email}")
+    print(f"\nExisting ({len(existing)} users):")
+    for item in existing:
+        user = item.get("user", {})
+        diffs = item.get("field_diffs", [])
+        print(
+            f"  BN={item['bondsnummer']} email={user.get('email', '?')}"
+            f" ({len(diffs)} diffs)"
+        )
 
-    print(f"\nExisting ({len(existing)} users - in both):")
-    for pair in existing:
-        sync = pair["sync"]
-        current = pair.get("current")
-        status = "has data" if current else "no data yet"
-        print(f"  {sync['email']} ({status})")
+    print(f"\nDeparted ({len(departed)} users):")
+    for item in departed:
+        print(f"  {item.get('email', '?')} (BN={item.get('bondsnummer')})")
 
 
 def cmd_remove_departed(args: argparse.Namespace) -> None:
-    """Revoke member permission for departed users."""
-    kwargs: dict[str, str] = {}
-    if args.email:
-        kwargs["email"] = args.email
-    result = send_command_json("remove_departed", **kwargs)
+    """Remove departed linked live users."""
+    result = send_command_json("remove_departed")
     if result:
         if "error" in result:
             print(f"Error: {result['error']}")
         else:
-            print(f"Removed member permission for {result.get('removed', 0)} user(s)")
+            print(f"Removed {result.get('removed', 0)} user(s)")
 
 
-def cmd_accept_new(args: argparse.Namespace) -> None:
-    """Accept new users and initiate Faroe signup (email suppressed)."""
-    kwargs: dict[str, str] = {}
-    if args.email:
-        kwargs["email"] = args.email
-    result = send_command_json("accept_new_with_signup", **kwargs)
+def cmd_update_existing(args: argparse.Namespace) -> None:
+    """Update existing from imported Volta data."""
+    result = send_command_json("update_existing")
     if result:
-        print(f"Added: {result.get('added', 0)}, Skipped: {result.get('skipped', 0)}")
-        initiated = result.get("signup_initiated", 0)
-        failed = result.get("signup_failed", 0)
-        if initiated or failed:
-            print(f"Signups: {initiated} initiated, {failed} failed")
-        if result.get("failed_emails"):
-            for email in result["failed_emails"]:
-                print(f"  Failed: {email}")
+        if "error" in result:
+            print(f"Error: {result['error']}")
+        else:
+            print(
+                f"Registrations updated: {result.get('registrations_updated', 0)}, "
+                f"Users refreshed: {result.get('users_refreshed', 0)}"
+            )
 
 
 def cmd_board_setup(args: argparse.Namespace) -> None:
@@ -216,7 +200,7 @@ def cmd_grant_admin(args: argparse.Namespace) -> None:
 
 
 def cmd_create_accounts(args: argparse.Namespace) -> None:
-    """Complete signup for all accepted newusers."""
+    """Complete signup for all accepted registrations."""
     result = send_command_json("create_accounts", password=args.password, timeout=120)
     if result:
         print(f"Created: {result.get('created', 0)}, Failed: {result.get('failed', 0)}")
@@ -224,19 +208,6 @@ def cmd_create_accounts(args: argparse.Namespace) -> None:
             print(result["message"])
         for failure in result.get("failures", []):
             print(f"  {failure['email']}: {failure['error']}")
-
-
-def cmd_update_existing(args: argparse.Namespace) -> None:
-    """Update userdata from sync for existing users."""
-    kwargs: dict[str, str] = {}
-    if args.email:
-        kwargs["email"] = args.email
-    result = send_command_json("update_existing", **kwargs)
-    if result:
-        if "error" in result:
-            print(f"Error: {result['error']}")
-        else:
-            print(f"Updated {result.get('updated', 0)} user(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -252,29 +223,25 @@ def create_backend_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # reset
     reset_parser = subparsers.add_parser(
         "reset", help="Clear all tables and re-bootstrap admin"
     )
     reset_parser.set_defaults(func=cmd_reset)
 
-    # prepare-user
     prepare_parser = subparsers.add_parser(
         "prepare-user",
-        help="Prepare a user in the newusers table with accepted=True",
+        help="Prepare a user with an accepted registration",
     )
     prepare_parser.add_argument("email", help="Email address of the user")
     prepare_parser.add_argument("--firstname", "-f", help="First name of the user")
     prepare_parser.add_argument("--lastname", "-l", help="Last name of the user")
     prepare_parser.set_defaults(func=cmd_prepare_user)
 
-    # get-admin-credentials
     admin_creds_parser = subparsers.add_parser(
         "get-admin-credentials", help="Get the bootstrap admin credentials"
     )
     admin_creds_parser.set_defaults(func=cmd_get_admin_credentials)
 
-    # get-token
     token_parser = subparsers.add_parser(
         "get-token", help="Get an email verification token"
     )
@@ -282,52 +249,39 @@ def create_backend_parser() -> argparse.ArgumentParser:
     token_parser.add_argument("email", help="Email address")
     token_parser.set_defaults(func=cmd_get_token)
 
-    # import-sync
     sync_parser = subparsers.add_parser(
         "import-sync", help="Parse CSV export and import into sync table"
     )
     sync_parser.add_argument("csv_path", help="Path to the CSV export file")
     sync_parser.set_defaults(func=cmd_import_sync)
 
-    # sync-status
-    status_parser = subparsers.add_parser(
-        "sync-status", help="Show sync groups (departed/new/existing)"
-    )
+    status_parser = subparsers.add_parser("sync-status", help="Show sync status")
     status_parser.set_defaults(func=cmd_sync_status)
 
-    # remove-departed
     remove_parser = subparsers.add_parser(
         "remove-departed",
-        help="Revoke member permission for departed users",
-    )
-    remove_parser.add_argument(
-        "--email", help="Remove single user (omit for all departed)"
+        help="Remove departed linked live users",
     )
     remove_parser.set_defaults(func=cmd_remove_departed)
 
-    # accept-new
-    accept_parser = subparsers.add_parser(
-        "accept-new",
-        help="Accept new users and initiate signup (email suppressed)",
+    update_parser = subparsers.add_parser(
+        "update-existing",
+        help="Update existing from imported Volta data",
     )
-    accept_parser.add_argument("--email", help="Accept single user (omit for all new)")
-    accept_parser.set_defaults(func=cmd_accept_new)
+    update_parser.set_defaults(func=cmd_update_existing)
 
-    # board-setup
     board_setup_parser = subparsers.add_parser(
         "board-setup",
         help="One-time setup for the Bestuur (board) account",
     )
     board_setup_parser.set_defaults(func=cmd_board_setup)
 
-    # board-renew
     board_renew_parser = subparsers.add_parser(
         "board-renew",
         help="Yearly: reset board password and renew admin permission",
     )
     board_renew_parser.set_defaults(func=cmd_board_renew)
 
-    # grant-admin
     grant_admin_parser = subparsers.add_parser(
         "grant-admin",
         help="Grant admin permission and mark as system user",
@@ -335,24 +289,13 @@ def create_backend_parser() -> argparse.ArgumentParser:
     grant_admin_parser.add_argument("email", help="Email address of the user")
     grant_admin_parser.set_defaults(func=cmd_grant_admin)
 
-    # create-accounts
     create_accs_parser = subparsers.add_parser(
         "create-accounts",
-        help="Complete signup for all accepted newusers (testing)",
+        help="Complete signup for all accepted registrations (testing)",
     )
     create_accs_parser.add_argument(
         "password", help="Password to set for all new accounts"
     )
     create_accs_parser.set_defaults(func=cmd_create_accounts)
-
-    # update-existing
-    update_parser = subparsers.add_parser(
-        "update-existing",
-        help="Update userdata from sync for existing users",
-    )
-    update_parser.add_argument(
-        "--email", help="Update single user (omit for all existing)"
-    )
-    update_parser.set_defaults(func=cmd_update_existing)
 
     return parser

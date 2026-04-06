@@ -22,29 +22,28 @@ from freetser.server import Handler, StorageQueue
 from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.client import AuthClient
 from apiserver.data.registrations import (
-    get_registration,
+    get_registration_by_email,
     normalize_email,
     upsert_registration,
 )
 from apiserver.email import TOKEN_EMAIL_TYPES, EmailData, EmailType, sendemail
 from apiserver.settings import PRIVATE_HOST, SmtpConfig
 from apiserver.tooling.command_handlers import (
-    cmdhandler_accept_new,
-    cmdhandler_accept_new_with_email,
-    cmdhandler_accept_user,
     cmdhandler_board_renew,
     cmdhandler_board_setup,
-    cmdhandler_compute_groups,
+    cmdhandler_complete_sync,
+    cmdhandler_compute_sync_status,
     cmdhandler_create_accounts,
     cmdhandler_get_admin_credentials,
     cmdhandler_get_code,
     cmdhandler_grant_admin,
     cmdhandler_import_sync,
+    cmdhandler_link_bondsnummer,
     cmdhandler_list_birthdays,
+    cmdhandler_list_outbox,
     cmdhandler_prepare_user,
-    cmdhandler_remove_departed,
     cmdhandler_reset,
-    cmdhandler_update_existing,
+    cmdhandler_resolve_sync_match,
     is_email_suppressed,
 )
 from apiserver.tooling.codes import CodeWaiter, add_code
@@ -165,21 +164,21 @@ def handle_email(
     timestamp = body.get("timestamp")
     new_email = body.get("newEmail")
 
-    # Construct signup link using registration_token
+    # Construct signup link using registration_id
     link: str | None = None
     if email_type == "signup_verification":
 
-        def get_reg_token(store: Storage) -> str | None:
-            reg = get_registration(store, to_email)
+        def get_reg_id(store: Storage) -> str | None:
+            reg = get_registration_by_email(store, to_email)
             if reg is not None:
-                return reg.registration_token
+                return reg.registration_id
             return None
 
-        registration_token = store_queue.execute(get_reg_token)
-        if registration_token and code:
+        registration_id = store_queue.execute(get_reg_id)
+        if registration_id and code:
             link = (
                 f"{frontend_origin}/account/signup"
-                f"?token={registration_token}&code={code}"
+                f"?registration_id={registration_id}&code={code}"
             )
             logger.info(f"Signup link for {to_email}: {link}")
 
@@ -213,7 +212,7 @@ def handle_email(
         if email_type == "signup_verification":
 
             def inc_send_count(store: Storage) -> None:
-                reg = get_registration(store, to_email)
+                reg = get_registration_by_email(store, to_email)
                 if reg is not None:
                     reg.email_send_count += 1
                     upsert_registration(store, reg)
@@ -231,8 +230,6 @@ def handle_command(
     email_settings: tuple[str, SmtpConfig | None, bool] = ("", None, False),
 ) -> Response:
     """Handle management command."""
-    frontend_origin, smtp_config, smtp_send = email_settings
-
     try:
         body = json.loads(req.body.decode("utf-8"))
         command = body.get("command")
@@ -260,18 +257,20 @@ def handle_command(
         "import_sync": lambda: cmdhandler_import_sync(
             store_queue, body.get("csv_content", "")
         ),
-        "compute_groups": lambda: cmdhandler_compute_groups(store_queue),
-        "remove_departed": lambda: cmdhandler_remove_departed(
-            store_queue, body.get("email")
+        "compute_groups": lambda: cmdhandler_compute_sync_status(store_queue),
+        "resolve_sync_match": lambda: cmdhandler_resolve_sync_match(
+            store_queue,
+            body.get("bondsnummer"),
+            body.get("kind"),
+            body.get("subject_id"),
         ),
-        "accept_new": lambda: cmdhandler_accept_new(store_queue, body.get("email")),
-        "accept_user": lambda: cmdhandler_accept_user(store_queue, body.get("email")),
-        "accept_new_with_signup": lambda: cmdhandler_accept_new_with_email(
-            store_queue, frontend_origin, smtp_config, smtp_send, body.get("email")
+        "link_bondsnummer": lambda: cmdhandler_link_bondsnummer(
+            store_queue,
+            body.get("kind"),
+            body.get("subject_id"),
+            body.get("bondsnummer"),
         ),
-        "update_existing": lambda: cmdhandler_update_existing(
-            store_queue, body.get("email")
-        ),
+        "complete_sync": lambda: cmdhandler_complete_sync(store_queue),
         "board_setup": lambda: cmdhandler_board_setup(store_queue, auth_client),
         "board_renew": lambda: cmdhandler_board_renew(store_queue, auth_client),
         "grant_admin": lambda: cmdhandler_grant_admin(store_queue, body.get("email")),
@@ -279,6 +278,13 @@ def handle_command(
             store_queue, auth_client, code_waiter, body.get("password")
         ),
         "list_birthdays": lambda: cmdhandler_list_birthdays(store_queue),
+        "list_outbox": lambda: cmdhandler_list_outbox(
+            store_queue,
+            body.get("kind"),
+            body.get("subject_kind"),
+            body.get("subject_id"),
+            body.get("status"),
+        ),
     }
 
     if command in dispatch:

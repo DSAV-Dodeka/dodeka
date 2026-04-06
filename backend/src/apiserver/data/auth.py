@@ -1,13 +1,6 @@
-"""
-This file implements the Faroe user server interface, which means implementing the
-SyncServer (since we use synchronous code) from the tiauth_faroe Python package.
-Be careful modifying it!
+"""Faroe user server interface.
 
-What makes our approach different from the simplest possible implementation is the
-newusers table, since we need to synchronize with Volta and ensure the user is really
-a member. Creating a user then requires that a user actually exists in this table.
-If the board has already accepted them (maybe because they were added to newusers
-through sync and hence already accepted), we immediately add their member permissions.
+Implements the SyncServer from the tiauth_faroe Python package.
 """
 
 import json
@@ -33,11 +26,11 @@ from tiauth_faroe.user_server import (
 
 from apiserver.data.permissions import Permissions, add_permission
 from apiserver.data.registrations import (
-    get_registration,
-    normalize_email,
-    upsert_registration,
     delete_registration,
+    get_registration_by_email,
+    normalize_email,
 )
+from apiserver.data.userdata import populate_birthday_for_user, set_user_bondsnummer
 
 logger = logging.getLogger("apiserver.auth")
 
@@ -45,14 +38,14 @@ logger = logging.getLogger("apiserver.auth")
 def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     """Create a new user account from a completed Faroe signup.
 
-    Requires a registrations[email] row with account_created=False.
-    If accepted=True, grants member permission immediately.
-    Sets account_created=True and clears signup_token.
-
-    Registration row lifecycle after this function:
-    - accepted=True, notify_on_completion=False: delete immediately
-    - accepted=True, notify_on_completion=True: keep until set_session
-    - accepted=False: keep for later admin approval
+    1. Normalize email
+    2. Require registrations_by_email[email] -> registration_id
+    3. Require registration with accepted=True
+    4. Allocate user_id
+    5. Create live user
+    6. If registration has bondsnummer, set users_by_bondsnummer
+    7. Grant member
+    8. Delete registration row and indexes
     """
     email = normalize_email(effect.email_address)
 
@@ -61,19 +54,19 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
         logger.info(f"User with email {email} already exists")
         return ActionError("email_address_already_used")
 
-    reg = get_registration(store, email)
+    reg = get_registration_by_email(store, email)
     if reg is None:
         logger.info(f"No registration found for email={email}")
         return ActionError("user_not_found")
-    if reg.account_created:
-        logger.info(f"Account already created for email={email}")
-        return ActionError("email_address_already_used")
+    if not reg.accepted:
+        logger.info(f"Registration not accepted for email={email}")
+        return ActionError("user_not_found")
 
     firstname = reg.firstname
     lastname = reg.lastname
-    accepted = reg.accepted
+    bondsnummer = reg.bondsnummer
 
-    # We store a global counter that tracks the max user_id
+    # Allocate user_id from global counter
     counter_result = store.get("metadata", "user_id_counter")
     if counter_result is None:
         store.add("metadata", "user_id_counter", b"0", expires_at=0)
@@ -83,15 +76,13 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
         counter_bytes, counter = counter_result
         int_id = int(counter_bytes.decode("utf-8"))
 
-    # Increment counter for next user
     new_user_counter = str(int_id + 1).encode("utf-8")
     store.update("metadata", "user_id_counter", new_user_counter, counter, expires_at=0)
 
-    # We construct a user_id from a unique integer and first name + last name
     name_id = f"{firstname.lower()}_{lastname.lower()}"
     user_id = f"{int_id}_{name_id}"
 
-    # Construct the rest of the user data
+    # Construct user data
     profile_data = {"firstname": firstname, "lastname": lastname}
     profile_bytes = json.dumps(profile_data).encode("utf-8")
     password_data = {
@@ -109,23 +100,17 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     store.add("users", f"{user_id}:sessions_counter", b"0", expires_at=0)
     store.add("users_by_email", email, user_id.encode("utf-8"), expires_at=0)
 
-    # Update registration row
-    reg.account_created = True
-    reg.signup_token = None
+    # Link bondsnummer if registration had one
+    if bondsnummer is not None:
+        set_user_bondsnummer(store, bondsnummer, user_id)
+        populate_birthday_for_user(store, user_id, bondsnummer)
 
-    if accepted:
-        timestamp = int(time.time())
-        add_permission(store, timestamp, user_id, Permissions.MEMBER)
-        if not reg.notify_on_completion:
-            # Lifecycle complete — delete registration
-            delete_registration(store, email)
-        else:
-            # Keep until set_session sends the deferred acceptance email
-            upsert_registration(store, reg)
-    else:
-        # Keep registration for later admin approval
-        upsert_registration(store, reg)
-        logger.info(f"User {user_id} created but not yet accepted")
+    # Grant member immediately
+    timestamp = int(time.time())
+    add_permission(store, timestamp, user_id, Permissions.MEMBER)
+
+    # Delete registration row and all its indexes
+    delete_registration(store, reg.registration_id)
 
     logger.info(f"Created user {user_id} with email {email}")
     return User(
@@ -146,15 +131,12 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
 def get_user(store: Storage, effect: GetUserEffect) -> EffectResult:
     user_id = effect.user_id
 
-    # Read all user data from separate keys
     profile_result = store.get("users", f"{user_id}:profile")
     email_result = store.get("users", f"{user_id}:email")
     password_result = store.get("users", f"{user_id}:password")
     disabled_result = store.get("users", f"{user_id}:disabled")
     sessions_result = store.get("users", f"{user_id}:sessions_counter")
 
-    # Assert consistency: profile, email, and password must all exist together
-    # or not at all
     all_none = (
         (profile_result is None) == (email_result is None) == (password_result is None)
     )
@@ -165,17 +147,13 @@ def get_user(store: Storage, effect: GetUserEffect) -> EffectResult:
         f"password={password_result is not None}"
     )
 
-    # Check if user exists
     if profile_result is None:
         logger.info(f"User {user_id} not found")
         return ActionError("user_not_found")
 
-    # At this point, due to the consistency assertion above,
-    # email_result and password_result must also be not None
     assert email_result is not None
     assert password_result is not None
 
-    # Now we parse and get all of the data
     profile_bytes, _ = profile_result
     profile_data = json.loads(profile_bytes.decode("utf-8"))
     firstname = profile_data["firstname"]
@@ -234,7 +212,6 @@ def update_user_email_address(
     user_id = effect.user_id
     new_email = normalize_email(effect.email_address)
 
-    # Get current email
     old_email_result = store.get("users", f"{user_id}:email")
     if old_email_result is None:
         logger.info(f"User {user_id} not found for email update")
@@ -243,19 +220,15 @@ def update_user_email_address(
     old_email_bytes, _ = old_email_result
     old_email = old_email_bytes.decode("utf-8")
 
-    # Check if already the same
     if old_email == new_email:
         logger.info(f"Email already set to {new_email} for user {user_id}")
         return None
 
-    # Check if new email already in use
     new_email_check = store.get("users_by_email", new_email)
     if new_email_check is not None:
         logger.info(f"Email {new_email} already in use")
         return ActionError("email_address_already_used")
 
-    # Use the non-throwing variant because a missing/stale record
-    # maps to an action error.
     new_email_bytes = new_email.encode("utf-8")
     updated = store.try_update(
         "users",
@@ -267,7 +240,6 @@ def update_user_email_address(
     if not updated:
         return ActionError("user_not_found")
 
-    # Update email index
     store.add("users_by_email", new_email, user_id.encode("utf-8"), expires_at=0)
     store.delete("users_by_email", old_email)
 
@@ -277,7 +249,6 @@ def update_user_email_address(
 def update_user_password_hash(
     store: Storage, effect: UpdateUserPasswordHashEffect
 ) -> EffectResult:
-    """Update user password hash."""
     user_id = effect.user_id
 
     password_data = {
@@ -305,10 +276,8 @@ def update_user_password_hash(
 def increment_user_sessions_counter(
     store: Storage, effect: IncrementUserSessionsCounterEffect
 ) -> EffectResult:
-    """Increment user sessions counter."""
     user_id = effect.user_id
 
-    # Get current sessions counter value
     sessions_result = store.get("users", f"{user_id}:sessions_counter")
     if sessions_result is None:
         logger.info(f"User {user_id} not found for sessions counter increment")
@@ -336,10 +305,8 @@ def increment_user_sessions_counter(
 
 
 def delete_user(store: Storage, effect: DeleteUserEffect) -> EffectResult:
-    """Delete a user."""
     user_id = effect.user_id
 
-    # Get email to delete from index
     email_result = store.get("users", f"{user_id}:email")
     if email_result is None:
         logger.info(f"User {user_id} not found for deletion")
@@ -348,7 +315,6 @@ def delete_user(store: Storage, effect: DeleteUserEffect) -> EffectResult:
     email_bytes, _ = email_result
     email = email_bytes.decode("utf-8")
 
-    # Delete all user keys
     store.delete("users", f"{user_id}:profile")
     store.delete("users", f"{user_id}:password")
     store.delete("users", f"{user_id}:disabled")
@@ -362,7 +328,7 @@ def delete_user(store: Storage, effect: DeleteUserEffect) -> EffectResult:
 
 
 class SqliteSyncServer(SyncServer):
-    """Sync server that executes effects using hfree Storage."""
+    """Sync server that executes effects using freetser Storage."""
 
     store: Storage
 

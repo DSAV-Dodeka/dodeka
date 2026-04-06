@@ -1,7 +1,7 @@
-"""Legacy registration integration tests retired by the final spec rewrite.
+"""Legacy registration integration tests retired by the spec rewrite.
 
 The old tests in this file encoded the pre-migration email-keyed registration
-model. The final contract now lives in `test_spec.py`.
+model. The current contract now lives in `test_spec.py`.
 """
 
 import pytest

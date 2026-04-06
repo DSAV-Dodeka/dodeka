@@ -12,6 +12,7 @@ from apiserver.data.permissions import add_permission
 from apiserver.data.registrations import (
     create_or_reuse_registration,
     delete_registration,
+    get_registration_by_email,
     normalize_email,
 )
 from apiserver.tooling.codes import CodeWaiter
@@ -39,7 +40,9 @@ def create_admin_user(
 
     # Delete existing user by email (cleanup from previous runs)
     def delete_user_by_email(store: Storage) -> str | None:
-        delete_registration(store, email)
+        reg = get_registration_by_email(store, email)
+        if reg is not None:
+            delete_registration(store, reg.registration_id)
 
         result = store.get("users_by_email", email)
         if result is None:

@@ -1,12 +1,12 @@
 """Canonical registration data module.
 
-Owns two tables:
-  - registrations[email] — keyed by normalized email, stores the full
-    registration lifecycle state as JSON.
-  - registration_tokens[registration_token] -> email — stable public
-    lookup index.
+Owns three tables:
+  - registrations[registration_id] — canonical pending registration state as JSON.
+  - registrations_by_email[email] -> registration_id — email lookup index.
+  - registrations_by_bondsnummer[str(bondsnummer)] -> registration_id
+    — Volta link index.
 
-This replaces the old `newuser` + `registration_state` split.
+A registration row is deleted when it successfully becomes a live user.
 """
 
 import json
@@ -23,25 +23,14 @@ def normalize_email(email: str) -> str:
 
 @dataclass
 class Registration:
+    registration_id: str
     email: str
     firstname: str
     lastname: str
     accepted: bool
-    account_created: bool
-    registration_token: str
+    bondsnummer: int | None
     signup_token: str | None
     email_send_count: int
-    notify_on_completion: bool
-
-
-@dataclass
-class RegistrationNotFound:
-    email: str
-
-
-@dataclass
-class RegistrationTokenNotFound:
-    registration_token: str
 
 
 @dataclass
@@ -50,24 +39,24 @@ class EmailExistsInUserTable:
 
 
 REGISTRATIONS_TABLE = "registrations"
-REGISTRATION_TOKENS_TABLE = "registration_tokens"
+REGISTRATIONS_BY_EMAIL_TABLE = "registrations_by_email"
+REGISTRATIONS_BY_BONDSNUMMER_TABLE = "registrations_by_bondsnummer"
 
 
-def generate_registration_token() -> str:
+def generate_registration_id() -> str:
     return secrets.token_urlsafe(32)
 
 
 def serialize_registration(reg: Registration) -> bytes:
     data = {
+        "registration_id": reg.registration_id,
         "email": reg.email,
         "firstname": reg.firstname,
         "lastname": reg.lastname,
         "accepted": reg.accepted,
-        "account_created": reg.account_created,
-        "registration_token": reg.registration_token,
+        "bondsnummer": reg.bondsnummer,
         "signup_token": reg.signup_token,
         "email_send_count": reg.email_send_count,
-        "notify_on_completion": reg.notify_on_completion,
     }
     return json.dumps(data).encode("utf-8")
 
@@ -75,64 +64,86 @@ def serialize_registration(reg: Registration) -> bytes:
 def deserialize_registration(data: bytes) -> Registration:
     d = json.loads(data.decode("utf-8"))
     return Registration(
+        registration_id=d["registration_id"],
         email=d["email"],
         firstname=d["firstname"],
         lastname=d["lastname"],
         accepted=d["accepted"],
-        account_created=d["account_created"],
-        registration_token=d["registration_token"],
+        bondsnummer=d.get("bondsnummer"),
         signup_token=d.get("signup_token"),
         email_send_count=d.get("email_send_count", 0),
-        notify_on_completion=d.get("notify_on_completion", False),
     )
 
 
-def get_registration(store: Storage, email: str) -> Registration | None:
-    """Get registration by normalized email."""
-    result = store.get(REGISTRATIONS_TABLE, email)
+def get_registration(store: Storage, registration_id: str) -> Registration | None:
+    """Get registration by registration_id."""
+    result = store.get(REGISTRATIONS_TABLE, registration_id)
     if result is None:
         return None
     data_bytes, _ = result
     return deserialize_registration(data_bytes)
 
 
-def get_registration_by_token(
-    store: Storage, registration_token: str
-) -> Registration | None:
-    """Resolve registration_token -> email -> registration."""
-    result = store.get(REGISTRATION_TOKENS_TABLE, registration_token)
+def get_registration_by_email(store: Storage, email: str) -> Registration | None:
+    """Resolve email -> registration_id -> registration."""
+    result = store.get(REGISTRATIONS_BY_EMAIL_TABLE, email)
     if result is None:
         return None
-    email = result[0].decode("utf-8")
-    return get_registration(store, email)
+    registration_id = result[0].decode("utf-8")
+    return get_registration(store, registration_id)
+
+
+def get_registration_by_bondsnummer(
+    store: Storage, bondsnummer: int
+) -> Registration | None:
+    """Resolve bondsnummer -> registration_id -> registration."""
+    result = store.get(REGISTRATIONS_BY_BONDSNUMMER_TABLE, str(bondsnummer))
+    if result is None:
+        return None
+    registration_id = result[0].decode("utf-8")
+    return get_registration(store, registration_id)
 
 
 def upsert_registration(store: Storage, reg: Registration) -> None:
-    """Create or update a registration entry and its token index."""
-    key = reg.email
+    """Create or update a registration entry and its indexes."""
+    key = reg.registration_id
+    existing = get_registration(store, key)
+    if existing is not None:
+        if existing.email != reg.email:
+            store.delete(REGISTRATIONS_BY_EMAIL_TABLE, existing.email)
+        if existing.bondsnummer is not None and existing.bondsnummer != reg.bondsnummer:
+            store.delete(REGISTRATIONS_BY_BONDSNUMMER_TABLE, str(existing.bondsnummer))
+
     data = serialize_registration(reg)
-    # Registration rows are canonical state snapshots. When a callback decides
-    # on the new state, it should replace the stored row.
     store.overwrite(REGISTRATIONS_TABLE, key, data, expires_at=0)
 
-    # Ensure token index exists
-    # The token index is derived from the canonical registration row, so the
-    # current email mapping should overwrite any older one.
+    # Email index
     store.overwrite(
-        REGISTRATION_TOKENS_TABLE,
-        reg.registration_token,
+        REGISTRATIONS_BY_EMAIL_TABLE,
+        reg.email,
         key.encode("utf-8"),
         expires_at=0,
     )
 
+    # Bondsnummer index
+    if reg.bondsnummer is not None:
+        store.overwrite(
+            REGISTRATIONS_BY_BONDSNUMMER_TABLE,
+            str(reg.bondsnummer),
+            key.encode("utf-8"),
+            expires_at=0,
+        )
 
-def delete_registration(store: Storage, email: str) -> bool:
-    """Delete a registration row and its token index."""
-    reg = get_registration(store, email)
+
+def delete_registration(store: Storage, registration_id: str) -> bool:
+    """Delete a registration row and all its indexes."""
+    reg = get_registration(store, registration_id)
     if reg is None:
         return False
-    store.delete(REGISTRATIONS_TABLE, email)
-    store.delete(REGISTRATION_TOKENS_TABLE, reg.registration_token)
+    store.delete(REGISTRATIONS_TABLE, registration_id)
+    store.delete(REGISTRATIONS_BY_EMAIL_TABLE, reg.email)
+    if reg.bondsnummer is not None:
+        store.delete(REGISTRATIONS_BY_BONDSNUMMER_TABLE, str(reg.bondsnummer))
     return True
 
 
@@ -145,24 +156,23 @@ def create_or_reuse_registration(
 ) -> Registration:
     """Create a new registration or return the existing one for this email.
 
-    If a registration already exists for this email, it is returned as-is
-    (the caller can update fields and call upsert_registration).
+    If a registration already exists for this email, it is returned as-is.
+    Never clears existing accepted, bondsnummer, or signup_token state on reuse.
     """
-    existing = get_registration(store, email)
+    existing = get_registration_by_email(store, email)
     if existing is not None:
         return existing
 
-    registration_token = generate_registration_token()
+    registration_id = generate_registration_id()
     reg = Registration(
+        registration_id=registration_id,
         email=email,
         firstname=firstname,
         lastname=lastname,
         accepted=accepted,
-        account_created=False,
-        registration_token=registration_token,
+        bondsnummer=None,
         signup_token=None,
         email_send_count=0,
-        notify_on_completion=False,
     )
     upsert_registration(store, reg)
     return reg
@@ -180,41 +190,33 @@ def list_registrations(store: Storage) -> list[Registration]:
     return regs
 
 
-def migrate_registration_email(store: Storage, old_email: str, new_email: str) -> bool:
-    """Move a registration row from old_email to new_email.
+def migrate_registration_email(
+    store: Storage, registration_id: str, new_email: str
+) -> bool:
+    """Update the email on a registration and rewrite indexes.
 
-    Preserves the registration_token, clears signup_token.
-    If new_email already has a registration, it is deleted first.
-    Returns False if no registration exists for old_email.
+    Clears signup_token since the old email-based signup session is stale.
+    Returns False if the registration does not exist.
     """
-    reg = get_registration(store, old_email)
+    reg = get_registration(store, registration_id)
     if reg is None:
         return False
 
+    old_email = reg.email
+    if old_email == new_email:
+        return True
+
+    # Remove old email index
+    store.delete(REGISTRATIONS_BY_EMAIL_TABLE, old_email)
+
     # Remove conflicting registration at new_email if it exists
-    existing = get_registration(store, new_email)
-    if existing is not None:
-        delete_registration(store, new_email)
+    existing = get_registration_by_email(store, new_email)
+    if existing is not None and existing.registration_id != registration_id:
+        delete_registration(store, existing.registration_id)
 
-    # Delete old entry
-    store.delete(REGISTRATIONS_TABLE, old_email)
-
-    # Create new entry with same token, cleared signup
+    # Update registration
     reg.email = new_email
     reg.signup_token = None
-    data = serialize_registration(reg)
-    store.add(REGISTRATIONS_TABLE, new_email, data, expires_at=0)
-
-    # Update token index to point to new email
-    token_result = store.get(REGISTRATION_TOKENS_TABLE, reg.registration_token)
-    if token_result is not None:
-        # This index entry is derived from the migrated registration row, so it
-        # should now point at the new canonical email unconditionally.
-        store.overwrite(
-            REGISTRATION_TOKENS_TABLE,
-            reg.registration_token,
-            new_email.encode("utf-8"),
-            expires_at=0,
-        )
+    upsert_registration(store, reg)
 
     return True

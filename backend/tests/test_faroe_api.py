@@ -1,16 +1,11 @@
 """Faroe API compatibility tests.
 
-Mirrors the test patterns from tiauth-faroe/python/client/tests/test_integration.py,
-adapted for our backend which requires users to exist in the newusers table before
-signup can succeed.
-
 Each test that calls create_signup first calls prepare_user to create the
-newuser entry that our backend requires (the reference user-server in
-tiauth-faroe accepts any email).
+accepted registration that our backend requires.
 
 Tests cover the full Faroe API surface:
-- Signup: create → verify email → set password → complete
-- Signin: create → verify password → complete
+- Signup: create -> verify email -> set password -> complete
+- Signin: create -> verify password -> complete
 - Session: get session from token
 """
 
@@ -85,7 +80,7 @@ class TestSignupFlow:
     """Faroe signup API compatibility — mirrors tiauth-faroe/python/client/tests."""
 
     def test_create_signup(self, command, auth_client, unique_email):
-        """prepare_user → create_signup succeeds."""
+        """prepare_user -> create_signup succeeds."""
         command("prepare_user", email=unique_email, names=["Test", "User"])
 
         result = auth_client.create_signup(unique_email)
@@ -99,10 +94,8 @@ class TestSignupFlow:
 
     def test_create_signup_duplicate_email(self, command, auth_client, unique_email):
         """Second signup with same email fails with email_address_already_used."""
-        # First: complete full signup
         complete_signup_flow(command, auth_client, unique_email)
 
-        # Second attempt should fail — user already exists in users table
         result = auth_client.create_signup(unique_email)
 
         assert isinstance(result, ActionErrorResult)
@@ -110,14 +103,13 @@ class TestSignupFlow:
         assert result.error_code == "email_address_already_used"
 
     def test_complete_signup_full_flow(self, command, auth_client, unique_email):
-        """Full: prepare_user → create → verify → password → complete."""
+        """Full: prepare_user -> create -> verify -> password -> complete."""
         command("prepare_user", email=unique_email, names=["Full", "Flow"])
 
         signup = auth_client.create_signup(unique_email)
         assert isinstance(signup, CreateSignupActionSuccessResult)
         signup_token = signup.signup_token
 
-        # Send verification code (Faroe auto-sends on create, but we can resend)
         send_result = auth_client.send_signup_email_address_verification_code(
             signup_token
         )
@@ -148,10 +140,8 @@ class TestSignupFlow:
         signup = auth_client.create_signup(unique_email)
         assert isinstance(signup, CreateSignupActionSuccessResult)
 
-        # Set password but skip email verification
         auth_client.set_signup_password(signup.signup_token, TEST_PASSWORD)
 
-        # Complete should fail — email not verified
         result = auth_client.complete_signup(signup.signup_token)
         assert isinstance(result, ActionErrorResult)
         assert result.ok is False

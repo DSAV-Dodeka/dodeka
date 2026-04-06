@@ -39,7 +39,6 @@ EmailType = Literal[
     "password_updated",
     "email_updated",
     "sync_please_register",
-    "account_accepted_self",
 ]
 
 # Email subjects, titles and preheaders for each type
@@ -48,7 +47,7 @@ EMAIL_CONFIG: dict[EmailType, tuple[str, str, str]] = {
     "signup_verification": (
         "Activeer je Dodeka account",
         "Account activeren",
-        "Klik op de link om je account te activeren",
+        "Gebruik de verificatiecode om je account te activeren",
     ),
     "email_update_verification": (
         "Bevestig je nieuwe e-mailadres",
@@ -80,15 +79,11 @@ EMAIL_CONFIG: dict[EmailType, tuple[str, str, str]] = {
         "Account aanmaken",
         "Je inschrijving bij D.S.A.V. Dodeka is afgerond",
     ),
-    "account_accepted_self": (
-        "Je lidmaatschap bij Dodeka is goedgekeurd",
-        "Lidmaatschap goedgekeurd",
-        "Je aanmelding bij D.S.A.V. Dodeka is goedgekeurd",
-    ),
 }
 
 # Templates directory (in resources folder)
 TEMPLATES_DIR: Path = res_path / "templates"
+FRAGMENTS_DIR: Path = TEMPLATES_DIR / "fragments"
 
 
 @dataclass
@@ -137,6 +132,7 @@ class TemplateCache:
     """Cache for loaded email templates."""
 
     templates: dict[EmailType, EmailTemplate]
+    fragments: dict[str, str]
     base: str
     initialized: bool = False
 
@@ -155,17 +151,25 @@ class TemplateCache:
             "password_updated",
             "email_updated",
             "sync_please_register",
-            "account_accepted_self",
         ]
         for email_type in email_types:
             self.templates[email_type] = load_template(email_type)
+
+        fragment_names = [
+            "signup_verification_link.txt",
+            "signup_verification_link.html",
+        ]
+        for fragment_name in fragment_names:
+            fragment_path = FRAGMENTS_DIR / fragment_name
+            with open(fragment_path) as f:
+                self.fragments[fragment_name] = f.read()
 
         self.initialized = True
         logger.info(f"Loaded {len(self.templates)} email templates")
 
 
 # Template cache instance
-cache = TemplateCache(templates={}, base="")
+cache = TemplateCache(templates={}, fragments={}, base="")
 
 
 def formatgreeting(display_name: str | None) -> str:
@@ -232,7 +236,7 @@ def save_email_to_file(email: RenderedEmail) -> Path:
 
     # Create filename with timestamp and details
     now = datetime.now(timezone.utc)
-    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    timestamp = now.strftime("%Y%m%d_%H%M%S_%f")
     # Sanitize email for filename (replace @ and . with _)
     safe_email = email.to_email.replace("@", "_at_").replace(".", "_")
     base_name = f"{timestamp}_{email.email_type}_{safe_email}"
@@ -293,7 +297,15 @@ def sendemail(
         "timestamp": data.timestamp or "",
         "new_email": data.new_email or "",
         "link": data.link or "",
+        "link_section": "",
     }
+
+    if data.link:
+        text_context["link_section"] = cache.fragments[
+            "signup_verification_link.txt"
+        ].format(
+            link=data.link
+        )
 
     # Build context for HTML (escape user-provided values)
     escaped_name = escape(data.display_name) if data.display_name else None
@@ -306,7 +318,15 @@ def sendemail(
         "timestamp": data.timestamp or "",  # System-generated, safe
         "new_email": escape(data.new_email) if data.new_email else "",
         "link": data.link or "",  # System-generated URL, safe
+        "link_section": "",
     }
+
+    if data.link:
+        html_context["link_section"] = cache.fragments[
+            "signup_verification_link.html"
+        ].format(
+            link=data.link
+        )
 
     # Render text template
     text_body = template.text.format(**text_context)

@@ -9,7 +9,6 @@ import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict
 from typing import Any
 
 from freetser import Response, Storage
@@ -19,27 +18,29 @@ from tiauth_faroe.client import ActionErrorResult
 from apiserver.data import DB_TABLES
 from apiserver.data.admin import get_admin_credentials, store_admin_credentials
 from apiserver.data.client import AuthClient
-from apiserver.data.permissions import Permissions, add_permission
+from apiserver.data.outbox import OUTBOX_TABLE, deserialize_outbox
+from apiserver.data.permissions import add_permission
 from apiserver.data.registrations import (
     create_or_reuse_registration,
-    delete_registration,
-    get_registration,
+    get_registration_by_email,
     list_registrations,
     normalize_email,
     upsert_registration,
 )
 from apiserver.data.features.birthdays import list_birthdays
-from apiserver.handlers.acceptance import do_accept_new_with_email
-from apiserver.settings import SmtpConfig
 from apiserver.sync import (
-    accept_new,
+    CompleteSyncError,
+    ImportValidationError,
+    StaleCounter,
     add_system_user,
-    compute_groups,
+    complete_sync,
+    compute_sync_status,
+    get_sync_state,
     import_sync,
+    link_bondsnummer,
     parse_csv,
-    remove_departed,
-    serialize_groups,
-    update_existing,
+    resolve_sync_match,
+    serialize_sync_status,
 )
 from apiserver.tooling.actions import AdminUserCreationError, create_admin_user
 from apiserver.tooling.codes import CODES_TABLE, CodeWaiter, get_code, peek_code
@@ -186,7 +187,7 @@ def cmdhandler_prepare_user(
         lastname = ""
 
     def do_prepare(store: Storage) -> str | None:
-        existing = get_registration(store, email)
+        existing = get_registration_by_email(store, email)
         if existing is not None:
             return f"Registration already exists for {email}"
         create_or_reuse_registration(store, email, firstname, lastname, accepted=True)
@@ -235,74 +236,99 @@ def cmdhandler_get_code(
 
 def cmdhandler_import_sync(store_queue: StorageQueue, csv_content: str) -> Response:
     entries = parse_csv(csv_content)
-    count = store_queue.execute(lambda store: import_sync(store, entries))
-    logger.info(f"import_sync: Imported {count} entries")
-    return Response.json({"imported": count})
+
+    def do_import(store: Storage) -> int | ImportValidationError | StaleCounter:
+        _, counter = get_sync_state(store)
+        return import_sync(store, entries, sync_state_counter=counter)
+
+    result = store_queue.execute(do_import)
+    if isinstance(result, (ImportValidationError, StaleCounter)):
+        logger.warning(f"import_sync: Failed: {result.message}")
+        return Response.json({"error": result.message}, status_code=400)
+    logger.info(f"import_sync: Imported {result} entries")
+    return Response.json({"imported": result})
 
 
-def cmdhandler_compute_groups(store_queue: StorageQueue) -> Response:
-    groups = store_queue.execute(compute_groups)
+def cmdhandler_compute_sync_status(store_queue: StorageQueue) -> Response:
+    status = store_queue.execute(compute_sync_status)
+    result = serialize_sync_status(status)
     logger.info(
-        f"compute_groups: {len(groups.departed)} departed, "
-        f"{len(groups.to_accept)} to_accept, "
-        f"{len(groups.pending_signup)} pending_signup, "
-        f"{len(groups.existing)} existing"
+        f"compute_sync_status: {len(result['review_required'])} review_required, "
+        f"{len(result['linked_registrations'])} linked_registrations, "
+        f"{len(result['existing'])} existing, "
+        f"{len(result['departed'])} departed"
     )
-    return Response.json(serialize_groups(groups))
-
-
-def cmdhandler_remove_departed(
-    store_queue: StorageQueue, email: str | None
-) -> Response:
-    timestamp = int(time.time())
-    result = store_queue.execute(lambda store: remove_departed(store, timestamp, email))
-    logger.info(f"remove_departed: {result}")
     return Response.json(result)
 
 
-def cmdhandler_accept_new(store_queue: StorageQueue, email: str | None) -> Response:
-    result = store_queue.execute(lambda store: accept_new(store, email))
-    logger.info(f"accept_new: {result}")
-    return Response.json(result)
-
-
-def cmdhandler_accept_new_with_email(
+def cmdhandler_resolve_sync_match(
     store_queue: StorageQueue,
-    frontend_origin: str,
-    smtp_config: SmtpConfig | None,
-    smtp_send: bool,
-    email: str | None,
+    bondsnummer: int | None,
+    kind: str | None,
+    subject_id: str | None,
 ) -> Response:
-    """Command handler for accept_new with acceptance emails."""
-    result = do_accept_new_with_email(
-        store_queue, frontend_origin, smtp_config, smtp_send, email
+    if bondsnummer is None or kind is None:
+        return Response.text("Missing bondsnummer or kind", status_code=400)
+    result = store_queue.execute(
+        lambda store: resolve_sync_match(store, int(bondsnummer), kind, subject_id)
     )
-    return Response.json(asdict(result))
+    if not result.success:
+        return Response.json(
+            {"success": False, "message": result.message}, status_code=400
+        )
+    return Response.json({"success": True, "message": result.message})
 
 
-def cmdhandler_update_existing(
-    store_queue: StorageQueue, email: str | None
+def cmdhandler_link_bondsnummer(
+    store_queue: StorageQueue,
+    kind: str | None,
+    subject_id: str | None,
+    bondsnummer: int | None,
 ) -> Response:
-    result = store_queue.execute(lambda store: update_existing(store, email))
-    logger.info(f"update_existing: {result}")
-    return Response.json(result)
+    if not kind or not subject_id or bondsnummer is None:
+        return Response.text(
+            "Missing kind, subject_id, or bondsnummer",
+            status_code=400,
+        )
+    result = store_queue.execute(
+        lambda store: link_bondsnummer(store, kind, subject_id, int(bondsnummer))
+    )
+    if not result.success:
+        return Response.json(
+            {"success": False, "message": result.message}, status_code=400
+        )
+    return Response.json({"success": True, "message": result.message})
+
+
+def cmdhandler_complete_sync(store_queue: StorageQueue) -> Response:
+    result = store_queue.execute(complete_sync)
+    if isinstance(result, CompleteSyncError):
+        return Response.json({"error": result.message}, status_code=400)
+    return Response.json(
+        {
+            "success": True,
+            "volta_rows_applied": result.volta_rows_applied,
+            "registrations_created": result.registrations_created,
+            "registrations_accepted": result.registrations_accepted,
+            "registrations_updated": result.registrations_updated,
+            "users_refreshed": result.users_refreshed,
+            "users_departed": result.users_departed,
+        }
+    )
 
 
 def cmdhandler_board_setup(
     store_queue: StorageQueue,
     auth_client: AuthClient | None,
 ) -> Response:
-    """One-time setup for the Bestuur (board) account.
-
-    Creates an accepted registration, marks as system user, initiates signup.
-    """
+    """One-time setup for the Bestuur (board) account."""
     if auth_client is None:
         return Response.text("Auth client not available", status_code=500)
 
     email = BOARD_EMAIL
 
     def prepare(store: Storage) -> str | None:
-        existing = get_registration(store, email)
+        existing = get_registration_by_email(store, email)
         if existing is not None:
             return f"{email} already has a registration"
         create_or_reuse_registration(store, email, "Bestuur", "", accepted=True)
@@ -313,7 +339,6 @@ def cmdhandler_board_setup(
     if error:
         return Response.text(error, status_code=400)
 
-    # Initiate Faroe signup (blocking HTTP — outside store_queue)
     signup_result = auth_client.create_signup(email)
     if isinstance(signup_result, ActionErrorResult):
         logger.error(
@@ -327,7 +352,7 @@ def cmdhandler_board_setup(
     signup_token = signup_result.signup_token
 
     def save_signup(store: Storage) -> None:
-        reg = get_registration(store, email)
+        reg = get_registration_by_email(store, email)
         if reg is not None:
             reg.signup_token = signup_token
             upsert_registration(store, reg)
@@ -407,11 +432,7 @@ def cmdhandler_create_accounts(
     code_waiter: CodeWaiter | None,
     password: str | None,
 ) -> Response:
-    """Create accounts for all accepted registrations (testing).
-
-    Runs the full signup flow for each: create_signup, verify email,
-    set password, complete signup. Emails are suppressed.
-    """
+    """Create accounts for all accepted registrations (testing)."""
     if auth_client is None:
         return Response.text("Auth client not available", status_code=500)
     if code_waiter is None:
@@ -422,11 +443,7 @@ def cmdhandler_create_accounts(
     def find_pending(store: Storage) -> list[str]:
         registered = set(store.list_keys("users_by_email"))
         regs = list_registrations(store)
-        return [
-            r.email
-            for r in regs
-            if r.accepted and not r.account_created and r.email not in registered
-        ]
+        return [r.email for r in regs if r.accepted and r.email not in registered]
 
     emails = store_queue.execute(find_pending)
     if not emails:
@@ -522,56 +539,53 @@ def cmdhandler_grant_admin(store_queue: StorageQueue, email: str | None) -> Resp
     return Response.json(result)
 
 
-def cmdhandler_accept_user(store_queue: StorageQueue, email: str | None) -> Response:
-    """Accept a user without HTTP request parsing (for test automation).
-
-    Same logic as accept_user_handler:
-    - If user already has account: grant member, delete registration
-    - If not: mark accepted=True, set notify_on_completion
-    No email sending.
-    """
-    if not email:
-        return Response.text("Missing email for accept_user", status_code=400)
-
-    email = normalize_email(email)
-    timestamp = int(time.time())
-
-    def accept(store: Storage) -> dict:
-        reg = get_registration(store, email)
-        if reg is None:
-            return {"error": f"No registration found for {email}"}
-
-        user_result = store.get("users_by_email", email)
-        if user_result is not None:
-            user_id = user_result[0].decode("utf-8")
-            add_permission(store, timestamp, user_id, Permissions.MEMBER)
-            delete_registration(store, email)
-            return {
-                "success": True,
-                "has_account": True,
-                "message": f"Member permission granted to {email}",
-            }
-
-        reg.accepted = True
-        reg.notify_on_completion = True
-        upsert_registration(store, reg)
-
-        return {
-            "success": True,
-            "has_account": False,
-            "message": f"User {email} marked as accepted",
-        }
-
-    result = store_queue.execute(accept)
-    if "error" in result:
-        logger.warning(f"accept_user: {result['error']}")
-        return Response.json(result, status_code=400)
-
-    logger.info(f"accept_user: {result['message']}")
-    return Response.json(result)
-
-
 def cmdhandler_list_birthdays(store_queue: StorageQueue) -> Response:
     """Return all birthday entries."""
     result = store_queue.execute(list_birthdays)
+    return Response.json(result)
+
+
+def cmdhandler_list_outbox(
+    store_queue: StorageQueue,
+    kind: str | None = None,
+    subject_kind: str | None = None,
+    subject_id: str | None = None,
+    status: str | None = None,
+) -> Response:
+    """Return outbox rows for test/tooling inspection."""
+
+    def list_rows(store: Storage) -> list[dict[str, Any]]:
+        rows = []
+        for key in store.list_keys(OUTBOX_TABLE):
+            result = store.get(OUTBOX_TABLE, key)
+            if result is None:
+                continue
+            row = deserialize_outbox(result[0])
+            if kind is not None and row.kind != kind:
+                continue
+            if subject_kind is not None and row.subject_kind != subject_kind:
+                continue
+            if subject_id is not None and row.subject_id != subject_id:
+                continue
+            if status is not None and row.status != status:
+                continue
+            rows.append(
+                {
+                    "outbox_id": row.outbox_id,
+                    "kind": row.kind,
+                    "status": row.status,
+                    "subject_kind": row.subject_kind,
+                    "subject_id": row.subject_id,
+                    "payload": row.payload,
+                    "created_at": row.created_at,
+                    "last_attempt_at": row.last_attempt_at,
+                    "next_attempt_at": row.next_attempt_at,
+                    "attempt_count": row.attempt_count,
+                    "last_error": row.last_error,
+                }
+            )
+        rows.sort(key=lambda row: (row["created_at"], row["outbox_id"]))
+        return rows
+
+    result = store_queue.execute(list_rows)
     return Response.json(result)

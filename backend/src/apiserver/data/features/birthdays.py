@@ -1,4 +1,4 @@
-"""Birthday data operations."""
+"""Birthday data operations keyed by user_id."""
 
 import json
 
@@ -7,34 +7,16 @@ from freetser import Storage
 BIRTHDAYS_TABLE = "birthdays"
 
 
-def set_birthday(
-    store: Storage,
-    email: str,
-    geboortedatum: str,
-    voornaam: str,
-    tussenvoegsel: str,
-    achternaam: str,
-) -> None:
-    """Upsert birthday entry for a member."""
-    key = email.lower()
-    data = json.dumps(
-        {
-            "geboortedatum": geboortedatum,
-            "voornaam": voornaam,
-            "tussenvoegsel": tussenvoegsel,
-            "achternaam": achternaam,
-        }
-    ).encode("utf-8")
-    # Birthday rows are regenerated from authoritative member data, so the
-    # latest sync/update should simply replace the stored value.
-    store.overwrite(BIRTHDAYS_TABLE, key, data, expires_at=0)
-
-
-def delete_birthday(store: Storage, email: str) -> None:
-    """Delete birthday entry for a member."""
-    key = email.lower()
-    if store.get(BIRTHDAYS_TABLE, key) is not None:
-        store.delete(BIRTHDAYS_TABLE, key)
+def replace_birthdays(store: Storage, entries: list[dict]) -> None:
+    """Replace the derived birthday table in one storage callback."""
+    store.clear(BIRTHDAYS_TABLE)
+    for entry in entries:
+        store.add(
+            BIRTHDAYS_TABLE,
+            entry["user_id"],
+            json.dumps(entry).encode("utf-8"),
+            expires_at=0,
+        )
 
 
 def list_birthdays(store: Storage) -> list[dict]:

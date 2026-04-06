@@ -1,7 +1,7 @@
-"""Legacy sync integration tests retired by the final spec rewrite.
+"""Legacy sync integration tests retired by the spec rewrite.
 
 The old tests in this file encoded the pre-migration email-keyed sync model.
-The final contract now lives in `test_spec.py`.
+The current contract now lives in `test_spec.py`.
 """
 
 import pytest

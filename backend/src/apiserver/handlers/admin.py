@@ -1,19 +1,14 @@
-"""Admin handlers for the public API.
-
-Handles user management, permissions, sync operations, and related flows.
-"""
+"""Admin handlers for the public API."""
 
 import json
 import logging
-import smtplib
 import time
-from dataclasses import asdict
 
-from freetser import Request, Response, Storage
+from freetser import Request, Response, Storage, UpdateCounterMismatch
 from freetser.server import StorageQueue
 
+from apiserver.data.outbox import create_outbox_row
 from apiserver.data.permissions import (
-    Permissions,
     UserNotFoundError,
     add_permission,
     allowed_permission,
@@ -22,159 +17,295 @@ from apiserver.data.permissions import (
     remove_permission,
 )
 from apiserver.data.registrations import (
-    delete_registration,
     get_registration,
     list_registrations,
-    normalize_email,
     upsert_registration,
 )
 from apiserver.data.user import list_all_users
-from apiserver.email import EmailData, sendemail
-from apiserver.handlers.acceptance import do_accept_new_with_email
+from apiserver.data.userdata import (
+    BONDSNUMMER_TABLE,
+    VOLTA_DATA_TABLE,
+    get_volta,
+    volta_to_dict,
+)
+from apiserver.handlers.acceptance import (
+    dispatch_pending_outbox,
+    send_registration_invite,
+)
 from apiserver.settings import SmtpConfig
 from apiserver.sync import (
-    compute_groups,
+    CompleteSyncError,
+    ImportValidationError,
+    StaleCounter,
+    complete_sync,
+    compute_sync_status,
     import_sync,
+    link_bondsnummer,
     list_system_users,
     parse_csv,
-    remove_departed,
-    serialize_groups,
-    update_existing,
+    resolve_sync_match,
+    serialize_sync_status,
 )
 
 logger = logging.getLogger("apiserver.handlers.admin")
 
 
-def list_newusers_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/list_newusers/ — lists all pending registrations."""
+def list_registrations_handler(store_queue: StorageQueue) -> Response:
+    """Handle /admin/list_registrations/."""
 
     def list_regs(store: Storage) -> list:
         regs = list_registrations(store)
         result = []
         for reg in regs:
-            is_registered = store.get("users_by_email", reg.email) is not None
+            volta_data = None
+            if reg.bondsnummer is not None:
+                vd = get_volta(store, VOLTA_DATA_TABLE, reg.bondsnummer)
+                if vd is not None:
+                    volta_data = volta_to_dict(vd)
+            actions = []
+            if reg.accepted:
+                actions.append({"kind": "resend_registration_invite"})
             result.append(
                 {
+                    "registration_id": reg.registration_id,
                     "email": reg.email,
                     "firstname": reg.firstname,
                     "lastname": reg.lastname,
                     "accepted": reg.accepted,
-                    "account_created": reg.account_created,
-                    "email_send_count": reg.email_send_count,
-                    "has_signup_token": reg.signup_token is not None,
-                    "is_registered": is_registered,
-                    "registration_token": reg.registration_token,
+                    "bondsnummer": reg.bondsnummer,
+                    "signup_active": reg.signup_token is not None,
+                    "volta_data": volta_data,
+                    "available_actions": actions,
                 }
             )
+        result.sort(key=lambda r: (r["accepted"], r["email"]))
         return result
 
     result = store_queue.execute(list_regs)
-    logger.info(f"list_newusers: Returning {len(result)} registrations")
+    logger.info(f"list_registrations: Returning {len(result)} registrations")
     return Response.json(result)
 
 
-def accept_user_handler(
+def accept_registration_handler(
     req: Request,
     store_queue: StorageQueue,
     frontend_origin: str,
     smtp_config: SmtpConfig | None,
     smtp_send: bool,
 ) -> Response:
-    """Handle /admin/accept_user/ — accept a user.
+    """Handle /admin/accept_registration/.
 
-    If user already has account: grant member, send acceptance email, clean up.
-    If no account yet: mark accepted, set notify_on_completion for deferred email.
+    Sets accepted=True and creates a durable outbox row.
+    Idempotent if already accepted (no duplicate outbox row).
     """
     try:
         body_data = json.loads(req.body.decode("utf-8"))
-        email_raw = body_data.get("email")
-        if not email_raw:
-            logger.warning("accept_user: Missing email in request")
-            return Response.text("Missing email", status_code=400)
+        registration_id = body_data.get("registration_id")
+        if not registration_id:
+            return Response.text("Missing registration_id", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"accept_user: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
-    email = normalize_email(email_raw)
-    timestamp = int(time.time())
-
     def accept(store: Storage) -> dict:
-        reg = get_registration(store, email)
+        reg = get_registration(store, registration_id)
         if reg is None:
-            return {"error": f"No registration found for {email}"}
+            return {"error": f"Registration {registration_id} not found"}
 
-        user_result = store.get("users_by_email", email)
-        if user_result is not None:
-            # User already has an account — grant member + clean up
-            user_id = user_result[0].decode("utf-8")
-            add_permission(store, timestamp, user_id, Permissions.MEMBER)
-            delete_registration(store, email)
-            return {
-                "success": True,
-                "has_account": True,
-                "display_name": reg.firstname,
-                "message": f"Member permission granted to {email}",
-            }
-
-        # No account yet — mark accepted, set notify_on_completion
-        reg.accepted = True
-        reg.notify_on_completion = True
-        upsert_registration(store, reg)
+        invite_needed = not reg.accepted
+        if invite_needed:
+            reg.accepted = True
+            upsert_registration(store, reg)
+            create_outbox_row(
+                store,
+                kind="send_registration_invite",
+                subject_kind="registration",
+                subject_id=reg.registration_id,
+                payload={
+                    "registration_id": reg.registration_id,
+                    "email": reg.email,
+                    "display_name": reg.firstname,
+                },
+            )
 
         return {
             "success": True,
-            "has_account": False,
-            "registration_token": reg.registration_token,
+            "registration_id": reg.registration_id,
+            "email": reg.email,
             "display_name": reg.firstname,
-            "message": f"User {email} marked as accepted (pending signup completion)",
         }
 
     result = store_queue.execute(accept)
     if "error" in result:
-        logger.warning(f"accept_user: {result['error']}")
+        logger.warning(f"accept_registration: {result['error']}")
         return Response.json(result, status_code=400)
 
-    # Send acceptance email if user already has an account
-    if result.get("has_account"):
-        try:
-            link = frontend_origin
-            email_data = EmailData(
-                email_type="account_accepted_self",
-                to_email=email,
-                display_name=result.get("display_name"),
-                link=link,
-            )
-            sendemail(smtp_config, email_data, smtp_send)
-        except (smtplib.SMTPException, OSError) as exc:
-            logger.error(
-                f"accept_user: Failed to send acceptance email to {email}: {exc}"
-            )
+    # Attempt delivery after commit
+    dispatch_pending_outbox(store_queue, frontend_origin, smtp_config, smtp_send)
 
-    logger.info(f"accept_user: {result['message']}")
+    logger.info(f"accept_registration: Accepted {registration_id}")
     return Response.json(result)
 
 
+def resend_registration_invite_handler(
+    req: Request,
+    store_queue: StorageQueue,
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
+    smtp_send: bool,
+) -> Response:
+    """Handle /admin/resend_registration_invite/.
+
+    Direct admin command, sends immediately, no outbox.
+    """
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        registration_id = body_data.get("registration_id")
+        if not registration_id:
+            return Response.text("Missing registration_id", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    reg = store_queue.execute(lambda store: get_registration(store, registration_id))
+    if reg is None:
+        return Response.json(
+            {"error": f"Registration {registration_id} not found"},
+            status_code=404,
+        )
+    if not reg.accepted:
+        return Response.json({"error": "Registration not accepted"}, status_code=400)
+
+    success = send_registration_invite(
+        frontend_origin=frontend_origin,
+        smtp_config=smtp_config,
+        smtp_send=smtp_send,
+        registration_id=reg.registration_id,
+        email=reg.email,
+        display_name=reg.firstname,
+    )
+    if not success:
+        return Response.json({"error": "Failed to send invite"}, status_code=500)
+
+    return Response.json({"success": True, "email": reg.email})
+
+
+def resolve_sync_match_handler(
+    req: Request,
+    store_queue: StorageQueue,
+) -> Response:
+    """Handle /admin/resolve_sync_match/ — records a pending decision."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        bondsnummer = body_data.get("bondsnummer")
+        kind = body_data.get("kind")
+        subject_id = body_data.get("subject_id")
+        counter = body_data.get("sync_state_counter")
+        if bondsnummer is None or kind is None:
+            return Response.text("Missing bondsnummer or kind", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    try:
+        result = store_queue.execute(
+            lambda store: resolve_sync_match(
+                store, int(bondsnummer), kind, subject_id, counter
+            )
+        )
+    except UpdateCounterMismatch:
+        return Response.json(
+            {"success": False, "message": "Stale sync_state_counter"},
+            status_code=400,
+        )
+    if not result.success:
+        logger.warning(f"resolve_sync_match: {result.message}")
+        return Response.json(
+            {"success": False, "message": result.message}, status_code=400
+        )
+
+    logger.info(f"resolve_sync_match: {result.message}")
+    return Response.json({"success": True, "message": result.message})
+
+
+def complete_sync_handler(
+    req: Request,
+    store_queue: StorageQueue,
+    frontend_origin: str,
+    smtp_config: SmtpConfig | None,
+    smtp_send: bool,
+) -> Response:
+    """Handle /admin/complete_sync/ — apply the pending sync session."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        counter = body_data.get("sync_state_counter")
+    except json.JSONDecodeError, ValueError:
+        counter = None
+
+    try:
+        result = store_queue.execute(lambda store: complete_sync(store, counter))
+    except UpdateCounterMismatch:
+        return Response.json({"error": "Stale sync_state_counter"}, status_code=409)
+    if isinstance(result, CompleteSyncError):
+        logger.warning(f"complete_sync: {result.message}")
+        return Response.json({"error": result.message}, status_code=400)
+
+    # Attempt outbox delivery after commit
+    dispatch_pending_outbox(store_queue, frontend_origin, smtp_config, smtp_send)
+
+    logger.info(f"complete_sync: {result.message}")
+    return Response.json(
+        {
+            "success": True,
+            "volta_rows_applied": result.volta_rows_applied,
+            "registrations_created": result.registrations_created,
+            "registrations_accepted": result.registrations_accepted,
+            "registrations_updated": result.registrations_updated,
+            "users_refreshed": result.users_refreshed,
+            "users_departed": result.users_departed,
+        }
+    )
+
+
+def link_bondsnummer_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/link_bondsnummer/."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        kind = body_data.get("kind")
+        subject_id = body_data.get("subject_id")
+        bn = body_data.get("bondsnummer")
+        if not kind or not subject_id or bn is None:
+            return Response.text(
+                "Missing kind, subject_id, or bondsnummer",
+                status_code=400,
+            )
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    result = store_queue.execute(
+        lambda store: link_bondsnummer(store, kind, subject_id, int(bn))
+    )
+    if not result.success:
+        logger.warning(f"link_bondsnummer: {result.message}")
+        return Response.json(
+            {"success": False, "message": result.message}, status_code=400
+        )
+
+    logger.info(f"link_bondsnummer: {result.message}")
+    return Response.json({"success": True, "message": result.message})
+
+
 def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/add_permission/ — adds a permission to a user (except admin)."""
+    """Handle /admin/add_permission/."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         user_id = body_data.get("user_id")
         permission = body_data.get("permission")
         if not user_id or not permission:
-            logger.warning("add_user_permission: Missing user_id or permission")
             return Response.text("Missing user_id or permission", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"add_user_permission: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     if permission == "admin":
-        logger.error(
-            f"add_user_permission: Attempted to add admin permission to {user_id}"
-        )
         return Response.text("Cannot add admin permission", status_code=403)
-
     if not allowed_permission(permission):
-        logger.warning(f"add_user_permission: Invalid permission {permission}")
         return Response.text(f"Invalid permission: {permission}", status_code=400)
 
     timestamp = int(time.time())
@@ -187,28 +318,22 @@ def add_user_permission(req: Request, store_queue: StorageQueue) -> Response:
 
     result = store_queue.execute(add_perm)
     if isinstance(result, UserNotFoundError):
-        logger.warning(f"add_user_permission: User {user_id} not found")
         return Response.text(f"User {user_id} not found", status_code=404)
-    else:
-        logger.info(f"add_user_permission: {result.strip()}")
-        return Response.text(result)
+    return Response.text(result)
 
 
 def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/remove_permission/ — removes a permission from a user."""
+    """Handle /admin/remove_permission/."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         user_id = body_data.get("user_id")
         permission = body_data.get("permission")
         if not user_id or not permission:
-            logger.warning("remove_user_permission: Missing user_id or permission")
             return Response.text("Missing user_id or permission", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"remove_user_permission: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     if not allowed_permission(permission):
-        logger.warning(f"remove_user_permission: Invalid permission {permission}")
         return Response.text(f"Invalid permission: {permission}", status_code=400)
 
     def remove_perm(store: Storage) -> str | UserNotFoundError:
@@ -219,64 +344,72 @@ def remove_user_permission(req: Request, store_queue: StorageQueue) -> Response:
 
     result = store_queue.execute(remove_perm)
     if isinstance(result, UserNotFoundError):
-        logger.warning(f"remove_user_permission: User {user_id} not found")
         return Response.text(f"User {user_id} not found", status_code=404)
-    else:
-        logger.info(f"remove_user_permission: {result.strip()}")
-        return Response.text(result)
+    return Response.text(result)
 
 
 def list_users_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/list_users/ — lists all users with their permissions."""
+    """Handle /admin/list_users/."""
     timestamp = int(time.time())
 
     def get_users(store: Storage) -> list[dict]:
         users = list_all_users(store, timestamp)
-        return [
-            {
-                "user_id": u.user_id,
-                "email": u.email,
-                "firstname": u.firstname,
-                "lastname": u.lastname,
-                "permissions": sorted(u.permissions),
-            }
-            for u in users
-        ]
+        result = []
+        for u in users:
+            bn = None
+            volta_data = None
+            for key in store.list_keys(BONDSNUMMER_TABLE):
+                res = store.get(BONDSNUMMER_TABLE, key)
+                if res is not None and res[0].decode("utf-8") == u.user_id:
+                    bn = int(key)
+                    vd = get_volta(store, VOLTA_DATA_TABLE, bn)
+                    if vd is not None:
+                        volta_data = volta_to_dict(vd)
+                    break
+            result.append(
+                {
+                    "user_id": u.user_id,
+                    "email": u.email,
+                    "firstname": u.firstname,
+                    "lastname": u.lastname,
+                    "permissions": sorted(u.permissions),
+                    "bondsnummer": bn,
+                    "volta_data": volta_data,
+                }
+            )
+        return result
 
     result = store_queue.execute(get_users)
-    logger.info(f"list_users: Returning {len(result)} users")
     return Response.json(result)
 
 
 def available_permissions_handler() -> Response:
-    """Handle /admin/available_permissions/ — lists all valid permissions."""
-    permissions = get_all_permissions()
-    return Response.json({"permissions": permissions})
+    return Response.json({"permissions": get_all_permissions()})
 
 
 def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/set_permissions/ — declaratively set permissions for users."""
+    """Handle /admin/set_permissions/."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         permissions_map = body_data.get("permissions")
         if not permissions_map or not isinstance(permissions_map, dict):
-            logger.warning("set_permissions: Missing or invalid permissions map")
             return Response.text("Missing permissions map", status_code=400)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"set_permissions: Invalid request: {e}")
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     for user_id, perms in permissions_map.items():
         if not isinstance(perms, list):
             return Response.text(
-                f"Permissions for {user_id} must be a list", status_code=400
+                f"Permissions for {user_id} must be a list",
+                status_code=400,
             )
         for perm in perms:
             if not allowed_permission(perm):
                 return Response.text(f"Invalid permission: {perm}", status_code=400)
             if perm == "admin":
                 return Response.text(
-                    "Cannot set admin permission via this endpoint", status_code=403
+                    "Cannot set admin permission via this endpoint",
+                    status_code=403,
                 )
 
     timestamp = int(time.time())
@@ -289,114 +422,53 @@ def set_permissions_handler(req: Request, store_queue: StorageQueue) -> Response
             if isinstance(current, UserNotFoundError):
                 results[user_id] = {"error": "user_not_found"}
                 continue
-
             current_non_admin = current - {"admin"}
             target_non_admin = target_set - {"admin"}
-
             to_add = target_non_admin - current_non_admin
             to_remove = current_non_admin - target_non_admin
-
             for perm in to_add:
                 add_permission(store, timestamp, user_id, perm)
             for perm in to_remove:
                 remove_permission(store, user_id, perm)
-
             results[user_id] = {
                 "added": sorted(to_add),
                 "removed": sorted(to_remove),
             }
 
     store_queue.execute(apply_permissions)
-    logger.info(f"set_permissions: Updated {len(results)} users")
     return Response.json({"results": results})
 
 
 def import_sync_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/import_sync/ — import CSV content into sync table."""
+    """Handle /admin/import_sync/."""
     try:
         body_data = json.loads(req.body.decode("utf-8"))
         csv_content = body_data.get("csv_content")
         if not csv_content:
             return Response.text("Missing csv_content", status_code=400)
+        counter = body_data.get("sync_state_counter")
     except (json.JSONDecodeError, ValueError) as e:
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     entries = parse_csv(csv_content)
-    count = store_queue.execute(lambda store: import_sync(store, entries))
-    logger.info(f"import_sync: Imported {count} entries")
-    return Response.json({"imported": count})
+    try:
+        result = store_queue.execute(lambda store: import_sync(store, entries, counter))
+    except UpdateCounterMismatch:
+        return Response.json({"error": "Stale sync_state_counter"}, status_code=409)
+    if isinstance(result, (ImportValidationError, StaleCounter)):
+        return Response.json({"error": result.message}, status_code=400)
+    logger.info(f"import_sync: Imported {result} entries")
+    return Response.json({"imported": result})
 
 
 def sync_status_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/sync_status/ — compute and return sync groups."""
-    result = store_queue.execute(lambda store: serialize_groups(compute_groups(store)))
-    logger.info(
-        f"sync_status: {len(result['to_accept'])} to_accept, "
-        f"{len(result['pending_signup'])} pending_signup, "
-        f"{len(result['existing'])} existing, "
-        f"{len(result['departed'])} departed"
+    """Handle /admin/sync_status/."""
+    result = store_queue.execute(
+        lambda store: serialize_sync_status(compute_sync_status(store))
     )
-    return Response.json(result)
-
-
-def accept_new_sync_handler(
-    req: Request,
-    store_queue: StorageQueue,
-    frontend_origin: str,
-    smtp_config: SmtpConfig | None,
-    smtp_send: bool,
-) -> Response:
-    """Handle /admin/accept_new_sync/ — accept new users and send emails."""
-    email = None
-    if req.body:
-        try:
-            body_data = json.loads(req.body.decode("utf-8"))
-            raw_email = body_data.get("email")
-            if raw_email:
-                email = normalize_email(raw_email)
-        except json.JSONDecodeError, ValueError:
-            pass
-
-    result = do_accept_new_with_email(
-        store_queue, frontend_origin, smtp_config, smtp_send, email
-    )
-    return Response.json(asdict(result))
-
-
-def remove_departed_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/remove_departed/ — remove departed users."""
-    email = None
-    if req.body:
-        try:
-            body_data = json.loads(req.body.decode("utf-8"))
-            raw_email = body_data.get("email")
-            if raw_email:
-                email = normalize_email(raw_email)
-        except json.JSONDecodeError, ValueError:
-            pass
-    timestamp = int(time.time())
-    result = store_queue.execute(lambda store: remove_departed(store, timestamp, email))
-    logger.info(f"remove_departed: {result}")
-    return Response.json(result)
-
-
-def update_existing_handler(req: Request, store_queue: StorageQueue) -> Response:
-    """Handle /admin/update_existing/ — update existing user data from sync."""
-    email = None
-    if req.body:
-        try:
-            body_data = json.loads(req.body.decode("utf-8"))
-            raw_email = body_data.get("email")
-            if raw_email:
-                email = normalize_email(raw_email)
-        except json.JSONDecodeError, ValueError:
-            pass
-    result = store_queue.execute(lambda store: update_existing(store, email))
-    logger.info(f"update_existing: {result}")
     return Response.json(result)
 
 
 def list_system_users_handler(store_queue: StorageQueue) -> Response:
-    """Handle /admin/list_system_users/ — list system users."""
     users = store_queue.execute(list_system_users)
     return Response.json({"system_users": users})

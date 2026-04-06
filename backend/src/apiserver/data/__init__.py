@@ -6,20 +6,29 @@ and full-reset (cmdhandler_reset).
 """
 
 from apiserver.data.features.birthdays import BIRTHDAYS_TABLE
-from apiserver.data.registrations import REGISTRATIONS_TABLE, REGISTRATION_TOKENS_TABLE
+from apiserver.data.outbox import OUTBOX_TABLE
+from apiserver.data.registrations import (
+    REGISTRATIONS_BY_BONDSNUMMER_TABLE,
+    REGISTRATIONS_BY_EMAIL_TABLE,
+    REGISTRATIONS_TABLE,
+)
 from apiserver.sync import SYSTEM_USERS_TABLE
 from apiserver.tooling.codes import CODES_TABLE
 
 DB_TABLES = [
     "users",
     "users_by_email",
+    "users_by_bondsnummer",
     REGISTRATIONS_TABLE,
-    REGISTRATION_TOKENS_TABLE,
+    REGISTRATIONS_BY_EMAIL_TABLE,
+    REGISTRATIONS_BY_BONDSNUMMER_TABLE,
+    OUTBOX_TABLE,
+    "sync_state",
+    "sync",
+    "sync_decisions",
+    "volta_data",
     "metadata",
     "session_cache",
-    "userdata",
-    "sync",
-    "users_by_bondsnummer",
     BIRTHDAYS_TABLE,
     SYSTEM_USERS_TABLE,
     CODES_TABLE,
