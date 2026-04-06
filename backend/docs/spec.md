@@ -1,636 +1,807 @@
 # Dodeka Backend Specification
 
-This document specifies the sync, registration, login, and permission flows
-for the D.S.A.V. Dodeka backend. It is the authoritative reference for how
-member accounts are created, maintained, and removed. This forms the core of
-the backend application. It does not mention any _features_.
+This document specifies the backend identity, sync, registration,
+authentication, session, and permission model for D.S.A.V. Dodeka.
 
-## Architecture overview
+It is the authoritative specification for the core backend. Feature-specific
+application behavior is out of scope.
+
+## Context
+
+D.S.A.V. Dodeka is a student athletics association. Its backend has to combine
+two worlds:
+
+- Dodeka-managed account and permission state
+- member data imported from the Dutch athletics federation ecosystem
+
+The imported member data comes from VoltaClub, the administration system used
+for Atletiekunie-linked membership administration. The crucial imported
+identifier is the `bondsnummer`, the stable Atletiekunie member number.
+
+This backend therefore has to support:
+
+- people who already have a Dodeka account
+- people who are known only through a pending registration
+- people who are present only in imported Volta data
+
+The specification below is organized around keeping those identities separate
+and linking them only through explicit stable identifiers.
+
+## Purpose
+
+The backend exists to do work that cannot safely or cleanly live in the
+browser bundle.
+
+It is responsible for:
+
+- server-side logic that must run with trusted credentials or trusted state
+- storage and access control for member-only and otherwise private data
+- bridging imported Volta/Atletiekunie member data into Dodeka’s member-facing
+  system
+
+The frontend must not access raw Volta data directly. Instead, the backend
+imports that data, links it to Dodeka identities, applies admin review where
+needed, and exposes only the controlled read and write operations that belong
+in the Dodeka application.
+
+## Terms
+
+- **Dodeka**: the student association and the Python backend/frontend system
+  described by this spec.
+- **Atletiekunie**: the Dutch athletics federation whose member numbers are
+  used as stable external identity.
+- **VoltaClub**: the Atletiekunie-linked administration system used by the
+  board. Dodeka imports its CSV export.
+- **bondsnummer**: the stable Atletiekunie member number.
+- **Faroe** (`tiauth-faroe`): the separate auth server that owns signup,
+  signin, password, email-change, and session protocol.
+- **freetser**: the SQLite-backed storage layer used by the Python backend.
+
+## Architecture
 
 Two processes cooperate:
 
-- **Python backend** -- public HTTP API (frontend-facing) and a private HTTP
-  server on a separate loopback address (127.0.0.2).
-- **Go auth server (tiauth-faroe)** -- handles authentication primitives
-  (signup, signin, sessions, password reset). Calls back to the Python
-  private server for user storage (`/invoke`) and email delivery (`/email`).
+- **Python backend**: public HTTP API for the frontend, plus a private HTTP
+  server on loopback
+- **Faroe auth server**: handles auth protocol and calls back to the Python
+  private server
 
-All persistent state lives in a single SQLite database accessed through
-`freetser.Storage`. A `StorageQueue` serializes all database operations onto
-a single thread. Blocking calls (HTTP, SMTP) must never run inside a
-`store_queue.execute()` callback.
+Faroe uses two private callbacks:
 
-### Email identity
+- `POST /invoke`: user-server effects against the SQLite-backed user store
+- `POST /email`: requests to send auth-related email
 
-Email addresses are normalized by trimming surrounding whitespace and
-lowercasing. This normalization is applied consistently at every ingress:
+All persistent state lives in SQLite behind `freetser.StorageQueue`. Storage
+callbacks must remain limited to fast database work. They must not block on
+SMTP, HTTP, or filesystem I/O.
 
-- public registration
-- signin
-- sync import
-- email change
-- private/admin commands
+## Core Model
 
-No provider-specific canonicalization is performed. The backend does not
-collapse Gmail dot aliases, plus aliases, `gmail.com` / `googlemail.com`, or
-other provider-specific variants. Email is treated as a verified contact and
-login channel, not as the canonical identity of a person. Cross-email
-continuity is handled through explicit email-change flows and Atletiekunie
-`bondsnummer` matching.
+### Stable Identifiers
 
-## Registration
+The backend uses three stable identifiers:
 
-There are two ways a user gets an account in Dodeka. Both end with a
-verified email and a password stored in Faroe, but they differ in who
-initiates the process and when membership is granted.
+- **`registration_id`**: canonical identity of a pending registration
+- **`user_id`**: canonical identity of a live account
+- **`bondsnummer`**: canonical identity of Volta-managed member data
 
-All pre-account and pending-approval state is represented by one canonical
-backend table:
+Normalized email is a mutable lookup key and verified contact channel, not a
+stable identity.
 
-- **`registrations`** -- keyed by normalized `email`. Each entry stores
-  `email`, `firstname`, `lastname`, `accepted`, `account_created`,
-  `registration_token`, `signup_token`, `email_send_count`, and
-  `notify_on_completion`.
-- **`registration_tokens`** -- keyed by `registration_token`, stores the
-  normalized `email`. This is the stable public lookup index used by the
-  frontend and by Faroe email callbacks.
+### Data Domains
 
-The `registration_token` is the stable public handle for the entire
-registration lifecycle. The Faroe `signup_token` is an internal short-lived
-signup session identifier. A registration can exist without an active
+The design is split into two domains.
+
+**Dodeka-managed data**
+
+- owned by the Dodeka backend and Faroe
+- keyed by `registration_id` or `user_id`
+- examples: registrations, users, password hashes, sessions, permissions
+
+**Volta-managed data**
+
+- owned by sync imports from VoltaClub
+- keyed only by `bondsnummer`
+- used for member identity linking and member-related imported attributes
+- examples: current Volta email, birthday, address details, and potentially
+  federation-managed financial information
+
+No separate storage contract is defined for individual Volta-managed fields
+beyond `bondsnummer`. Admin and sync APIs work with opaque `VoltaRow` values
+and generic field diffs.
+
+This split is the core simplification:
+
+- Dodeka identity does not depend on email stability
+- Volta data does not depend on whether the person already has an account
+- sync always reasons through `bondsnummer`
+
+### Lifecycle Buckets
+
+Identity-wise, a logical person is in one of these buckets:
+
+1. pending registration, `accepted=False`, no `bondsnummer`
+2. pending registration, `accepted=True`, no `bondsnummer`
+3. pending registration, `accepted=True`, with `bondsnummer`
+4. live user, no `bondsnummer`
+5. live user, with `bondsnummer`
+
+These buckets describe the important identity transitions. Additional fields
+such as permissions or current signup session state may also exist, but they do
+not change the core identity bucket.
+
+Only an accepted registration may become a live user.
+
+## Email Normalization
+
+Email addresses are normalized by:
+
+- trimming surrounding whitespace
+- lowercasing
+
+No provider-specific canonicalization is performed.
+
+## Volta Data
+
+### Volta Row
+
+A Volta row is an opaque JSON-like object keyed by `bondsnummer`.
+
+The backend may normalize and expose selected fields such as:
+
+- current Volta email
+- names
+- cancellation date
+- birth date
+- address details
+- federation-managed financial fields when present
+
+But only `bondsnummer` has special identity semantics. Other Volta-managed
+fields are treated generically.
+
+### Imported Snapshot And Applied Volta Data
+
+The backend distinguishes:
+
+- the **latest imported sync snapshot**
+- the **currently applied Volta-managed data**
+
+Both are keyed by `bondsnummer`.
+
+This distinction exists so the admin UI can show exact diffs before applying a
+new sync.
+
+## Registrations
+
+### Registration Row
+
+The canonical pending-registration row stores:
+
+- `registration_id`
+- `email`
+- `firstname`
+- `lastname`
+- `accepted`
+- optional `bondsnummer`
+- optional `signup_token`
+
+`signup_token` is not the identity of the registration. It is the current
+ephemeral Faroe signup-session handle, stored on the registration so the
+backend can resume or renew signup from the stable `registration_id`.
+
+Implementations may store additional operational metadata such as email send
+counts, but that is not part of the public contract.
+
+### Registration Tables
+
+- `registrations[registration_id] -> RegistrationRow`
+- `registrations_by_email[email] -> registration_id`
+- `registrations_by_bondsnummer[bondsnummer] -> registration_id`
+
+A registration row is deleted when it successfully becomes a live user.
+
+There is no separate “account created but still pending approval” registration
+state in the final model. Acceptance happens before signup completion.
+
+### Public Registration Contract
+
+#### `request_registration(email, firstname, lastname)`
+
+- normalizes the email
+- rejects if `users_by_email` already contains the email
+- creates a pending registration with `accepted=False` when none exists
+- otherwise reuses the existing pending registration for that email
+- never clears existing `accepted`, `bondsnummer`, or `signup_token` state on
+  reuse
+- does not start Faroe signup yet
+- returns a generic success response
+
+#### `registration_status(registration_id)`
+
+- resolves the pending registration
+- returns whether it exists
+- returns whether it is accepted
+- returns the current `signup_token` when a Faroe signup session is active,
+  otherwise `null`
+
+This endpoint is used after the user follows an email link containing
+`registration_id`.
+
+#### `renew_signup(registration_id)`
+
+- resolves the pending registration
+- requires `accepted=True`
+- starts or renews a Faroe signup for the registration’s current email
+- replaces the stored `signup_token`
+- sends a fresh signup verification email
+- returns the current `signup_token`
+
+This exists because the public Dodeka flow is keyed by stable
+`registration_id`, while the Faroe signup flow is keyed by an ephemeral
 `signup_token`.
 
-Registration rows do not expire automatically. The Faroe signup session may
-expire after approximately 20 minutes, but the Dodeka registration record
-remains until the lifecycle is completed or explicitly removed.
+#### `lookup_registration(email, code)`
 
-### Sync registration
+- normalizes the email
+- verifies the current Faroe signup verification code for that email
+- resolves `registrations_by_email[email] -> registration_id`
+- returns the stable `registration_id`
 
-This is an important flow and necessary to migrate existing users and to 
-onboard users who don't immediately make an account but do officially become 
-members. A user is a full member in VoltaClub, but does not have an account on 
-the website.
+This is a recovery path when the user has the current email and verification
+code but not the invite link.
 
-1. **Admin imports VoltaClub CSV** -- member data lands in the `sync` table.
-2. **Admin runs "Accept All New"** -- for each new member, the backend:
-   - Creates or updates a `registrations` entry with `accepted=True`,
-     `account_created=False`, using the authoritative name from the CSV.
-   - Ensures a `registration_token` exists and is indexed in
-     `registration_tokens`.
-   - Stores their sync data (`userdata`, birthday, bondsnummer index).
-   - Sends a **sync_please_register** email with a signup link:
-     `{frontend}/account/signup?token={registration_token}`.
-3. **User clicks the link** -- the frontend reads `registration_token` from
-   the URL and fetches the registration status. Because `accepted` is
-   `True`, the frontend knows this user was already approved and can present
-   the page accordingly. The frontend calls `renew_signup`, which starts a
-   Faroe signup session. Faroe sends a **signup_verification** email with a
-   verification code.
-4. **User enters the verification code** -- or clicks the direct link in
-   the verification email, which pre-fills the code.
-5. **User sets a password.**
-6. **Signup completes** -- Faroe finalizes the account by calling
-   `create_user`. Because `accepted=True` in `registrations`, the `member`
-   permission is granted immediately (1-year TTL). The registration row is
-   deleted as soon as no deferred acceptance email remains to be sent. The
-   user is now a full member.
+### Acceptance
 
-**Emails sent (2+):**
-1. `sync_please_register` -- "Create your account" with signup link (sent
-   by the backend when the admin accepts).
-2. `signup_verification` -- verification code (sent by Faroe when the user
-   starts signup, expires in ~20 min; `renew_signup` sends a fresh one if
-   needed).
+Acceptance is what allows a registration to enter Faroe signup.
 
-### Self-registration
+An admin may accept a registration directly. Sync may also cause a registration
+to become accepted by attaching a `bondsnummer` and confirming that it matches
+a Volta member.
 
-A user creates their account on their own via the website. They can log in
-immediately, but membership requires admin approval.
+Accepting a registration:
 
-1. **User submits the registration form** -- the backend normalizes the
-   email, creates or reuses a `registrations` entry with `accepted=False`
-   and `account_created=False`, ensures a stable `registration_token`, and
-   immediately attempts to start a Faroe signup session.
-2. **Faroe signup is started** -- Faroe sends a **signup_verification**
-   email with a verification code. The resulting `signup_token` is stored in
-   the registration row. If the Faroe signup cannot be created at that
-   moment, the registration row still remains valid and the frontend can
-   recover later through `renew_signup`.
-3. **User enters the verification code** -- or clicks the direct link in
-   the verification email. If the Faroe signup session expired before the
-   user returned, the frontend calls `renew_signup` to get a fresh session
-   and verification email.
-4. **User sets a password.**
-5. **Signup completes** -- Faroe finalizes the account by calling
-   `create_user`. Because `accepted=False` in `registrations`, the account
-   is created without the `member` permission. The registration row is kept
-   with `account_created=True`. The user can log in but sees a
-   `pending_approval` state and cannot access member-only areas.
-6. **Admin accepts the user** (from the Registrations tab) -- the backend
-   grants the `member` permission (1-year TTL), sends an
-   **account_accepted_self** email if the account already exists, and
-   deletes the registration row once the lifecycle is complete.
+- sets `accepted=True`
+- sends a registration invite email containing `registration_id`
 
-After step 6, the user is a full member.
+If a registration later gains a `bondsnummer`, it remains the same
+`registration_id`.
 
-**Emails sent (2+):**
-1. `signup_verification` -- sent immediately at registration (may expire;
-   `renew_signup` sends a fresh one).
-2. `account_accepted_self` -- "Your membership is approved" (sent when the
-   admin accepts, either immediately or on first session if acceptance
-   happened before signup was completed).
+## Live Users
 
-### Public registration contract
+### Live User Row
 
-The public registration flow is addressed by `registration_token`.
+A live user has:
 
-- **`request_registration(email, firstname, lastname)`**
-  - normalizes the email
-  - rejects if `users_by_email` already contains the email
-  - creates or reuses `registrations[email]`
-  - ensures `registration_tokens[registration_token] -> email`
-  - attempts Faroe `create_signup(email)`
-  - stores `signup_token` when Faroe signup succeeds
-  - returns `registration_token` and the current `signup_token` when
-    available
-- **`registration_status(registration_token)`**
-  - resolves `registration_token -> email`
-  - returns the canonical registration state for that email
-  - remains valid across Faroe signup expiry
-- **`renew_signup(registration_token)`**
-  - resolves `registration_token -> email`
-  - starts a fresh Faroe signup for the current email
-  - replaces the stored `signup_token`
-  - sends a fresh `signup_verification` email
+- stable `user_id`
+- verified email
+- Faroe-managed auth state stored through `/invoke`
+- optional linked `bondsnummer`
 
-The frontend uses `registration_token` as the stable identity for a pending
-registration. The `signup_token` is an ephemeral Faroe session token and is
-not the primary public identifier.
+There is no live user without a verified email.
 
-### Faroe signup flow
+### Creating A Live User
 
-Faroe handles the cryptographic parts of account creation:
+Faroe completes signup by calling `CreateUserEffect` through `/invoke`.
 
-1. **`create_signup(email)`** -- creates a signup session. Faroe
-   immediately calls back to the Python `/email` endpoint with a
-   `signup_verification` email containing a verification code. Returns a
-   `signup_token`.
-2. **`verify_signup_email_address_verification_code(signup_token, code)`**
-   -- verifies the code the user entered.
-3. **`set_signup_password(signup_token, password)`** -- sets the password.
-4. **`complete_signup(signup_token)`** -- finalizes account creation. Faroe
-   calls back to `/invoke`, which triggers `create_user` in `auth.py`.
+The backend must:
 
-**Timing constraint:** when `create_signup` is called, Faroe calls back to
-the `/email` endpoint *during* the HTTP call (before `signup_token` is
-returned to the caller). This means the signup link in the verification
-email cannot use `signup_token`. Instead, the email link uses
-`registration_token`, which already exists and is already bound to the
-email in `registration_tokens`.
+1. normalize the email
+2. require `registrations_by_email[email] -> registration_id`
+3. require `registrations[registration_id]` with `accepted=True`
+4. allocate a new `user_id`
+5. create the live user in `users`
+6. store the email index in `users_by_email`
+7. if the registration has a `bondsnummer`, set
+   `users_by_bondsnummer[bondsnummer] -> user_id`
+8. grant `member`
+9. delete the registration row and its indexes
 
-**Expiry:** Faroe signup sessions expire after approximately 20 minutes. If
-the user doesn't complete signup in time, a new signup must be created via
-`renew_signup` or `resend_signup_email`. The Dodeka registration row remains
-valid throughout this process.
+The live user’s email is now verified and becomes Dodeka-owned.
 
-### Account creation (`create_user` in `auth.py`)
+## Faroe Integration
 
-This function is called by Faroe (via `/invoke`) when `complete_signup`
-succeeds. It:
+Faroe owns:
 
-1. Normalizes the email and rejects if `users_by_email` already contains it.
-2. Requires a `registrations[email]` row with `account_created=False`.
-3. Generates a `user_id` from an auto-incrementing counter and the user's
-   name (for example `0_alice_smith`).
-4. Stores user data in the `users` table and the email index in
-   `users_by_email`.
-5. If `accepted=True`: grants `member` permission (1-year TTL).
-6. Sets `account_created=True` and clears the stored `signup_token`.
-7. If `accepted=False`: keeps the registration row so pending approval
-   remains representable.
-8. If `accepted=True` and `notify_on_completion=False`: deletes the
-   registration row and its `registration_tokens` index.
-9. If `accepted=True` and `notify_on_completion=True`: keeps the
-   registration row until `set_session` sends the deferred
-   `account_accepted_self` email, then deletes it.
+- signup protocol
+- signin protocol
+- session issuance and validation
+- password reset
+- email-address verification
+- email-address change protocol
 
-`create_user` never sends emails. It runs inside the Faroe `/invoke`
-callback and must not block on SMTP. Any notification emails are handled
-elsewhere (see [Deferred accepted email](#deferred-accepted-email-in-set_session)).
+The password hash is stored in the Dodeka SQLite-backed user store, not inside
+Faroe itself. Faroe reads and writes that state through `/invoke`.
 
-### Registration scenarios
+Faroe user-server effects are the named callbacks sent through `/invoke`. In
+this spec, `CreateUserEffect` means the signup-completion callback that asks
+the backend to create the live user.
 
-The two primary flows above can interact in unexpected ways. The following
-scenarios describe how the system handles each case.
+### Signup Flow
 
-#### Scenario 1: Self-registered, admin accepts BEFORE signup completes
+After the user has an accepted registration and an invite link:
 
-A user registers on the website but doesn't finish their Faroe signup
-before the admin reviews the Registrations tab.
+1. frontend opens the link containing `registration_id`
+2. frontend calls `registration_status(registration_id)`
+3. frontend calls `renew_signup(registration_id)` when needed
+4. Faroe sends `signup_verification`
+5. frontend calls Faroe directly to:
+   - verify the email code
+   - set the password
+   - complete signup
+6. Faroe returns `session_token`
+7. frontend calls `POST /cookies/set_session/`
 
-1. **User submits registration form** -- `registrations[email]` is created
-   with `accepted=False`, `account_created=False`, and an active
-   `signup_token`.
-2. **Admin accepts the user** -- `accept_user` sets `accepted=True` in the
-   registration row and sets `notify_on_completion=True`. The
-   **account_accepted_self** email is not sent yet.
-3. **User completes signup** -- `create_user` sees `accepted=True`, grants
-   `member`, sets `account_created=True`, and keeps the registration row
-   because `notify_on_completion=True`.
-4. **User's first session** -- after signup, the frontend calls
-   `/cookies/set_session/`. The `set_session` handler detects
-   `notify_on_completion=True`, sends the **account_accepted_self** email,
-   clears the flag, and deletes the registration row and token index.
+### Signup Email Timing Constraint
 
-The end result is that the user is a full member immediately upon
-completing signup, and the acceptance email is sent only once the account
-is fully usable.
+When `create_signup(email)` is called, Faroe sends the verification email
+through `/email` before the caller has received `signup_token`.
 
-#### Scenario 2: Self-registered user appears in sync CSV (no account yet)
+For that reason, invite and signup links use `registration_id`, not
+`signup_token`.
 
-A user has self-registered, but before they complete signup, their email
-also appears in a sync CSV import.
+That is also why the backend stores the current `signup_token` on the
+registration row: the public flow must be resumable from `registration_id`
+even though Faroe itself continues through `signup_token`.
 
-1. **User submitted registration form earlier** -- a registration row
-   exists with `accepted=False`, `account_created=False`. Faroe signup may
-   or may not still be active.
-2. **Admin imports CSV and runs "Accept All"** -- `compute_groups` places
-   this email in the `to_accept` group. `accept_new` updates the existing
-   registration row to `accepted=True`, updates the stored name from the
-   sync data, stores `userdata`, birthday, and the bondsnummer index, and
-   sends a **sync_please_register** email.
-3. **User completes signup** -- either via the original signup session or a
-   renewed one. `create_user` sees `accepted=True`, grants `member`, and
-   deletes the registration row when no deferred acceptance email remains.
+## Sync Import
 
-The sync upgrades the self-registration by marking it as accepted and by
-storing the authoritative member data from the CSV. The `registration_token`
-does not change.
+The backend imports a pending Volta snapshot keyed by `bondsnummer`.
 
-#### Scenario 3: Self-registered user appears in sync CSV (already has account)
+Import validation is strict:
 
-A user has self-registered and completed signup. They have an account in
-the `users` table, but their registration row still exists with
-`accepted=False` and `account_created=True`, so they do not yet have the
-`member` permission.
+- every row must have a positive `bondsnummer`
+- every row must have a non-empty normalized email
+- duplicate `bondsnummer` values in one import are rejected
+- duplicate normalized emails in one import are rejected
 
-Their email then appears in a sync CSV import. `compute_groups` places this
-email in the `to_accept` group. When `accept_new` processes the entry:
+The import stage does not itself bind unresolved rows to users or
+registrations. That binding happens through the sync review and apply flow.
 
-1. Grants `member` permission (1-year TTL).
-2. Stores `userdata`, birthday, and the bondsnummer index from the sync
-   data.
-3. Updates the user profile with the authoritative name from the sync CSV.
-4. Sends an **account_accepted_self** email.
-5. Deletes the registration row and its token index.
+## Sync Matching Rules
 
-From the user's perspective, acceptance through sync or through the manual
-registrations tab leads to the same final state.
+For each imported Volta row, matching is handled in this order:
 
-#### Scenario 4: Pending registration email changes before account creation
+1. **live user by bondsnummer**
+   - if `users_by_bondsnummer[bondsnummer]` exists, the row belongs to that
+     live user
+2. **pending registration by bondsnummer**
+   - if `registrations_by_bondsnummer[bondsnummer]` exists, the row belongs to
+     that pending registration
+3. **review-required candidates**
+   - otherwise, the backend produces possible matches among:
+     - live users without `bondsnummer`
+     - registrations without `bondsnummer`
+   - these are suggestions only
+   - the backend must not auto-bind an unresolved row without an existing
+     `bondsnummer` link
 
-A person has a registration row for email `A`, but before account creation
-their email changes to `B` in Atletiekunie while the same `bondsnummer`
-still identifies the same member.
+The only authoritative automatic identity link is an existing `bondsnummer`
+mapping.
 
-1. **Registration exists for `A`** -- the registration row stores
-   `accepted` and `account_created=False`. Sync data and
-   `users_by_bondsnummer` point at `A`.
-2. **A later sync import contains the same `bondsnummer` with email `B`** --
-   `compute_groups` detects an `email_change`. The member is treated as the
-   same person, not as one departed user plus one new user.
-3. **`update_existing` applies the email change** -- the backend migrates
-   the pending registration from `A` to `B`, updates the sync-related
-   tables, and keeps the same `registration_token`.
-4. **Old signup state is invalidated** -- any stored `signup_token` for `A`
-   is cleared. Future signup verification is sent only to `B`.
-5. **User continues registration** -- the existing signup link still works
-   because it resolves through the unchanged `registration_token`, but the
-   next signup step creates a fresh Faroe signup for `B` and requires fresh
-   verification of `B`.
+## Sync Review Candidate Generation
 
-At no point may both `A` and `B` remain active registration rows for the
-same `bondsnummer`.
+Candidate generation is a review aid, not an automatic identity-binding
+mechanism.
 
-#### Departed members returning
+For each imported Volta row that has no existing `bondsnummer` link, the
+backend must build candidates from exactly this pool:
 
-When a member departs, their account is fully deleted (see
-[Remove departed](#6-remove-departed-remove_departed)). This means:
+- live users without `bondsnummer`
+- pending registrations without `bondsnummer`
 
-- **Departed member self-registers:** there is no existing account, so
-  `request_registration` works normally. The user goes through the standard
-  self-registration flow.
-- **Departed member returns in future sync CSV:** there is no existing
-  account, so `compute_groups` classifies them in `to_accept`. They go
-  through the standard sync registration flow (`accept_new` -> signup).
+The backend must not search outside that pool.
 
-No special handling is needed. Departed members are indistinguishable from
-first-time users.
+### Candidate Input Keys
 
-## Sync lifecycle
+For candidate generation, the backend derives:
 
-The sync process imports member data from the Atletiekunie VoltaClub CSV
-export and reconciles it with the user database. Every step is explicit and
-admin-triggered.
+- normalized email
+- normalized full name
+- normalized surname
+- normalized given-name prefix key
 
-### 1. Import CSV (`import_sync`)
+Email normalization is defined above.
 
-The admin uploads a CSV file. The `sync` table is cleared and repopulated
-with parsed entries. Each row becomes a `UserDataEntry` keyed by normalized
+Name normalization for candidate generation is:
+
+- lowercase
+- trim surrounding whitespace
+- collapse internal whitespace to single spaces
+
+The full name is the normalized space-joined person name used by that row. For
+Volta rows this includes the imported given name, optional tussenvoegsel, and
+surname. For Dodeka registrations and users it includes the stored first and
+last name fields.
+
+The given-name prefix key is the first four normalized characters of the given
+name, or the whole given name if it is shorter than four characters.
+
+### Candidate Rules
+
+For one unresolved imported row, the backend must compute candidates in this
+order:
+
+1. **exact email**
+   - include every candidate whose normalized email equals the imported email
+   - add reason `email_exact`
+2. **exact full name**
+   - include every candidate whose normalized full name equals the imported
+     full name
+   - add reason `name_exact`
+3. **partial name**
+   - include candidates whose normalized surname equals the imported surname
+     and whose given-name prefix key equals the imported given-name prefix key
+   - add reason `name_partial`
+
+If the same subject matches more than one rule, it appears only once and its
+`reasons` list contains every matching reason.
+
+### Candidate Ordering And Limit
+
+The backend must return at most five candidates per imported row.
+
+Candidates are ordered by:
+
+1. strongest matching reason:
+   - `email_exact`
+   - `name_exact`
+   - `name_partial`
+2. number of matched reasons, descending
+3. `kind`, with `"registration"` before `"user"`
+4. `subject_id`, ascending lexicographic order
+
+If more than five candidates exist, the backend keeps only the first five after
+that ordering.
+
+### Review Contract
+
+The frontend receives the candidate list exactly as returned by the backend and
+must send back one explicit admin decision:
+
+- match one candidate registration
+- match one candidate live user
+- choose “no match”
+
+The backend must not auto-bind an unresolved row based on candidates alone.
+
+## Sync Review Outcomes
+
+For each review-required row, the frontend posts one explicit admin decision.
+The backend then performs exactly one of:
+
+- **match an existing registration**
+  - set `registrations_by_bondsnummer[bondsnummer]`
+  - set `accepted=True`
+  - keep the same `registration_id`
+- **match an existing live user**
+  - set `users_by_bondsnummer[bondsnummer]`
+- **no match**
+  - create a new accepted registration using the current imported Volta email
+  - set `registrations_by_bondsnummer[bondsnummer]`
+  - send a registration invite email
+
+If a registration is matched to a `bondsnummer`, it becomes a pending
+registration with `accepted=True` and `bondsnummer`.
+The linked pending-registration email rule then applies in the same sync apply
+cycle.
+
+## Email Rules During Sync
+
+### Linked Pending Registration
+
+If a pending registration already has `bondsnummer`, its email follows the
+current Volta email for that `bondsnummer`.
+
+When sync applies a new Volta email to such a registration:
+
+- update the registration email
+- rewrite `registrations_by_email`
+- clear any stored `signup_token`
+- send a fresh registration invite to the new email
+
+This is safe because registration emails are not yet verified and do not own a
+live account.
+
+### Linked Live User
+
+If a live user already has `bondsnummer`, sync never rewrites the live account
 email.
 
-The CSV uses the VoltaClub "alle velden" format with UTF-8 BOM.
-Relevant columns: `Bondsnummer`, `Voornaam`, `Tussenvoegsel`, `Achternaam`,
-`Geslacht`, `Geboortedatum`, `Email`, `Club lidmaatschap opzegdatum`.
-
-Rows without an email are skipped. Emails are normalized to trimmed
-lowercase. Bondsnummer is parsed as an integer.
-
-### 2. Compute groups (`compute_groups`)
-
-Read-only comparison of the `sync` table against the user database. The
-groups map directly to admin actions: "Accept" processes `to_accept`,
-"Update" processes `existing`, "Remove" processes `departed`.
-
-Returns five groups:
-
-- **to_accept** -- emails in sync that do not yet have full member status.
-  This includes:
-  - truly new people (not in `users_by_email`, not in `registrations`, not
-    bondsnummer-matched)
-  - self-registered users without an account (`registrations` exists with
-    `accepted=False`, `account_created=False`)
-  - self-registered users with an account but pending approval
-    (`registrations` exists with `accepted=False`, `account_created=True`,
-    and `users_by_email` contains the email)
-- **pending_signup** -- emails whose registration row has `accepted=True`
-  and `account_created=False`. These users have already been accepted but
-  have not completed signup yet. Informational only.
-- **existing** -- emails in sync that already correspond to full members.
-  Includes bondsnummer-matched users whose email changed. Each entry pairs
-  the sync data with the current `userdata` (which may be `null` if
-  `update_existing` has not been run yet for this user).
-- **departed** -- registered users (in `users_by_email`) with an active
-  `member` permission who are not in the active sync set, or whose
-  `opzegdatum` cancellation date lies in the past. Users whose email is
-  being changed via bondsnummer matching are not considered departed.
-- **email_changes** -- sync entries where the bondsnummer maps to an
-  existing user or pending registration with a different email. Reports
-  `old_email`, `new_email`, and `bondsnummer`.
-
-System users are excluded from all groups.
-
-Cancelled members (with an `opzegdatum` that is in the past) are treated as
-departed even if present in the CSV. A future cancellation date is ignored
-until that date has passed.
-
-### 3. Accept (`accept_new`)
-
-The admin reviews the `to_accept` group and triggers "Accept All". For each
-entry, `accept_new` determines the appropriate action based on the user's
-current state:
-
-**Truly new** (not in `users_by_email`, not in `registrations`):
-
-1. A `registrations` entry is created with `accepted=True`,
-   `account_created=False`, and the authoritative name from the sync data.
-2. A `registration_token` is created and indexed.
-3. Sync data is stored (`userdata`, birthday, bondsnummer index).
-4. A **sync_please_register** email is sent with a link to create the
-   account.
-
-**Self-registered, no account yet** (`registrations` exists with
-`accepted=False`, `account_created=False`):
-
-1. The registration row is updated to `accepted=True`.
-2. The stored name is updated from the sync data.
-3. Sync data is stored (`userdata`, birthday, bondsnummer index).
-4. A **sync_please_register** email is sent.
-
-When the user later completes their Faroe signup, `create_user` sees
-`accepted=True` and grants `member` permission immediately. This is
-[Scenario 2](#scenario-2-self-registered-user-appears-in-sync-csv-no-account-yet).
-
-**Self-registered, has account** (`registrations` exists with
-`accepted=False`, `account_created=True` and the email is in
-`users_by_email`):
-
-1. `member` permission is granted (1-year TTL).
-2. Sync data is stored (`userdata`, birthday, bondsnummer index) and the
-   user profile is updated with the authoritative name from the sync CSV.
-3. An **account_accepted_self** email is sent.
-4. The registration row and token index are deleted.
-
-This is
-[Scenario 3](#scenario-3-self-registered-user-appears-in-sync-csv-already-has-account).
-
-### 4. Users sign up
-
-After acceptance, truly new users receive an email with a link to create
-their account. The signup process is detailed in [Sync
-registration](#sync-registration).
-
-### 5. Update existing (`update_existing`)
-
-The admin triggers this after verifying the diff in the admin panel. This is
-the step that actually writes data. For each entry in the `existing` group:
-
-1. **Email changes are applied first.** For each `email_change` detected by
-   bondsnummer matching, `update_user_email` migrates all references from
-   `old_email` to `new_email` (see [Bondsnummer matching](#bondsnummer-matching)).
-2. **Sync data is copied to userdata** (`sync_userdata`): the `userdata`
-   table is updated with the sync entry.
-3. **User profile is updated** (`users:{user_id}:profile`): firstname and
-   lastname are updated from the sync data. The sync CSV is the
-   authoritative source for names.
-4. **Member permission is renewed** (1-year TTL).
-5. **Bondsnummer index is updated.**
-6. **Birthday table is updated** with `geboortedatum`, `voornaam`,
-   `tussenvoegsel`, and `achternaam`.
-
-Creating an account alone does not populate these tables. The `userdata`
-and birthday tables are first populated by `accept_new` (for new entries)
-and subsequently updated by `update_existing` (for existing members each
-sync cycle).
-
-### 6. Remove departed (`remove_departed`)
-
-For each departed user, the account is fully deleted:
-
-1. User account is deleted from the `users` table.
-2. `users_by_email` index entry is deleted.
-3. `userdata` entry is deleted.
-4. Birthday entry is deleted.
-5. Bondsnummer index entry is deleted.
-6. Any `registrations` row and `registration_tokens` index for the email are
-   deleted.
-7. Existing sessions become invalid because session validation consults the
-   current user state through the user server, and the user no longer exists.
-
-After removal, the user has no presence in the system. If they return in a
-future sync CSV or self-register, they go through the normal registration
-flow as a new user.
-
-## Login and sessions
-
-### Signin flow
+The Volta email may differ from the account email. That mismatch is visible to
+admins but has no automatic effect on the live user. The user must change their
+email through Dodeka/Faroe if they want the account email changed.
 
-1. **Frontend calls `create_signin(email)`** on Faroe -- Faroe looks up the
-   user via `/invoke` (`GetUserByEmailAddressEffect`).
-2. **User enters password** -- Faroe verifies the password hash.
-3. **Faroe creates a session** -- returns a `session_token`. Faroe sends a
-   **signin_notification** email.
-4. **Frontend calls `/cookies/set_session/`** -- the Python backend
-   validates the session with Faroe, then sets an HttpOnly cookie.
+### Unlinked Registration Or Live User
 
-### Deferred accepted email in `set_session`
+If no `bondsnummer` link exists yet, sync does not infer identity from email by
+itself. It only produces candidates for admin review.
 
-When `set_session` validates a session and sets the cookie, it also checks
-whether a deferred **account_accepted_self** email needs to be sent. This
-handles [Scenario
-1](#scenario-1-self-registered-admin-accepts-before-signup-completes) where
-the admin accepted a self-registered user before they completed signup.
+This is the important edge case for self-registration with a different email
+from Volta.
 
-The mechanism:
+## Applying Sync
 
-1. `accept_user` sets `notify_on_completion=True` in `registrations` when
-   it accepts a user who has no account yet.
-2. After the user completes Faroe signup, the frontend calls
-   `/cookies/set_session/`.
-3. `set_session` looks up the user's email in `registrations`. If
-   `notify_on_completion=True`, it sends the **account_accepted_self**
-   email, clears the flag, and deletes the registration row and token index.
-
-This keeps email sending out of `create_user` and ensures the user receives
-the acceptance notification only after their account is fully ready.
-
-### Session validation
-
-Session tokens are validated with the Faroe auth server and cached in the
-`session_cache` table for 8 hours to reduce auth server load.
-
-### Session cookies
-
-Two cookie slots exist:
-
-- **Primary** (`session_token`) -- the user's logged-in session. Used by
-  default for `session_info` and permission checks.
-- **Secondary** (`session_token_secondary`) -- authorization-only fallback.
-  Permission checks try primary first, then secondary. Useful for testing:
-  log in as a regular user (primary) while using an admin session
-  (secondary) for admin actions.
-
-### Session info (`/auth/session_info/`)
-
-Returns the current user's information:
-
-- `user_id`, `email`, `firstname`, `lastname`
-- `permissions` -- list of active permission names
-- `pending_approval` -- whether the user still has a `registrations` row
-  with `account_created=True` and `accepted=False`
-
-The Dodeka public contract does not expose a `disabled` user field.
-
-## Core database tables
-
-| Table | Key | Value | Purpose |
-|---|---|---|---|
-| `users` | `{user_id}:{field}` | varies | User data: `:profile`, `:email`, `:password`, `:sessions_counter`, `:perm:{name}` |
-| `users_by_email` | normalized email | user_id bytes | Email-to-user index |
-| `users_by_bondsnummer` | `str(bondsnummer)` | normalized email bytes | Bondsnummer-to-email index |
-| `registrations` | normalized email | JSON `{email, firstname, lastname, accepted, account_created, registration_token, signup_token, email_send_count, notify_on_completion}` | Canonical pre-account and pending-approval lifecycle state |
-| `registration_tokens` | `registration_token` | normalized email bytes | Stable public registration lookup index |
-| `metadata` | key | value | Global counters (for example `user_id_counter`) |
-| `userdata` | normalized email | JSON `UserDataEntry` | Member data from sync |
-| `sync` | normalized email | JSON `UserDataEntry` | Imported CSV data (replaced each import) |
-| `system_users` | normalized email | `b"1"` | Users excluded from sync comparison |
-
-## Permission system
-
-Permissions are stored as separate keys in the `users` table:
-
-    Key:   {user_id}:perm:{permission_name}
-    Value: b""
-    TTL:   1 year from grant (expires_at = timestamp + 365 days)
-
-The storage layer filters expired entries automatically when `timestamp` is
-passed to `store.get()`.
-
-**Core permissions:**
-
-- `member` -- grants access to member-only areas. Granted at signup (when
-  accepted), granted at admin acceptance for pending-approval users, and
-  renewed by `update_existing` each sync cycle.
-- `admin` -- grants access to the admin panel and all admin API routes.
-
-**Role permissions:** committee/group tags (`bestuur`, `comcom`, `batcie`,
-etc.) with no special system behavior. Managed manually by admins and can
-be used in future features.
-
-**Expiry behavior:** permissions silently expire after 1 year. The sync
-cycle (`update_existing`) renews the `member` permission for all active
-members. If no sync is run within a year, the permission lapses. There is no
-user-facing notification for expiry.
-
-## System users
-
-Certain accounts (root admin, board account) are marked as system users via
-the `system_users` table. System users are excluded from sync comparison in
-`compute_groups` -- they never appear as "departed" regardless of the CSV
-contents.
-
-The root admin (`root_admin@localhost`) is bootstrapped automatically at
-server startup.
-
-## Bondsnummer matching
-
-The `bondsnummer` (athletics union member number) is a stable identifier.
-When a member changes their email in the athletics union system, the CSV
-will have the same bondsnummer but a new email. Without bondsnummer
-matching, this would incorrectly show as one departed user plus one new
-member.
-
-### How it works
-
-1. When `sync_userdata` or `accept_new` runs, the bondsnummer index
-   (`users_by_bondsnummer`) is populated: `str(bondsnummer)` -> normalized
-   email.
-2. `compute_groups` calls `detect_email_changes`, which checks each sync
-   entry's bondsnummer against the index. If a bondsnummer maps to a
-   different email, it is reported as an `email_change`.
-3. Bondsnummer-matched entries are treated as "existing", and the old email
-   is not marked "departed".
-4. `update_existing` applies email changes before syncing userdata. The
-   `update_user_email` function migrates all references:
-   - `users_by_email`: delete old, add new
-   - `users:{user_id}:email`: update to new email
-   - `userdata`: delete old key, insert new key
-   - `users_by_bondsnummer`: update to new email
-   - `registrations`: migrate the row if it exists
-   - `registration_tokens`: keep the same `registration_token` but point it
-     at the new email
-   - `birthdays`: migrate the key if it exists
-5. If the migrated registration had `account_created=False`, any stored
-   `signup_token` is cleared and future verification is sent only to the new
-   email address.
-
-The bondsnummer index is deleted when a user departs, along with the rest
-of their account data. If a departed member returns in a future CSV, they
-are treated as a new member.
-
-## Email notifications
-
-### Email types
-
-There are two categories:
-
-**Backend-initiated** (sent by Python code directly):
-- `sync_please_register` -- sync-imported member, invites them to create an
-  account
-- `account_accepted_self` -- self-registered member, tells them membership
-  is approved
-
-**Faroe-initiated** (Faroe calls back to `/email` on the private server):
+After review decisions are made, applying sync does three things:
+
+1. update current Volta-managed data by `bondsnummer`
+2. apply pending-registration updates for linked registrations
+3. refresh Dodeka-owned derived state for linked live users
+
+The first part is unconditional and independent of user lifecycle. The second
+part only affects pending registrations already linked by `bondsnummer`. The
+third part only affects already linked live users.
+
+### Update Existing
+
+`update_existing` applies the imported Volta snapshot to already linked
+identities.
+
+For each pending registration with `bondsnummer` present in the imported
+snapshot:
+
+- keep the same `registration_id`
+- rewrite the registration email if the Volta email changed
+- clear stale signup state when the registration email changes
+- send a fresh registration invite when the registration email changes
+
+For each live user with `bondsnummer` present in the imported snapshot:
+
+- refresh current Volta-managed data for that `bondsnummer`
+- refresh any Dodeka-owned projections derived from Volta data
+- renew `member`
+
+The set of Dodeka-owned projections derived from Volta data is
+implementation-defined. The admin API must nevertheless expose generic field
+diffs for all Volta-managed fields.
+
+## Departed Members
+
+`remove_departed` only applies to live users with `bondsnummer`.
+
+A live user is departed when:
+
+- their `bondsnummer` is no longer present in the imported snapshot, or
+- the imported Volta row marks the membership as cancelled
+
+For each departed linked live user, the backend:
+
+1. deletes the user row
+2. deletes `users_by_email`
+3. deletes `users_by_bondsnummer`
+4. deletes any Dodeka-managed per-user data
+
+Live users without `bondsnummer` are never auto-removed by sync because sync
+has no authoritative identity link for them.
+
+## Important Cases
+
+### Self-Registration Before Sync
+
+A self-registered person starts as:
+
+- pending registration
+- `accepted=False`
+- no `bondsnummer`
+
+If sync later identifies them through an admin-confirmed match:
+
+- the same registration row is kept
+- `accepted=True`
+- `bondsnummer` is attached
+- the registration invite goes to the current Volta email
+
+### Self-Registration With Different Volta Email
+
+If the self-registration email and Volta email differ, and there is no
+`bondsnummer` link yet:
+
+- the backend does not auto-merge them
+- sync returns candidates
+- the admin must explicitly confirm the match or choose “no match”
+
+This is the explicit recovery path for the hardest pre-account email-change
+case.
+
+### Volta Email Change Before Signup Completion
+
+If a pending registration already has `bondsnummer` and the Volta email later
+changes:
+
+- the same `registration_id` remains valid
+- the registration email is updated to the current Volta email
+- stale signup state is cleared
+- the next invite or renewed signup goes to the new email
+
+### Volta Email Change After Account Creation
+
+If a live user already has `bondsnummer` and the Volta email changes:
+
+- sync does not modify the account email
+- the mismatch is visible in admin read models
+- the user must change email through the normal Dodeka/Faroe account flow
+
+## Admin Read Models
+
+The admin UI depends on structured read models. These are part of the backend
+contract.
+
+At minimum:
+
+- `list_users` returns `AdminUserRecord[]`
+- `list_registrations` returns `AdminRegistrationRecord[]`
+- `sync_status` returns `SyncStatus`
+
+### `AdminUserRecord`
+
+For each live user:
+
+- `user_id`
+- `email`
+- `firstname`
+- `lastname`
+- `permissions`
+- optional `bondsnummer`
+- `volta_data: VoltaRow | null`
+
+### `AdminRegistrationRecord`
+
+For each pending registration:
+
+- `registration_id`
+- `email`
+- `firstname`
+- `lastname`
+- `accepted`
+- optional `bondsnummer`
+- `signup_active`
+- `volta_data: VoltaRow | null`
+
+This is the read model for general registration admin pages, not the sync
+preview.
+
+### `SyncMatchCandidate`
+
+One candidate suggested for admin review:
+
+- `kind` (`"registration"` or `"user"`)
+- `subject_id`
+- `email`
+- `display_name`
+- `reasons`
+
+`reasons` is a non-empty ordered list from this closed set:
+
+- `email_exact`
+- `name_exact`
+- `name_partial`
+
+The list is ordered from strongest to weakest reason.
+
+### `VoltaFieldDiff`
+
+One generic Volta-managed field difference:
+
+- `field`
+- `current`
+- `incoming`
+
+### `ExistingSyncRecord`
+
+For one linked live user during sync preview:
+
+- `bondsnummer`
+- `user: AdminUserRecord`
+- `current_volta_data`
+- `incoming_volta_data`
+- `field_diffs: VoltaFieldDiff[]`
+
+### `PendingRegistrationSyncRecord`
+
+For one linked pending registration during sync preview:
+
+- `bondsnummer`
+- `registration: AdminRegistrationRecord`
+- `current_volta_data`
+- `incoming_volta_data`
+- `field_diffs: VoltaFieldDiff[]`
+- `email_will_change`
+
+### `SyncReviewItem`
+
+For one unresolved imported row:
+
+- `bondsnummer`
+- `incoming_volta_data`
+- `candidates: SyncMatchCandidate[]`
+
+### `SyncStatus`
+
+The sync preview response must return:
+
+- `review_required: SyncReviewItem[]`
+- `linked_registrations: PendingRegistrationSyncRecord[]`
+- `existing: ExistingSyncRecord[]`
+- `departed: AdminUserRecord[]`
+
+This is what the admin frontend uses to explain the exact effects of the next
+sync apply step.
+
+### `Update Existing` Result
+
+`update_existing` may return top-level counts, but it must also return enough
+structured detail for the frontend to report exactly what changed.
+
+At minimum, the result must identify:
+
+- which `bondsnummer` rows were applied
+- which linked pending registrations were updated
+- which linked live users were refreshed
+- the `field_diffs` that were applied for each updated registration or
+  refreshed live user
+
+## Sessions And Permissions
+
+### Member Permission
+
+`member` is granted when an accepted registration successfully becomes a live
+user.
+
+For linked live users, sync renews `member` on successful `update_existing`.
+
+### Signin
+
+Signin is Faroe-driven:
+
+1. frontend calls `create_signin(email)`
+2. frontend calls `verify_signin_user_password(signin_token, password)`
+3. frontend calls `complete_signin(signin_token)`
+4. Faroe returns `session_token`
+5. frontend calls `POST /cookies/set_session/`
+
+### Session Validation
+
+Validated Faroe sessions may be cached in `session_cache`, but access checks
+must still load current Dodeka user state after session validation.
+
+That is what makes deleted users lose access immediately even if session
+validation itself was cached.
+
+### `session_info`
+
+`session_info` returns the current live user identity and permissions derived
+from the validated session.
+
+It returns:
+
+- `user_id`
+- `email`
+- `firstname`
+- `lastname`
+- `permissions`
+
+It does not return a `pending_approval` flag in the final model. Pending
+approval is represented only by pending registrations, not by a partially live
+user state.
+
+## Email Notifications
+
+There are two categories of email.
+
+**Backend-initiated**
+
+- `registration_invite`
+
+This is sent when:
+
+- a registration is manually accepted
+- sync creates a new accepted registration
+- sync updates the email of a pending registration that already has
+  `bondsnummer`
+
+The link contains `registration_id`.
+
+**Faroe-initiated**
+
 - `signup_verification`
 - `email_update_verification`
 - `password_reset`
@@ -638,115 +809,117 @@ There are two categories:
 - `password_updated`
 - `email_updated`
 
-### Email: `sync_please_register`
+## Admin Operations
 
-Sent when the admin runs "Accept All New" for sync-imported members and for
-self-registrations that become accepted through sync.
+The core admin operations are:
 
-- **Subject:** "Maak je Dodeka account aan"
-- **Content:** tells the user their registration with D.S.A.V. Dodeka is
-  complete and invites them to create a website account. Includes a link to
-  `{frontend}/account/signup?token={registration_token}`.
-- **Purpose:** provides the stable entry point for the rest of the signup
-  lifecycle.
-- **Sent by:** Python backend.
+- `import_sync`
+- `sync_status`
+- `accept_registration`
+- `resolve_sync_match`
+- `link_bondsnummer`
+- `update_existing`
+- `remove_departed`
 
-### Email: `account_accepted_self`
+### `import_sync`
 
-Sent when a self-registered user's membership is approved. This can happen
-in three ways:
+`import_sync` replaces the pending imported snapshot with a newly parsed
+VoltaClub CSV import.
 
-1. The admin manually accepts from the Registrations tab after the user has
-   completed signup.
-2. `accept_new` detects a self-registered user who already has an account
-   in the sync CSV.
-3. The user completes signup after being pre-accepted by the admin; in that
-   case `set_session` sends the email on the first session.
+It:
 
-- **Subject:** "Je lidmaatschap bij Dodeka is goedgekeurd"
-- **Content:** tells the user their membership has been approved. Links to
-  the homepage.
-- **Purpose:** confirms that the account now has full member access.
-- **Sent by:** Python backend.
+- validates the import
+- stores the imported rows as the new pending snapshot
+- does not itself create, delete, or relink registrations or users
 
-### Email: `signup_verification`
+The replacement is atomic from the perspective of later `sync_status`,
+`resolve_sync_match`, `update_existing`, and `remove_departed` calls.
 
-Sent by Faroe when `create_signup` or `renew_signup` is called.
+### `sync_status`
 
-- **Subject:** "Activeer je Dodeka account"
-- **Content:** "Je verificatiecode is: {code}" with a link to
-  `{frontend}/account/signup?token={registration_token}&code={code}`.
-- **Purpose:** email address verification. The code must be entered on the
-  signup page to prove email ownership.
-- **Expires:** ~20 minutes (Faroe signup session lifetime).
-- **Link construction:** the Python `/email` handler resolves
-  `registration_token` from the current email and constructs the link. The
-  `registration_token` is used instead of `signup_token` because of the
-  timing constraint described in [Faroe signup flow](#faroe-signup-flow).
-- **Token storage:** the verification code is stored in the `tokens` table
-  (`signup_verification:{email}`) for test automation.
+`sync_status` is a read-only preview over:
 
-### Email: `email_update_verification`
+- the pending imported snapshot
+- current live users
+- current pending registrations
+- current applied Volta-managed data
 
-Sent by Faroe when a user requests an email address change.
+It returns `SyncStatus`.
 
-- **Subject:** "Bevestig je nieuwe e-mailadres"
-- **Content:** "Je verificatiecode voor het wijzigen van je e-mailadres is:
-  {code}"
-- **Purpose:** verify ownership of the new email address.
+### `accept_registration`
 
-### Email: `password_reset`
+`accept_registration` is the direct admin path for a pending registration that
+does not require sync review.
 
-Sent by Faroe when a password reset is requested.
+It:
 
-- **Subject:** "Wachtwoord resetten"
-- **Content:** "Je tijdelijke wachtwoord is: {code}"
-- **Purpose:** provide a temporary password for the user to log in with.
+- resolves the pending registration by `registration_id`
+- sets `accepted=True`
+- sends a registration invite email to the registration’s current email
 
-### Email: `signin_notification`
+If the registration already has `accepted=True`, the operation is idempotent.
 
-Sent by Faroe after a successful signin.
+### `resolve_sync_match`
 
-- **Subject:** "Nieuwe aanmelding gedetecteerd"
-- **Content:** "Er is ingelogd op je account op {timestamp} (UTC)."
-- **Purpose:** security notification.
+`resolve_sync_match` applies one explicit admin decision for one unresolved
+imported `bondsnummer` row.
 
-### Email: `password_updated`
+It supports exactly these outcomes:
 
-Sent by Faroe after a password change.
+- match one pending registration by `registration_id`
+- match one live user by `user_id`
+- choose “no match” and create a new accepted registration
 
-- **Subject:** "Je wachtwoord is gewijzigd"
-- **Content:** "Je wachtwoord is gewijzigd op {timestamp} (UTC)."
-- **Purpose:** security notification.
+It updates the canonical registration/user links immediately. There is no
+separate persisted review-decisions table in the final model.
 
-### Email: `email_updated`
+Concretely, it must write one of:
 
-Sent by Faroe after an email address change is completed.
+- `registrations_by_bondsnummer[bondsnummer] -> registration_id`
+- `users_by_bondsnummer[bondsnummer] -> user_id`
 
-- **Subject:** "Je e-mailadres is gewijzigd"
-- **Content:** "Je e-mailadres is gewijzigd naar {new_email} op {timestamp}
-  (UTC)."
-- **Purpose:** security notification sent to the old email address.
+and any accompanying registration changes required by the chosen outcome.
 
-## Admin operations
+It must fail if the supplied `bondsnummer` row is not present in the current
+pending imported snapshot, or if the chosen outcome conflicts with an existing
+different `bondsnummer` link.
 
-### Board account
+After a successful `resolve_sync_match`, the next `sync_status` call must no
+longer report that `bondsnummer` in `review_required`.
 
-The board account (`bestuur@dsavdodeka.nl`) is a special admin account:
+### `link_bondsnummer`
 
-- **`board_setup`:** one-time creation. Prepares the account as an accepted
-  user, marks it as a system user, and initiates Faroe signup.
-- **`board_renew`:** yearly renewal when the board rotates. Triggers
-  password reset and renews admin permission.
+`link_bondsnummer` is the explicit recovery path for unresolved identity
+problems.
 
-### Permission management
+It must support:
 
-Admins can manage permissions via:
+- linking a pending registration by `registration_id`
+- linking a live user by `user_id`
 
-- `POST /admin/add_permission/` -- add a single permission (except admin)
-- `POST /admin/remove_permission/` -- remove a single permission
-- `POST /admin/set_permissions/` -- declaratively set permissions for
-  multiple users (add missing, remove extra, never touches admin permission)
+It:
 
-The `admin` permission cannot be added through the public API. It can only
-be granted via the private admin path.
+- assigns the supplied `bondsnummer`
+- writes the appropriate bondsnummer index
+- fails if that `bondsnummer` is already linked to a different identity
+
+Linking a registration by `bondsnummer` does not itself create a live user. It
+only moves that registration into the “accepted registration with bondsnummer”
+bucket.
+
+## Core Tables
+
+| Table | Key | Value | Purpose |
+|---|---|---|---|
+| `users` | `{user_id}:{field}` | varies | Dodeka/Faroe-managed live user state |
+| `users_by_email` | normalized email | user_id | Live user email index |
+| `users_by_bondsnummer` | `str(bondsnummer)` | user_id | Live user Volta identity link |
+| `registrations` | `registration_id` | `RegistrationRow` | Canonical pending registration state |
+| `registrations_by_email` | normalized email | `registration_id` | Pending registration email index |
+| `registrations_by_bondsnummer` | `str(bondsnummer)` | `registration_id` | Pending registration Volta identity link |
+| `sync` | `str(bondsnummer)` | `VoltaRow` | Latest imported Volta snapshot pending review/apply |
+| `volta_data` | `str(bondsnummer)` | `VoltaRow` | Current applied Volta-managed data |
+| `metadata` | key | value | Global counters and backend metadata |
+| `system_users` | normalized email | `b"1"` | Users excluded from sync departure checks |
+| `session_cache` | `session_token` | session JSON | Cache of validated Faroe sessions |
+| `tokens` | `{kind}:{email}` | auxiliary token data | Local testing/tooling mirror for verification codes |
