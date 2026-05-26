@@ -238,8 +238,8 @@ def cmdhandler_import_sync(store_queue: StorageQueue, csv_content: str) -> Respo
     entries = parse_csv(csv_content)
 
     def do_import(store: Storage) -> int | ImportValidationError | StaleCounter:
-        _, counter = get_sync_state(store)
-        return import_sync(store, entries, sync_state_counter=counter)
+        state = get_sync_state(store)
+        return import_sync(store, entries, sync_state_counter=state.counter)
 
     result = store_queue.execute(do_import)
     if isinstance(result, (ImportValidationError, StaleCounter)):

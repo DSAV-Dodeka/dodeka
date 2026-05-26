@@ -23,6 +23,8 @@ from apiserver.handlers.admin import (
     add_user_permission,
     available_permissions_handler,
     complete_sync_handler,
+    delete_registration_handler,
+    delete_user_handler,
     import_sync_handler,
     link_bondsnummer_handler,
     list_registrations_handler,
@@ -157,6 +159,12 @@ def handler_with_client(
             req, store_queue, frontend_origin, smtp_config, smtp_send
         )
 
+    def h_delete_registration():
+        return delete_registration_handler(req, store_queue)
+
+    def h_delete_user():
+        return delete_user_handler(req, store_queue)
+
     def h_link_bondsnummer():
         return link_bondsnummer_handler(req, store_queue)
 
@@ -191,6 +199,12 @@ def handler_with_client(
             "POST": RouteEntry(
                 h_resend_registration_invite, PermissionConfig.require("admin")
             )
+        },
+        "/admin/delete_registration/": {
+            "POST": RouteEntry(h_delete_registration, PermissionConfig.require("admin"))
+        },
+        "/admin/delete_user/": {
+            "POST": RouteEntry(h_delete_user, PermissionConfig.require("admin"))
         },
         # Admin - permissions
         "/admin/add_permission/": {

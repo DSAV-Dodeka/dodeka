@@ -70,31 +70,53 @@ class StaleCounter:
     message: str
 
 
-def get_sync_state(store: Storage) -> tuple[bool, int]:
-    """Return (in_progress, counter) for the sync session."""
+@dataclass
+class SyncStateInfo:
+    in_progress: bool
+    counter: int
+    file_modified_at: int | None
+
+
+def get_sync_state(store: Storage) -> SyncStateInfo:
+    """Return sync session state."""
     result = store.get(SYNC_STATE_TABLE, SYNC_STATE_KEY)
     if result is None:
-        return False, 0
+        return SyncStateInfo(in_progress=False, counter=0, file_modified_at=None)
     data, counter = result
     d = json.loads(data.decode("utf-8"))
-    return d.get("in_progress", False), counter
+    return SyncStateInfo(
+        in_progress=d.get("in_progress", False),
+        counter=counter,
+        file_modified_at=d.get("file_modified_at"),
+    )
 
 
-def set_sync_state(store: Storage, in_progress: bool) -> None:
+def set_sync_state(
+    store: Storage, in_progress: bool, file_modified_at: int | None = None
+) -> None:
     """Overwrite sync_state (advances the freetser counter)."""
-    data = json.dumps({"in_progress": in_progress}).encode("utf-8")
+    state: dict[str, object] = {"in_progress": in_progress}
+    if file_modified_at is not None:
+        state["file_modified_at"] = file_modified_at
+    data = json.dumps(state).encode("utf-8")
     store.overwrite(SYNC_STATE_TABLE, SYNC_STATE_KEY, data, expires_at=0)
 
 
 def advance_sync_state(
-    store: Storage, expected_counter: int, in_progress: bool
+    store: Storage,
+    expected_counter: int,
+    in_progress: bool,
+    file_modified_at: int | None = None,
 ) -> None:
     """Check counter and write new state via update().
 
     Raises UpdateCounterMismatch if the caller's counter doesn't match,
     which causes freetser to roll back the entire callback.
     """
-    data = json.dumps({"in_progress": in_progress}).encode("utf-8")
+    state: dict[str, object] = {"in_progress": in_progress}
+    if file_modified_at is not None:
+        state["file_modified_at"] = file_modified_at
+    data = json.dumps(state).encode("utf-8")
     store.update(
         SYNC_STATE_TABLE,
         SYNC_STATE_KEY,
@@ -232,6 +254,7 @@ def import_sync(
     store: Storage,
     entries: list[VoltaRow],
     sync_state_counter: int | None = None,
+    file_modified_at: int | None = None,
 ) -> int | ImportValidationError | StaleCounter:
     """Start or overwrite a pending sync session.
 
@@ -244,16 +267,18 @@ def import_sync(
     if error is not None:
         return error
 
-    in_progress, _ = get_sync_state(store)
-    if in_progress:
+    state = get_sync_state(store)
+    if state.in_progress:
         if sync_state_counter is None:
             return StaleCounter(
                 "Pending sync session exists; "
                 "pass sync_state_counter to confirm overwrite"
             )
-        advance_sync_state(store, sync_state_counter, True)
+        advance_sync_state(
+            store, sync_state_counter, True, file_modified_at=file_modified_at
+        )
     else:
-        set_sync_state(store, True)
+        set_sync_state(store, True, file_modified_at=file_modified_at)
 
     store.clear(SYNC_TABLE)
     store.clear(SYNC_DECISIONS_TABLE)
@@ -499,6 +524,7 @@ def serialize_field_diffs(diffs) -> list[dict]:
 class SyncStatus:
     sync_in_progress: bool
     sync_state_counter: int
+    file_modified_at: int | None
     can_complete: bool
     review_required: list[dict]
     registrations_created: list[dict]
@@ -510,11 +536,12 @@ class SyncStatus:
 
 
 def compute_sync_status(store: Storage) -> SyncStatus:  # noqa: PLR0912, PLR0915
-    in_progress, counter = get_sync_state(store)
+    state = get_sync_state(store)
 
     empty = SyncStatus(
         sync_in_progress=False,
-        sync_state_counter=counter,
+        sync_state_counter=state.counter,
+        file_modified_at=None,
         can_complete=False,
         review_required=[],
         registrations_created=[],
@@ -524,7 +551,7 @@ def compute_sync_status(store: Storage) -> SyncStatus:  # noqa: PLR0912, PLR0915
         departed_users=[],
         volta_data_changes=[],
     )
-    if not in_progress:
+    if not state.in_progress:
         return empty
 
     timestamp = int(time_mod.time())
@@ -739,7 +766,8 @@ def compute_sync_status(store: Storage) -> SyncStatus:  # noqa: PLR0912, PLR0915
 
     return SyncStatus(
         sync_in_progress=True,
-        sync_state_counter=counter,
+        sync_state_counter=state.counter,
+        file_modified_at=state.file_modified_at,
         can_complete=can_complete,
         review_required=review_required,
         registrations_created=registrations_created,
@@ -755,6 +783,7 @@ def serialize_sync_status(status: SyncStatus) -> dict:
     return {
         "sync_in_progress": status.sync_in_progress,
         "sync_state_counter": status.sync_state_counter,
+        "file_modified_at": status.file_modified_at,
         "can_complete": status.can_complete,
         "review_required": status.review_required,
         "registrations_created": status.registrations_created,
@@ -834,8 +863,8 @@ def resolve_sync_match(
     When sync_state_counter is provided, the write uses try_update
     to atomically verify the counter and advance it.
     """
-    in_progress, _ = get_sync_state(store)
-    if not in_progress:
+    state = get_sync_state(store)
+    if not state.in_progress:
         return ResolveSyncMatchResult(success=False, message="No pending sync session")
 
     imported = get_volta(store, SYNC_TABLE, bondsnummer)
@@ -1242,8 +1271,8 @@ def complete_sync(
 
     Composed from storage-only helpers; no external side effects.
     """
-    in_progress, _ = get_sync_state(store)
-    if not in_progress:
+    state = get_sync_state(store)
+    if not state.in_progress:
         return CompleteSyncError(message="No pending sync session")
 
     # Raises UpdateCounterMismatch on stale counter, rolling back.

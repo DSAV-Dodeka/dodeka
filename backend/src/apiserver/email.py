@@ -303,9 +303,7 @@ def sendemail(
     if data.link:
         text_context["link_section"] = cache.fragments[
             "signup_verification_link.txt"
-        ].format(
-            link=data.link
-        )
+        ].format(link=data.link)
 
     # Build context for HTML (escape user-provided values)
     escaped_name = escape(data.display_name) if data.display_name else None
@@ -324,9 +322,7 @@ def sendemail(
     if data.link:
         html_context["link_section"] = cache.fragments[
             "signup_verification_link.html"
-        ].format(
-            link=data.link
-        )
+        ].format(link=data.link)
 
     # Render text template
     text_body = template.text.format(**text_context)

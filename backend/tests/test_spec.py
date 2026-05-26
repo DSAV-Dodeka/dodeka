@@ -588,6 +588,7 @@ def test_sync_status_returns_complete_sync_preview_groups(
     assert set(status) == {
         "sync_in_progress",
         "sync_state_counter",
+        "file_modified_at",
         "can_complete",
         "review_required",
         "registrations_created",
@@ -989,9 +990,7 @@ def test_complete_sync_registration_match_with_email_change_still_accepts(
             "lastname": "van Hoorn",
         },
     )
-    registration = get_registration_by_email(
-        backend_url, admin_headers, original_email
-    )
+    registration = get_registration_by_email(backend_url, admin_headers, original_email)
 
     imported = import_sync_csv(
         backend_url,
@@ -1028,15 +1027,12 @@ def test_complete_sync_registration_match_with_email_change_still_accepts(
         row for row in preview["registrations_accepted"] if row["bondsnummer"] == 91033
     )
     assert (
-        accepted["registration"]["registration_id"]
-        == registration["registration_id"]
+        accepted["registration"]["registration_id"] == registration["registration_id"]
     )
     assert accepted["registration"]["accepted"] is False
     assert accepted["email_will_change"] is True
 
-    completed = complete_sync(
-        backend_url, admin_headers, preview["sync_state_counter"]
-    )
+    completed = complete_sync(backend_url, admin_headers, preview["sync_state_counter"])
     assert completed.status_code == 200
 
     row = get_registration_by_email(backend_url, admin_headers, volta_email)
@@ -1080,9 +1076,7 @@ def test_complete_sync_partial_name_registration_match_still_accepts(
             "lastname": "Hoorn",
         },
     )
-    registration = get_registration_by_email(
-        backend_url, admin_headers, original_email
-    )
+    registration = get_registration_by_email(backend_url, admin_headers, original_email)
 
     imported = import_sync_csv(
         backend_url,
@@ -1128,14 +1122,11 @@ def test_complete_sync_partial_name_registration_match_still_accepts(
         row for row in preview["registrations_accepted"] if row["bondsnummer"] == 91034
     )
     assert (
-        accepted["registration"]["registration_id"]
-        == registration["registration_id"]
+        accepted["registration"]["registration_id"] == registration["registration_id"]
     )
     assert accepted["email_will_change"] is True
 
-    completed = complete_sync(
-        backend_url, admin_headers, preview["sync_state_counter"]
-    )
+    completed = complete_sync(backend_url, admin_headers, preview["sync_state_counter"])
     assert completed.status_code == 200
 
     row = get_registration_by_email(backend_url, admin_headers, volta_email)

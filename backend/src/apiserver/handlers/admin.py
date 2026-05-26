@@ -17,6 +17,7 @@ from apiserver.data.permissions import (
     remove_permission,
 )
 from apiserver.data.registrations import (
+    delete_registration,
     get_registration,
     list_registrations,
     upsert_registration,
@@ -25,6 +26,7 @@ from apiserver.data.user import list_all_users
 from apiserver.data.userdata import (
     BONDSNUMMER_TABLE,
     VOLTA_DATA_TABLE,
+    delete_user_bondsnummer,
     get_volta,
     volta_to_dict,
 )
@@ -186,6 +188,77 @@ def resend_registration_invite_handler(
         return Response.json({"error": "Failed to send invite"}, status_code=500)
 
     return Response.json({"success": True, "email": reg.email})
+
+
+def delete_registration_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/delete_registration/."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        registration_id = body_data.get("registration_id")
+        if not registration_id:
+            return Response.text("Missing registration_id", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    deleted = store_queue.execute(
+        lambda store: delete_registration(store, registration_id)
+    )
+    if not deleted:
+        return Response.json(
+            {"error": f"Registration {registration_id} not found"}, status_code=404
+        )
+
+    logger.info(f"delete_registration: Deleted {registration_id}")
+    return Response.json({"success": True})
+
+
+def delete_user_handler(req: Request, store_queue: StorageQueue) -> Response:
+    """Handle /admin/delete_user/."""
+    try:
+        body_data = json.loads(req.body.decode("utf-8"))
+        user_id = body_data.get("user_id")
+        if not user_id:
+            return Response.text("Missing user_id", status_code=400)
+    except (json.JSONDecodeError, ValueError) as e:
+        return Response.text(f"Invalid request: {e}", status_code=400)
+
+    def do_delete(store: Storage) -> dict:
+        email_result = store.get("users", f"{user_id}:email")
+        if email_result is None:
+            return {"error": f"User {user_id} not found"}
+
+        email = email_result[0].decode("utf-8")
+
+        # Check for system user
+        system_emails = set(store.list_keys("system_users"))
+        if email in system_emails:
+            return {"error": "Cannot delete system user"}
+
+        # Remove bondsnummer link if any
+        for key in store.list_keys(BONDSNUMMER_TABLE):
+            result = store.get(BONDSNUMMER_TABLE, key)
+            if result is not None and result[0].decode("utf-8") == user_id:
+                delete_user_bondsnummer(store, int(key))
+                break
+
+        # Remove user data (same as departed user cleanup)
+        store.delete("users", f"{user_id}:profile")
+        store.delete("users", f"{user_id}:email")
+        store.delete("users", f"{user_id}:password")
+        store.delete("users", f"{user_id}:disabled")
+        store.delete("users", f"{user_id}:sessions_counter")
+        store.delete("users_by_email", email)
+        remove_permission(store, user_id, "member")
+
+        return {"success": True}
+
+    result = store_queue.execute(do_delete)
+    if "error" in result:
+        status = 404 if "not found" in result["error"] else 403
+        return Response.json(result, status_code=status)
+
+    logger.info(f"delete_user: Deleted {user_id}")
+    return Response.json(result)
 
 
 def resolve_sync_match_handler(
@@ -447,12 +520,15 @@ def import_sync_handler(req: Request, store_queue: StorageQueue) -> Response:
         if not csv_content:
             return Response.text("Missing csv_content", status_code=400)
         counter = body_data.get("sync_state_counter")
+        file_modified_at = body_data.get("file_modified_at")
     except (json.JSONDecodeError, ValueError) as e:
         return Response.text(f"Invalid request: {e}", status_code=400)
 
     entries = parse_csv(csv_content)
     try:
-        result = store_queue.execute(lambda store: import_sync(store, entries, counter))
+        result = store_queue.execute(
+            lambda store: import_sync(store, entries, counter, file_modified_at)
+        )
     except UpdateCounterMismatch:
         return Response.json({"error": "Stale sync_state_counter"}, status_code=409)
     if isinstance(result, (ImportValidationError, StaleCounter)):
