@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 import requests
+from apiserver.sync import NameMatchKey, name_match_key, names_match
 from tiauth_faroe.client import (
     ActionErrorResult,
     CompleteSignupActionSuccessResult,
@@ -77,6 +78,17 @@ def make_au_csv(members: list[dict[str, str]]) -> str:
     for member in members:
         writer.writerow(member)
     return buf.getvalue()
+
+
+def test_name_matching_uses_trimmed_exact_and_lowercase_forms() -> None:
+    key = name_match_key("  Test    Tester  ")
+    assert key.exact == "Test Tester"
+    assert key.lower == "test tester"
+    assert names_match(name_match_key("TEST Tester"), name_match_key("test tester"))
+    assert names_match(
+        NameMatchKey(exact="İpek Tester", lower="locale-sensitive-a"),
+        NameMatchKey(exact="İpek Tester", lower="locale-sensitive-b"),
+    )
 
 
 def poll_for_token(
@@ -748,11 +760,63 @@ def test_sync_review_candidates_use_unlinked_pool_and_reason_order(
         "email_exact",
         "name_exact",
         "name_partial",
+        "name_forgiving",
     }
     assert all(
         candidate["subject_id"] != linked_registration["registration_id"]
         for candidate in candidates
     )
+
+
+def test_sync_review_candidates_use_forgiving_name_match_for_missing_infix(
+    servers, command, backend_url, auth_client
+) -> None:
+    """Missing infix still returns a low-priority review candidate."""
+    ADMIN_COOKIE_HEADERS_BY_CREDS.clear()
+    servers.reset_all()
+    admin_headers = get_admin_cookie_headers(command, auth_client)
+
+    post_json(
+        backend_url,
+        "/auth/request_registration",
+        {
+            "email": "self.registration@example.com",
+            "firstname": "Test",
+            "lastname": "van Tester",
+        },
+    )
+    registration = get_registration_by_email(
+        backend_url, admin_headers, "self.registration@example.com"
+    )
+
+    imported = import_sync_csv(
+        backend_url,
+        admin_headers,
+        make_au_csv(
+            [
+                {
+                    "Bondsnummer": "9120",
+                    "Voornaam": "Test",
+                    "Achternaam": "Tester",
+                    "Geslacht": "V",
+                    "Geboortedatum": "01/01/2000",
+                    "Email": "volta.registration@example.com",
+                }
+            ]
+        ),
+    )
+    assert imported.status_code == 200
+
+    status = get_sync_status(backend_url, admin_headers)
+    review_item = next(
+        item for item in status["review_required"] if item["bondsnummer"] == 9120
+    )
+    candidate = next(
+        row
+        for row in review_item["candidates"]
+        if row["subject_id"] == registration["registration_id"]
+    )
+    assert candidate["reasons"] == ["name_forgiving"]
 
 
 def test_resolve_sync_match_rejects_stale_sync_state_counter(
@@ -1336,6 +1400,17 @@ def test_complete_sync_keeps_linked_live_user_account_email_when_volta_email_cha
     )
 
     status = get_sync_status(backend_url, admin_headers)
+    preview = next(
+        row for row in status["live_users_enriched"] if row["bondsnummer"] == 9105
+    )
+    assert {
+        (diff["field"], diff["current"], diff["incoming"])
+        for diff in preview["field_diffs"]
+    } >= {
+        ("profile.firstname", "live.account", "Live"),
+        ("profile.lastname", "Testuser", "Account"),
+    }
+
     completed = complete_sync(backend_url, admin_headers, status["sync_state_counter"])
     assert completed.status_code == 200
 

@@ -482,15 +482,20 @@ For candidate generation, the backend derives:
 - normalized email
 - normalized full name
 - normalized surname
+- normalized full surname, including infix when present
 - normalized given-name prefix key
 
 Email normalization is defined above.
 
 Name normalization for candidate generation is:
 
-- lowercase
 - trim surrounding whitespace
 - collapse internal whitespace to single spaces
+
+Name comparisons must test both:
+
+- the trimmed/collapsed exact string
+- the lowercase form of that same trimmed/collapsed string
 
 The full name is the normalized space-joined person name used by that row. For
 Volta rows this includes the imported given name, optional tussenvoegsel, and
@@ -516,6 +521,13 @@ order:
    - include candidates whose normalized surname equals the imported surname
      and whose given-name prefix key equals the imported given-name prefix key
    - add reason `name_partial`
+4. **forgiving name**
+   - include candidates whose normalized surname and imported normalized full
+     surname have a word-suffix match and whose given-name prefix key equals
+     the imported given-name prefix key
+   - this catches missing infixes in either source, for example `van Tester`
+     versus `Tester`
+   - add reason `name_forgiving`
 
 If the same subject matches more than one rule, it appears only once and its
 `reasons` list contains every matching reason.
@@ -530,6 +542,7 @@ Candidates are ordered by:
    - `email_exact`
    - `name_exact`
    - `name_partial`
+   - `name_forgiving`
 2. number of matched reasons, descending
 3. `kind`, with `"registration"` before `"user"`
 4. `subject_id`, ascending lexicographic order
@@ -813,6 +826,7 @@ One candidate suggested for admin review:
 - `email_exact`
 - `name_exact`
 - `name_partial`
+- `name_forgiving`
 
 The list is ordered from strongest to weakest reason.
 
@@ -835,7 +849,8 @@ For one live user that will be enriched during `complete_sync`:
 - `user: AdminUserRecord`
 - `current_volta_data`
 - `incoming_volta_data`
-- `field_diffs: VoltaFieldDiff[]`
+- `field_diffs: VoltaFieldDiff[]`, including live profile fields that will be
+  refreshed from Volta data
 
 ### `PendingRegistrationSyncRecord`
 

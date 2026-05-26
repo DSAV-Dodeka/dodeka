@@ -38,6 +38,7 @@ from apiserver.data.userdata import (
     BONDSNUMMER_TABLE,
     SYNC_TABLE,
     VOLTA_DATA_TABLE,
+    VoltaFieldDiff,
     VoltaRow,
     compute_field_diffs,
     delete_user_bondsnummer,
@@ -309,29 +310,64 @@ def list_system_users(store: Storage) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def normalize_name(name: str) -> str:
-    return " ".join(name.strip().lower().split())
+@dataclass(frozen=True)
+class NameMatchKey:
+    exact: str
+    lower: str
 
 
-def build_full_name_volta(row: VoltaRow) -> str:
+def normalize_name_exact(name: str) -> str:
+    return " ".join(name.strip().split())
+
+
+def name_match_key(name: str) -> NameMatchKey:
+    exact = normalize_name_exact(name)
+    return NameMatchKey(exact=exact, lower=exact.lower())
+
+
+def names_match(left: NameMatchKey, right: NameMatchKey) -> bool:
+    return left.exact == right.exact or left.lower == right.lower
+
+
+def words_suffix_match(left: str, right: str) -> bool:
+    left_words = left.split()
+    right_words = right.split()
+    if not left_words or not right_words:
+        return False
+    if len(left_words) < len(right_words):
+        left_words, right_words = right_words, left_words
+    return left_words[-len(right_words) :] == right_words
+
+
+def names_suffix_match(left: NameMatchKey, right: NameMatchKey) -> bool:
+    return words_suffix_match(left.exact, right.exact) or words_suffix_match(
+        left.lower, right.lower
+    )
+
+
+def build_full_name_key_volta(row: VoltaRow) -> NameMatchKey:
     parts = [row.voornaam]
     if row.tussenvoegsel:
         parts.append(row.tussenvoegsel)
     parts.append(row.achternaam)
-    return normalize_name(" ".join(parts))
+    return name_match_key(" ".join(parts))
 
 
-def build_full_name_reg(reg: Registration) -> str:
-    return normalize_name(f"{reg.firstname} {reg.lastname}")
+def build_full_name_key_reg(reg: Registration) -> NameMatchKey:
+    return name_match_key(f"{reg.firstname} {reg.lastname}")
 
 
-def build_full_name_user(user: UserInfo) -> str:
-    return normalize_name(f"{user.firstname} {user.lastname}")
+def build_full_name_key_user(user: UserInfo) -> NameMatchKey:
+    return name_match_key(f"{user.firstname} {user.lastname}")
 
 
-def given_name_prefix(name: str) -> str:
-    normalized = normalize_name(name)
-    return normalized[:4]
+def given_name_prefix_key(name: str) -> NameMatchKey:
+    normalized = normalize_name_exact(name)
+    return NameMatchKey(exact=normalized[:4], lower=normalized.lower()[:4])
+
+
+def build_lastname_key_volta(row: VoltaRow) -> NameMatchKey:
+    return name_match_key(build_lastname_from_volta(row))
 
 
 def build_lastname_from_volta(row: VoltaRow) -> str:
@@ -356,7 +392,12 @@ class SyncMatchCandidate:
     reasons: list[str]
 
 
-REASON_ORDER = {"email_exact": 0, "name_exact": 1, "name_partial": 2}
+REASON_ORDER = {
+    "email_exact": 0,
+    "name_exact": 1,
+    "name_partial": 2,
+    "name_forgiving": 3,
+}
 
 
 def generate_candidates(
@@ -365,9 +406,10 @@ def generate_candidates(
     unlinked_users: list[UserInfo],
 ) -> list[SyncMatchCandidate]:
     imported_email = normalize_email(imported_row.email)
-    imported_full_name = build_full_name_volta(imported_row)
-    imported_surname = normalize_name(imported_row.achternaam)
-    imported_given_prefix = given_name_prefix(imported_row.voornaam)
+    imported_full_name = build_full_name_key_volta(imported_row)
+    imported_surname = name_match_key(imported_row.achternaam)
+    imported_full_surname = build_lastname_key_volta(imported_row)
+    imported_given_prefix = given_name_prefix_key(imported_row.voornaam)
 
     candidates_map: dict[tuple[str, str], SyncMatchCandidate] = {}
 
@@ -389,29 +431,51 @@ def generate_candidates(
 
     for reg in unlinked_registrations:
         e = normalize_email(reg.email)
-        fn = build_full_name_reg(reg)
-        sn = normalize_name(reg.lastname)
-        gp = given_name_prefix(reg.firstname)
+        fn = build_full_name_key_reg(reg)
+        sn = name_match_key(reg.lastname)
+        gp = given_name_prefix_key(reg.firstname)
         d = f"{reg.firstname} {reg.lastname}"
+        exact_name_match = names_match(fn, imported_full_name)
+        partial_name_match = names_match(sn, imported_surname) and names_match(
+            gp, imported_given_prefix
+        )
         if e == imported_email:
             add_candidate("registration", reg.registration_id, e, d, "email_exact")
-        if fn == imported_full_name:
+        if exact_name_match:
             add_candidate("registration", reg.registration_id, e, d, "name_exact")
-        if sn == imported_surname and gp == imported_given_prefix:
+        if partial_name_match:
             add_candidate("registration", reg.registration_id, e, d, "name_partial")
+        if (
+            not exact_name_match
+            and not partial_name_match
+            and names_suffix_match(sn, imported_full_surname)
+            and names_match(gp, imported_given_prefix)
+        ):
+            add_candidate("registration", reg.registration_id, e, d, "name_forgiving")
 
     for user in unlinked_users:
         e = normalize_email(user.email)
-        fn = build_full_name_user(user)
-        sn = normalize_name(user.lastname)
-        gp = given_name_prefix(user.firstname)
+        fn = build_full_name_key_user(user)
+        sn = name_match_key(user.lastname)
+        gp = given_name_prefix_key(user.firstname)
         d = f"{user.firstname} {user.lastname}"
+        exact_name_match = names_match(fn, imported_full_name)
+        partial_name_match = names_match(sn, imported_surname) and names_match(
+            gp, imported_given_prefix
+        )
         if e == imported_email:
             add_candidate("user", user.user_id, e, d, "email_exact")
-        if fn == imported_full_name:
+        if exact_name_match:
             add_candidate("user", user.user_id, e, d, "name_exact")
-        if sn == imported_surname and gp == imported_given_prefix:
+        if partial_name_match:
             add_candidate("user", user.user_id, e, d, "name_partial")
+        if (
+            not exact_name_match
+            and not partial_name_match
+            and names_suffix_match(sn, imported_full_surname)
+            and names_match(gp, imported_given_prefix)
+        ):
+            add_candidate("user", user.user_id, e, d, "name_forgiving")
 
     candidates = list(candidates_map.values())
 
@@ -513,6 +577,31 @@ def serialize_field_diffs(diffs) -> list[dict]:
     return [
         {"field": d.field, "current": d.current, "incoming": d.incoming} for d in diffs
     ]
+
+
+def compute_live_user_field_diffs(
+    user: UserInfo, current: VoltaRow | None, incoming: VoltaRow
+) -> list[VoltaFieldDiff]:
+    """Preview the live-user fields complete_sync will actually refresh."""
+    diffs = compute_field_diffs(current, incoming)
+    incoming_lastname = build_lastname_from_volta(incoming)
+    if user.firstname != incoming.voornaam:
+        diffs.append(
+            VoltaFieldDiff(
+                field="profile.firstname",
+                current=user.firstname,
+                incoming=incoming.voornaam,
+            )
+        )
+    if user.lastname != incoming_lastname:
+        diffs.append(
+            VoltaFieldDiff(
+                field="profile.lastname",
+                current=user.lastname,
+                incoming=incoming_lastname,
+            )
+        )
+    return diffs
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +726,7 @@ def compute_sync_status(store: Storage) -> SyncStatus:  # noqa: PLR0912, PLR0915
             user = users_by_id.get(uid)
             if user is not None and user.email not in system_emails:
                 current = get_volta(store, VOLTA_DATA_TABLE, bn)
-                diffs = compute_field_diffs(current, imported)
+                diffs = compute_live_user_field_diffs(user, current, imported)
                 live_users_enriched.append(
                     {
                         "bondsnummer": bn,
@@ -704,7 +793,7 @@ def compute_sync_status(store: Storage) -> SyncStatus:  # noqa: PLR0912, PLR0915
                 user = users_by_id.get(decision.subject_id)
                 if user is not None:
                     current = get_volta(store, VOLTA_DATA_TABLE, bn)
-                    diffs = compute_field_diffs(current, imported)
+                    diffs = compute_live_user_field_diffs(user, current, imported)
                     live_users_enriched.append(
                         {
                             "bondsnummer": bn,
