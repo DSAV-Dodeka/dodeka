@@ -4,8 +4,8 @@ github.com/faroedev/go-json v0.1.1 h1:PfYNgKpxELrtC66UFj0P1zaoV4wK9AejD1UyBcEHcP
 github.com/faroedev/go-json v0.1.1/go.mod h1:xDXcDdefPzXVQCk9Zx+MecgvYCSkmLm6LxiXsn7vA+c=
 github.com/mattn/go-sqlite3 v1.14.34 h1:3NtcvcUnFBPsuRcno8pUtupspG/GM+9nZ88zgJcp6Zk=
 github.com/mattn/go-sqlite3 v1.14.34/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
-github.com/tiptenbrink/tiauth-faroe/tiauth v0.2.3 h1:n4zYoGyYhmPSY1yeMm+K8Os5xajAF8XN4dI8cCNDPzU=
-github.com/tiptenbrink/tiauth-faroe/tiauth v0.2.3/go.mod h1:R7QYFvDbNY5LxJ6FEozdq7gGVS4+tcoQhFpNZUI7P7A=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.2.4 h1:+0kdlfT19LjIYrF0Ya5qYzWVvuahZTdGuWxgA7H0/vg=
+github.com/tiptenbrink/tiauth-faroe/tiauth v0.2.4/go.mod h1:EGviQkX7EqORJ5sJgpzYJPTOXvefmiQTO+K6UM+5n/E=
 golang.org/x/crypto v0.48.0 h1:/VRzVqiRSggnhY7gNRxPauEQ5Drw9haKdM0jqfcCFts=
 golang.org/x/crypto v0.48.0/go.mod h1:r0kV5h3qnFPlQnBSrULhlsRfryS2pmewsg+XfMgkVos=
 golang.org/x/sync v0.19.0 h1:vV+1eWNmZ5geRlYjzm2adRgW2/mcpevXNg50YZtPCE4=

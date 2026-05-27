@@ -1,13 +1,6 @@
-"""
-This file implements the Faroe user server interface, which means implementing the
-SyncServer (since we use synchronous code) from the tiauth_faroe Python package.
-Be careful modifying it!
+"""Faroe user server interface.
 
-What makes our approach different from the simplest possible implementation is the
-newusers table, since we need to synchronize with Volta and ensure the user is really
-a member. Creating a user then requires that a user actually exists in this table.
-If the board has already accepted them (maybe because they were added to newusers
-through sync and hence already accepted), we immediately add their member permissions.
+Implements the SyncServer from the tiauth_faroe Python package.
 """
 
 import json
@@ -32,7 +25,12 @@ from tiauth_faroe.user_server import (
 )
 
 from apiserver.data.permissions import Permissions, add_permission
-from apiserver.data.registration_state import delete_registration_state
+from apiserver.data.registrations import (
+    delete_registration,
+    get_registration_by_email,
+    normalize_email,
+)
+from apiserver.data.userdata import populate_birthday_for_user, set_user_bondsnummer
 
 logger = logging.getLogger("apiserver.auth")
 
@@ -40,32 +38,35 @@ logger = logging.getLogger("apiserver.auth")
 def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     """Create a new user account from a completed Faroe signup.
 
-    Users must exist in the newusers table to complete signup. If the user
-    has been accepted (by admin or sync), they are granted the member
-    permission and removed from newusers. If not yet accepted, the user
-    account is created but they remain in newusers for later admin approval.
+    1. Normalize email
+    2. Require registrations_by_email[email] -> registration_id
+    3. Require registration with accepted=True
+    4. Allocate user_id
+    5. Create live user
+    6. If registration has bondsnummer, set users_by_bondsnummer
+    7. Grant member
+    8. Delete registration row and indexes
     """
-    email = effect.email_address
+    email = normalize_email(effect.email_address)
 
     user_id_result = store.get("users_by_email", email)
     if user_id_result is not None:
         logger.info(f"User with email {email} already exists")
         return ActionError("email_address_already_used")
 
-    # We only allow users that have been accepted through the newusers flow
-    newuser_result = store.get("newusers", email)
-    if newuser_result is None:
-        logger.info(f"Could not find user in newusers table with email={email}")
+    reg = get_registration_by_email(store, email)
+    if reg is None:
+        logger.info(f"No registration found for email={email}")
+        return ActionError("user_not_found")
+    if not reg.accepted:
+        logger.info(f"Registration not accepted for email={email}")
         return ActionError("user_not_found")
 
-    newuser_bytes, _ = newuser_result
-    newuser_data = json.loads(newuser_bytes.decode("utf-8"))
+    firstname = reg.firstname
+    lastname = reg.lastname
+    bondsnummer = reg.bondsnummer
 
-    firstname = newuser_data["firstname"]
-    lastname = newuser_data["lastname"]
-    accepted = newuser_data["accepted"]
-
-    # We store a global counter that tracks the max user_id
+    # Allocate user_id from global counter
     counter_result = store.get("metadata", "user_id_counter")
     if counter_result is None:
         store.add("metadata", "user_id_counter", b"0", expires_at=0)
@@ -75,15 +76,13 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
         counter_bytes, counter = counter_result
         int_id = int(counter_bytes.decode("utf-8"))
 
-    # Increment counter for next user
     new_user_counter = str(int_id + 1).encode("utf-8")
     store.update("metadata", "user_id_counter", new_user_counter, counter, expires_at=0)
 
-    # We construct a user_id from a unique integer and first name + last name
     name_id = f"{firstname.lower()}_{lastname.lower()}"
     user_id = f"{int_id}_{name_id}"
 
-    # Construct the rest of the user data
+    # Construct user data
     profile_data = {"firstname": firstname, "lastname": lastname}
     profile_bytes = json.dumps(profile_data).encode("utf-8")
     password_data = {
@@ -99,21 +98,19 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
     store.add("users", f"{user_id}:password", password_bytes, expires_at=0)
     store.add("users", f"{user_id}:disabled", b"0", expires_at=0)
     store.add("users", f"{user_id}:sessions_counter", b"0", expires_at=0)
-    # Permissions are now stored as separate keys with native expiration
-    # This is used as an index to find a user_id by email
     store.add("users_by_email", email, user_id.encode("utf-8"), expires_at=0)
 
-    if accepted:
-        # Grant member permission (1-year TTL, renewed by update_existing during sync).
-        timestamp = int(time.time())
-        add_permission(store, timestamp, user_id, Permissions.MEMBER)
-        # Remove newuser entry since acceptance is complete
-        store.delete("newusers", email)
-    else:
-        logger.info(f"User {user_id} created but not yet accepted, staying in newusers")
+    # Link bondsnummer if registration had one
+    if bondsnummer is not None:
+        set_user_bondsnummer(store, bondsnummer, user_id)
+        populate_birthday_for_user(store, user_id, bondsnummer)
 
-    # Registration state is no longer needed once the account exists
-    delete_registration_state(store, email)
+    # Grant member immediately
+    timestamp = int(time.time())
+    add_permission(store, timestamp, user_id, Permissions.MEMBER)
+
+    # Delete registration row and all its indexes
+    delete_registration(store, reg.registration_id)
 
     logger.info(f"Created user {user_id} with email {email}")
     return User(
@@ -134,15 +131,12 @@ def create_user(store: Storage, effect: CreateUserEffect) -> EffectResult:
 def get_user(store: Storage, effect: GetUserEffect) -> EffectResult:
     user_id = effect.user_id
 
-    # Read all user data from separate keys
     profile_result = store.get("users", f"{user_id}:profile")
     email_result = store.get("users", f"{user_id}:email")
     password_result = store.get("users", f"{user_id}:password")
     disabled_result = store.get("users", f"{user_id}:disabled")
     sessions_result = store.get("users", f"{user_id}:sessions_counter")
 
-    # Assert consistency: profile, email, and password must all exist together
-    # or not at all
     all_none = (
         (profile_result is None) == (email_result is None) == (password_result is None)
     )
@@ -153,17 +147,13 @@ def get_user(store: Storage, effect: GetUserEffect) -> EffectResult:
         f"password={password_result is not None}"
     )
 
-    # Check if user exists
     if profile_result is None:
         logger.info(f"User {user_id} not found")
         return ActionError("user_not_found")
 
-    # At this point, due to the consistency assertion above,
-    # email_result and password_result must also be not None
     assert email_result is not None
     assert password_result is not None
 
-    # Now we parse and get all of the data
     profile_bytes, _ = profile_result
     profile_data = json.loads(profile_bytes.decode("utf-8"))
     firstname = profile_data["firstname"]
@@ -198,7 +188,8 @@ def get_user(store: Storage, effect: GetUserEffect) -> EffectResult:
 def get_user_by_email_address(
     store: Storage, effect: GetUserByEmailAddressEffect
 ) -> EffectResult:
-    email_index_result = store.get("users_by_email", effect.email_address)
+    email = normalize_email(effect.email_address)
+    email_index_result = store.get("users_by_email", email)
     if email_index_result is None:
         logger.info(f"User with email {effect.email_address} not found")
         return ActionError("user_not_found")
@@ -219,9 +210,8 @@ def update_user_email_address(
     store: Storage, effect: UpdateUserEmailAddressEffect
 ) -> EffectResult:
     user_id = effect.user_id
-    new_email = effect.email_address
+    new_email = normalize_email(effect.email_address)
 
-    # Get current email
     old_email_result = store.get("users", f"{user_id}:email")
     if old_email_result is None:
         logger.info(f"User {user_id} not found for email update")
@@ -230,31 +220,26 @@ def update_user_email_address(
     old_email_bytes, _ = old_email_result
     old_email = old_email_bytes.decode("utf-8")
 
-    # Check if already the same
     if old_email == new_email:
         logger.info(f"Email already set to {new_email} for user {user_id}")
         return None
 
-    # Check if new email already in use
     new_email_check = store.get("users_by_email", new_email)
     if new_email_check is not None:
         logger.info(f"Email {new_email} already in use")
         return ActionError("email_address_already_used")
 
-    # Update email (assert_updated=True by default - will assert on counter mismatch)
     new_email_bytes = new_email.encode("utf-8")
-    updated = store.update(
+    updated = store.try_update(
         "users",
         f"{user_id}:email",
         new_email_bytes,
         effect.user_email_address_counter,
         expires_at=0,
-        assert_updated=False,
     )
     if not updated:
         return ActionError("user_not_found")
 
-    # Update email index
     store.add("users_by_email", new_email, user_id.encode("utf-8"), expires_at=0)
     store.delete("users_by_email", old_email)
 
@@ -264,7 +249,6 @@ def update_user_email_address(
 def update_user_password_hash(
     store: Storage, effect: UpdateUserPasswordHashEffect
 ) -> EffectResult:
-    """Update user password hash."""
     user_id = effect.user_id
 
     password_data = {
@@ -274,13 +258,12 @@ def update_user_password_hash(
     }
     new_password_bytes = json.dumps(password_data).encode("utf-8")
 
-    updated = store.update(
+    updated = store.try_update(
         "users",
         f"{user_id}:password",
         new_password_bytes,
         effect.user_password_hash_counter,
         expires_at=0,
-        assert_updated=False,
     )
 
     if not updated:
@@ -293,10 +276,8 @@ def update_user_password_hash(
 def increment_user_sessions_counter(
     store: Storage, effect: IncrementUserSessionsCounterEffect
 ) -> EffectResult:
-    """Increment user sessions counter."""
     user_id = effect.user_id
 
-    # Get current sessions counter value
     sessions_result = store.get("users", f"{user_id}:sessions_counter")
     if sessions_result is None:
         logger.info(f"User {user_id} not found for sessions counter increment")
@@ -305,15 +286,17 @@ def increment_user_sessions_counter(
     sessions_bytes, _ = sessions_result
     current_count = int(sessions_bytes.decode("utf-8"))
 
-    # Increment sessions counter (assert_updated=True by default)
     new_count_bytes = str(current_count + 1).encode("utf-8")
-    store.update(
+    updated = store.try_update(
         "users",
         f"{user_id}:sessions_counter",
         new_count_bytes,
         effect.user_sessions_counter,
         expires_at=0,
     )
+    if not updated:
+        logger.info(f"Stale sessions counter for user {user_id}")
+        return ActionError("user_not_found")
 
     logger.info(
         f"Incremented sessions counter for user {user_id} to {current_count + 1}"
@@ -322,10 +305,8 @@ def increment_user_sessions_counter(
 
 
 def delete_user(store: Storage, effect: DeleteUserEffect) -> EffectResult:
-    """Delete a user."""
     user_id = effect.user_id
 
-    # Get email to delete from index
     email_result = store.get("users", f"{user_id}:email")
     if email_result is None:
         logger.info(f"User {user_id} not found for deletion")
@@ -334,7 +315,6 @@ def delete_user(store: Storage, effect: DeleteUserEffect) -> EffectResult:
     email_bytes, _ = email_result
     email = email_bytes.decode("utf-8")
 
-    # Delete all user keys
     store.delete("users", f"{user_id}:profile")
     store.delete("users", f"{user_id}:password")
     store.delete("users", f"{user_id}:disabled")
@@ -348,7 +328,7 @@ def delete_user(store: Storage, effect: DeleteUserEffect) -> EffectResult:
 
 
 class SqliteSyncServer(SyncServer):
-    """Sync server that executes effects using hfree Storage."""
+    """Sync server that executes effects using freetser Storage."""
 
     store: Storage
 

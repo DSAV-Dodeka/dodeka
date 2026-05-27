@@ -27,13 +27,19 @@ Port scheme: test = 127xx, demo = 128xx, production = 129xx.
 
 ### Key Files
 
-- `app.py` - Main server, route handlers, CSRF protection, permission checks
-- `private.py` - Private server handlers, command dispatch
-- `commands.py` - CLI command implementations (HTTP client to private server)
-- `dev.py` - Dev orchestrator (manages both Go and Python processes)
+- `app.py` - Server startup, route table, request dispatch
+- `server.py` - HTTP framework (CSRF, CORS, sessions, permissions, routing types)
+- `private.py` - Private server handlers (`/invoke`, `/email`, `/command` dispatch)
+- `handlers/auth.py` - Auth handlers (registration, sessions, cookies)
+- `handlers/admin.py` - Admin handlers (user management, permissions, sync)
+- `handlers/features/birthdays.py` - Birthday feature handler
 - `settings.py` - Configuration loading from .env files
 - `sync.py` - Member sync (CSV import, group computation)
 - `data/` - Database operations (users, permissions, registration state, etc.)
+- `tooling/command_handlers.py` - Private server command implementations (bootstrap, accept, sync, etc.)
+- `tooling/commands.py` - CLI HTTP client to private server
+- `tooling/dev.py` - Dev orchestrator (manages both Go and Python processes)
+- `tooling/auth_binary.py` - Auth binary download and verification
 
 ## Code Quality Checks
 
@@ -54,6 +60,10 @@ Never use leading underscores for function names, method names, class names, or 
 ## Error Signalling
 
 Never use `None` to signal errors or failure states from functions. Instead, use explicit sentinel dataclasses (e.g. `InvalidHeaders`, `UserNotFound`, `EmailNotFoundInNewUserTable`) and check with `isinstance()`. This makes error paths visible in type signatures and avoids ambiguity with legitimate `None` values.
+
+## Free-Threaded Python Dependencies
+
+This backend runs on free-threaded Python (3.14t, GIL disabled). Do not add dependencies that include C extensions unless they are explicitly built for free-threaded Python. C extensions compiled for regular (GIL-enabled) Python are not compatible and will crash or behave incorrectly at runtime. Pure Python packages are always fine. freetser itself checks at import time that the GIL is disabled and exits with an error if it is not (see `freetser/__init__.py`).
 
 ## Database Thread Deadlock Prevention
 
@@ -79,6 +89,6 @@ def handler(req: Request, store_queue: StorageQueue) -> Response:
     return store_queue.execute(db_procedure)
 ```
 
-See `session_info()` in `src/apiserver/app.py` for an example.
+See `session_info()` in `src/apiserver/handlers/auth.py` for an example.
 
 ## Frontend

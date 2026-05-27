@@ -1,8 +1,8 @@
 module github.com/tiptenbrink/dodeka/backend/auth
 
-go 1.25.1
+go 1.26.3
 
-require github.com/tiptenbrink/tiauth-faroe/tiauth v0.2.3
+require github.com/tiptenbrink/tiauth-faroe/tiauth v0.2.4
 
 require (
 	github.com/faroedev/faroe v0.5.1 // indirect

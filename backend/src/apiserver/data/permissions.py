@@ -96,25 +96,9 @@ def add_permission(
 
     expires_at = timestamp + year_time
     perm_key = f"{user_id}:perm:{permission_name}"
-
-    result = store.get("users", perm_key)
-    if result is None:
-        store.add(
-            "users",
-            perm_key,
-            b"",
-            expires_at=expires_at,
-            timestamp=timestamp,
-        )
-    else:
-        _, counter = result
-        store.update(
-            "users",
-            perm_key,
-            b"",
-            counter,
-            expires_at=expires_at,
-        )
+    # This is a serialized TTL refresh for derived permission state, so the
+    # latest write should simply replace what was there before.
+    store.overwrite("users", perm_key, b"", expires_at=expires_at)
 
     return None
 

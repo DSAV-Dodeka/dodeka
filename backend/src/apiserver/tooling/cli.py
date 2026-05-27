@@ -5,7 +5,7 @@ Usage: uv run backend-actions <command> [args]
 Run 'uv run backend-actions --help' for a list of available commands.
 """
 
-from apiserver.commands import create_backend_parser
+from apiserver.tooling.commands import create_backend_parser
 
 
 def main() -> None:

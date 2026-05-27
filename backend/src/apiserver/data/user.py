@@ -109,7 +109,7 @@ def get_cached_session(
     )
 
 
-SESSION_CACHE_EXPIRY = 2 * 60 * 60
+SESSION_CACHE_EXPIRY = 8 * 60 * 60
 
 
 def update_session_cache(
@@ -120,7 +120,7 @@ def update_session_cache(
     expires_at: int | None,
     timestamp: int,
 ):
-    """Update session cache with 2-hour expiration."""
+    """Update session cache with 8-hour expiration."""
     cache_expires_at = timestamp + SESSION_CACHE_EXPIRY
 
     cache_data = {
@@ -130,24 +130,14 @@ def update_session_cache(
     }
     cache_bytes = json.dumps(cache_data).encode("utf-8")
 
-    result = store.get("session_cache", session_token)
-    if result is None:
-        store.add(
-            "session_cache",
-            session_token,
-            cache_bytes,
-            expires_at=cache_expires_at,
-            timestamp=timestamp,
-        )
-    else:
-        _, counter = result
-        store.update(
-            "session_cache",
-            session_token,
-            cache_bytes,
-            counter,
-            expires_at=cache_expires_at,
-        )
+    # This cache is last-writer-wins derived state, so we intentionally replace
+    # the row instead of treating concurrent refreshes as conflicts.
+    store.overwrite(
+        "session_cache",
+        session_token,
+        cache_bytes,
+        expires_at=cache_expires_at,
+    )
 
 
 @dataclass

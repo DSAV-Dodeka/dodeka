@@ -1,0 +1,4 @@
+# tag=auth/v1.0.0
+a91a4e5ace8e0e658e3e7d74c2c41743995560daeb2bf1f0bdffa596a946b3c5  auth-darwin-arm64
+d0524d2664c51ba25b290315a9bc4a46eb3396dad5c479b6840fa55c3f28fc9f  auth-linux-amd64
+bf9e4b4f9f2510bda736de53d38d834365560313b6554f8bf57f44ec575e268c  auth-windows-amd64.exe

@@ -2,8 +2,7 @@
 
 Je verificatiecode is: {code}
 
-Klik op onderstaande link om je account te activeren:
-{link}
+Gebruik deze code om je account te activeren.{link_section}
 
 --
 D.S.A.V. Dodeka

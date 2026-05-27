@@ -35,17 +35,21 @@ With a custom env file:
 uv run --frozen --no-dev backend --env-file /path/to/.env
 ```
 
+## Free-Threaded Python
+
+This backend runs on free-threaded Python (3.14t, GIL disabled). Do not add dependencies that include C extensions unless they are explicitly built for free-threaded Python. C extensions compiled for regular (GIL-enabled) Python are not compatible and will crash or behave incorrectly at runtime. Pure Python packages are always fine. freetser checks at import time that the GIL is disabled and exits with an error if it is not.
+
 ## Architecture
 
 The backend runs two HTTP servers:
 
-- **Public API** (port `BACKEND_PORT`, default 12780) - Serves the frontend, handles user requests.
-- **Private server** (port `BACKEND_PRIVATE_PORT`, default 12790, on 127.0.0.2) - Accepts commands from the Go auth server and CLI tools.
+- **Public API** (port `BACKEND_PORT`, default 12780) - Handles user requests coming over the public internet.
+- **Private server** (port `BACKEND_PRIVATE_PORT`, default 12790, on 127.0.0.2) - Accepts commands from the Go auth server and CLI tools. May not be exposed to the public internet.
 
 The Go auth server (tiauth-faroe) runs alongside:
 
-- **Auth server** (port `FAROE_PORT`, default 12770) - Handles authentication (signup, login, sessions).
-- **Auth command server** (port `FAROE_COMMAND_PORT`, default 12771, on 127.0.0.2) - Management commands (reset).
+- **Auth server** (port `FAROE_PORT`, default 12770) - Handles authentication (signup, login, sessions). Can be exposed to the public internet.
+- **Auth command server** (port `FAROE_COMMAND_PORT`, default 12771, on 127.0.0.2) - Management commands (reset). May not be exposed to teh public internet.
 
 Port scheme by environment: test = 127xx, demo = 128xx, production = 129xx.
 

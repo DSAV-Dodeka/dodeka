@@ -169,6 +169,7 @@ def download_auth_binary(*, force: bool = False) -> bool:
             )
             print("Run 'uv run update-auth <tag>' to refresh the pinned checksums.")
             return False
+        print(f"Checksum verified ({actual_hash[:16]}...)")
 
         binary_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(downloaded), str(binary_path))
@@ -200,6 +201,7 @@ def ensure_auth_binary() -> None:
 
     if binary_path.exists():
         if sha256_file(binary_path) == expected_hash:
+            print(f"Auth binary matches pinned version ({expected_hash[:16]}...)")
             return
         print("Auth binary does not match pinned version, re-downloading...")
     else:

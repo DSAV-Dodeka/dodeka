@@ -8,11 +8,19 @@ from tiauth_faroe.user_server import handle_request_sync
 
 from apiserver.data.auth import SqliteSyncServer
 from apiserver.data.client import AuthClient
-from apiserver.data.newuser import delete_new_user, prepare_user_store
 from apiserver.data.permissions import add_permission
-from apiserver.tokens import TokenWaiter
+from apiserver.data.registrations import (
+    create_or_reuse_registration,
+    delete_registration,
+    get_registration_by_email,
+    normalize_email,
+)
+from apiserver.tooling.codes import CodeWaiter
 
 logger = logging.getLogger("apiserver.actions")
+
+
+MAX_NAMES = 2
 
 
 class AdminUserCreationError(Exception):
@@ -24,17 +32,18 @@ def create_admin_user(
     auth_client: AuthClient,
     email: str,
     password: str,
-    token_waiter: TokenWaiter,
+    code_waiter: CodeWaiter,
     names: list[str] | None = None,
 ) -> tuple[str, str]:
     """Create an admin user using direct DB calls."""
+    email = normalize_email(email)
 
     # Delete existing user by email (cleanup from previous runs)
     def delete_user_by_email(store: Storage) -> str | None:
-        # Clean up newusers table
-        delete_new_user(store, email)
+        reg = get_registration_by_email(store, email)
+        if reg is not None:
+            delete_registration(store, reg.registration_id)
 
-        # Look up user_id by email
         result = store.get("users_by_email", email)
         if result is None:
             return None
@@ -59,16 +68,18 @@ def create_admin_user(
         if error is not None:
             raise AdminUserCreationError(f"Failed to delete user: {error}")
 
-    # Prepare user in newusers table with accepted=True
-    def prepare(store: Storage) -> str | None:
-        result = prepare_user_store(store, email, names or [])
-        if result is not None:
-            return str(result)
-        return None
+    # Prepare registration with accepted=True
+    if names and len(names) >= MAX_NAMES:
+        firstname, lastname = names[0], names[1]
+    elif names and len(names) == 1:
+        firstname, lastname = names[0], ""
+    else:
+        firstname, lastname = email.split("@", maxsplit=1)[0], ""
 
-    prepare_error = store_queue.execute(prepare)
-    if prepare_error is not None:
-        raise AdminUserCreationError(f"Failed to prepare user: {prepare_error}")
+    def prepare(store: Storage) -> None:
+        create_or_reuse_registration(store, email, firstname, lastname, accepted=True)
+
+    store_queue.execute(prepare)
 
     # Create signup via auth server
     signup_result = auth_client.create_signup(email)
@@ -79,7 +90,7 @@ def create_admin_user(
     signup_token = signup_result.signup_token
 
     # Wait for verification code from Go (stored in tokens table)
-    verification_code = token_waiter.wait_for_token("signup_verification", email)
+    verification_code = code_waiter.wait_for_code("signup_verification", email)
 
     # Verify email address
     verify_result = auth_client.verify_signup_email_address_verification_code(

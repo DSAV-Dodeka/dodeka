@@ -3,7 +3,7 @@ name: Auth Release
 on:
   push:
     tags:
-      - 'auth/v*'
+      - "auth/v*"
 
 jobs:
   build:
@@ -20,9 +20,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
           go-version-file: backend/auth/go.mod
           cache-dependency-path: backend/auth/go.sum
@@ -31,7 +31,7 @@ jobs:
         working-directory: backend/auth
         run: go build -o ${{ matrix.binary_name }} .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: ${{ matrix.binary_name }}
           path: backend/auth/${{ matrix.binary_name }}
@@ -42,7 +42,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: artifacts
 
@@ -61,4 +61,4 @@ jobs:
           gh release create "${{ github.ref_name }}" release-assets/* \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
-            --generate-notes
+            --notes ""

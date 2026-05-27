@@ -1,16 +1,11 @@
 """Faroe API compatibility tests.
 
-Mirrors the test patterns from tiauth-faroe/python/client/tests/test_integration.py,
-adapted for our backend which requires users to exist in the newusers table before
-signup can succeed.
-
 Each test that calls create_signup first calls prepare_user to create the
-newuser entry that our backend requires (the reference user-server in
-tiauth-faroe accepts any email).
+accepted registration that our backend requires.
 
 Tests cover the full Faroe API surface:
-- Signup: create → verify email → set password → complete
-- Signin: create → verify password → complete
+- Signup: create -> verify email -> set password -> complete
+- Signin: create -> verify password -> complete
 - Session: get session from token
 """
 
@@ -18,6 +13,7 @@ import secrets
 import time
 
 import pytest
+from freetser import Storage
 from tiauth_faroe.client import (
     ActionErrorResult,
     CompleteSigninActionSuccessResult,
@@ -26,6 +22,13 @@ from tiauth_faroe.client import (
     CreateSignupActionSuccessResult,
     GetSessionActionSuccessResult,
 )
+from tiauth_faroe.user_server import (
+    ActionError,
+    IncrementUserSessionsCounterEffect,
+)
+
+from apiserver.data import DB_TABLES
+from apiserver.data.auth import increment_user_sessions_counter
 
 TEST_PASSWORD = "Str0ng!Pass#2025"
 
@@ -77,7 +80,7 @@ class TestSignupFlow:
     """Faroe signup API compatibility — mirrors tiauth-faroe/python/client/tests."""
 
     def test_create_signup(self, command, auth_client, unique_email):
-        """prepare_user → create_signup succeeds."""
+        """prepare_user -> create_signup succeeds."""
         command("prepare_user", email=unique_email, names=["Test", "User"])
 
         result = auth_client.create_signup(unique_email)
@@ -91,10 +94,8 @@ class TestSignupFlow:
 
     def test_create_signup_duplicate_email(self, command, auth_client, unique_email):
         """Second signup with same email fails with email_address_already_used."""
-        # First: complete full signup
         complete_signup_flow(command, auth_client, unique_email)
 
-        # Second attempt should fail — user already exists in users table
         result = auth_client.create_signup(unique_email)
 
         assert isinstance(result, ActionErrorResult)
@@ -102,14 +103,13 @@ class TestSignupFlow:
         assert result.error_code == "email_address_already_used"
 
     def test_complete_signup_full_flow(self, command, auth_client, unique_email):
-        """Full: prepare_user → create → verify → password → complete."""
+        """Full: prepare_user -> create -> verify -> password -> complete."""
         command("prepare_user", email=unique_email, names=["Full", "Flow"])
 
         signup = auth_client.create_signup(unique_email)
         assert isinstance(signup, CreateSignupActionSuccessResult)
         signup_token = signup.signup_token
 
-        # Send verification code (Faroe auto-sends on create, but we can resend)
         send_result = auth_client.send_signup_email_address_verification_code(
             signup_token
         )
@@ -140,10 +140,8 @@ class TestSignupFlow:
         signup = auth_client.create_signup(unique_email)
         assert isinstance(signup, CreateSignupActionSuccessResult)
 
-        # Set password but skip email verification
         auth_client.set_signup_password(signup.signup_token, TEST_PASSWORD)
 
-        # Complete should fail — email not verified
         result = auth_client.complete_signup(signup.signup_token)
         assert isinstance(result, ActionErrorResult)
         assert result.ok is False
@@ -212,3 +210,26 @@ class TestSessionFlow:
         assert isinstance(result, ActionErrorResult)
         assert result.ok is False
         assert result.error_code == "invalid_session_token"
+
+
+def test_increment_sessions_counter_stale_counter_returns_action_error():
+    """Faroe effect contract: stale session counter maps to user_not_found."""
+    storage = Storage(":memory:", DB_TABLES)
+    try:
+        storage.add("users", "user-1:email", b"user@example.com", expires_at=0)
+        storage.add("users", "user-1:sessions_counter", b"1", expires_at=0)
+        storage.update("users", "user-1:sessions_counter", b"1", 0, expires_at=0)
+
+        result = increment_user_sessions_counter(
+            storage,
+            IncrementUserSessionsCounterEffect(
+                action_invocation_id="test",
+                user_id="user-1",
+                user_sessions_counter=0,
+            ),
+        )
+
+        assert isinstance(result, ActionError)
+        assert result.error_code == "user_not_found"
+    finally:
+        storage.close()
