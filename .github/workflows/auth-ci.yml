@@ -2,7 +2,7 @@ name: Auth CI
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
     paths:
       - backend/auth/**
       - .github/workflows/auth-ci.yml
@@ -16,11 +16,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             binary_name: auth-linux-amd64
-          - os: macos-latest
+          - os: macos-14
             binary_name: auth-darwin-arm64
-          - os: windows-latest
+          - os: windows-2022
             binary_name: auth-windows-amd64.exe
 
     runs-on: ${{ matrix.os }}
@@ -35,4 +35,6 @@ jobs:
 
       - name: Build
         working-directory: backend/auth
-        run: go build -o ${{ matrix.binary_name }} .
+        env:
+          CGO_ENABLED: "0"
+        run: go build -trimpath -buildvcs=false -mod=readonly -ldflags="-s -w" -o ${{ matrix.binary_name }} .

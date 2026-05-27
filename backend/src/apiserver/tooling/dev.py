@@ -174,7 +174,7 @@ def run_dev() -> None:
         msg = (
             f"Auth binary not found at {auth_path}.\n"
             "Run 'uv run update-auth' to download it, or build"
-            " it with 'CGO_ENABLED=1 go build -o auth .' in"
+            " it with 'go build -o auth .' in"
             " backend/auth/."
         )
         raise SystemExit(msg)

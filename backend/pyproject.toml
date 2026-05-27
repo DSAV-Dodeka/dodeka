@@ -14,8 +14,8 @@ license-files = ["LICENSE"]
 dependencies = [
     "tiauth_faroe.user_server",
     "tiauth_faroe.client",
-    "freetser>=0.5.0",
-    "requests==2.32.5",
+    "freetser==0.5.0",
+    "requests==2.34.2",
     # pin to exact version since freetser doesn't pin
     "h11==0.16.0"
 ]
@@ -28,8 +28,8 @@ exclude-newer = "3 days"
 exclude-newer-package = { freetser = false }
 
 [tool.uv.sources]
-"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/user-server", rev = "3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" }
-"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/client", rev = "3f9c8287f968ccca507e6400c3b1cdbfc2071e1b" }
+"tiauth_faroe.user_server" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/user-server", rev = "f058c63b3d8a0926f1f2f411002ef1b00d21c4d5" }
+"tiauth_faroe.client" = { git = "https://github.com/tiptenbrink/tiauth-faroe", subdirectory = "python/client", rev = "f058c63b3d8a0926f1f2f411002ef1b00d21c4d5" }
 
 [project.scripts]
 backend = "apiserver.app:run"
@@ -47,9 +47,9 @@ production = "apiserver.app:run_production"
 
 [dependency-groups]
 dev = [
-    "ty>=0.0.26",
-    "pytest>=9.0.1",
-    "ruff>=0.15.0",
+    "ty>=0.0.39",
+    "pytest>=9.0.3",
+    "ruff>=0.15.14",
 ]
 
 [build-system]

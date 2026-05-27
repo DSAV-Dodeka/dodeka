@@ -161,11 +161,9 @@ This downloads all platform binaries from the release, computes their SHA256 has
 
 ### Building
 
-CGO must be enabled (required for SQLite):
-
 ```bash
 cd auth
-CGO_ENABLED=1 go build .
+go build .
 ```
 
 ### Running
