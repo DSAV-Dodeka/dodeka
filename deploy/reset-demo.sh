@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euf -o pipefail
+set -eu -o pipefail
 
 echo "Stopping demo services..."
 sudo systemctl stop dodeka-backend-demo

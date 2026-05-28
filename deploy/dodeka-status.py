@@ -67,6 +67,10 @@ def status_line(state: str, label: str, detail: str = "") -> bool:
     return state == "OK"
 
 
+def suggestion(command: str) -> None:
+    print(f"     -> {command}")
+
+
 def section(title: str) -> None:
     print()
     print(title)
@@ -154,6 +158,8 @@ def check_services() -> bool:
 
         detail = f"{active_state}/{sub_state}, enabled={unit_file_state}"
         all_ok &= status_line(state, service, detail)
+        if state != "OK":
+            suggestion(f"journalctl -u {service}")
 
     return all_ok
 
