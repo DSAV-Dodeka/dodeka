@@ -5,6 +5,8 @@ BACKEND_BASE="/home/backend/dodeka/backend"
 RESTIC_REPO="/mnt/backup/restic"
 RESTIC_PW_FILE="/mnt/backup/.restic-password"
 
+export PATH="/home/backend/.local/bin:$PATH"
+
 # Get database path for environment
 get_db_path() {
     local env="$1"
