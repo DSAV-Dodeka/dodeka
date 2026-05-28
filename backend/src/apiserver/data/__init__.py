@@ -6,6 +6,7 @@ and full-reset (cmdhandler_reset).
 """
 
 from apiserver.data.features.birthdays import BIRTHDAYS_TABLE
+from apiserver.data.features.private_kv import PRIVATE_TABLE
 from apiserver.data.outbox import OUTBOX_TABLE
 from apiserver.data.registrations import (
     REGISTRATIONS_BY_BONDSNUMMER_TABLE,
@@ -30,6 +31,7 @@ DB_TABLES = [
     "metadata",
     "session_cache",
     BIRTHDAYS_TABLE,
+    PRIVATE_TABLE,
     SYSTEM_USERS_TABLE,
     CODES_TABLE,
 ]

@@ -8,21 +8,56 @@ This module provides:
 
 import argparse
 import json
+from pathlib import Path
 from typing import Any
 
 import requests
 
-from apiserver.settings import DEFAULT_PRIVATE_PORT, PRIVATE_HOST
+from apiserver.settings import (
+    PRIVATE_HOST,
+    load_settings_from_env,
+)
 
 
 # ---------------------------------------------------------------------------
 # HTTP client
 # ---------------------------------------------------------------------------
 
+PRIVATE_PORT_CONFIG: dict[str, int | None] = {"port": None}
 
-def get_private_url(port: int = DEFAULT_PRIVATE_PORT) -> str:
+
+def get_backend_dir() -> Path:
+    """Get the backend project directory from this source file."""
+    return Path(__file__).resolve().parents[3]
+
+
+def get_env_file(env: str) -> Path:
+    """Resolve the environment file for a named backend environment."""
+    cwd_path = Path.cwd() / "envs" / env / ".env"
+    if cwd_path.exists():
+        return cwd_path
+
+    return get_backend_dir() / "envs" / env / ".env"
+
+
+def configure_private_port(env: str | None, env_file: Path | None) -> None:
+    """Configure the private server port from an environment file."""
+    resolved_env_file = (
+        env_file if env_file is not None else get_env_file(env or "test")
+    )
+    if not resolved_env_file.exists():
+        raise FileNotFoundError(f"Environment file not found: {resolved_env_file}")
+
+    settings = load_settings_from_env(resolved_env_file)
+    PRIVATE_PORT_CONFIG["port"] = settings.private_port
+
+
+def get_private_url(port: int | None = None) -> str:
     """Get the base URL for the private server."""
-    return f"http://{PRIVATE_HOST}:{port}"
+    selected_port = PRIVATE_PORT_CONFIG["port"] if port is None else port
+    if selected_port is None:
+        raise RuntimeError("Private server port has not been configured")
+    return f"http://{PRIVATE_HOST}:{selected_port}"
 
 
 def send_command(command: str, **kwargs: Any) -> str:
@@ -221,6 +256,18 @@ def create_backend_parser() -> argparse.ArgumentParser:
         prog="backend",
         description="Backend management commands",
     )
+    env_group = parser.add_mutually_exclusive_group()
+    env_group.add_argument(
+        "--env",
+        choices=("test", "demo", "production"),
+        help="Load private server port from envs/<env>/.env",
+    )
+    env_group.add_argument(
+        "--env-file",
+        type=Path,
+        help="Load private server port from a specific backend .env file",
+    )
+    parser.set_defaults(env="test")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     reset_parser = subparsers.add_parser(

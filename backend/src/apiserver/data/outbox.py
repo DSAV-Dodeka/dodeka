@@ -4,13 +4,15 @@ Outbox rows are created atomically with canonical state mutations inside
 one freetser storage callback. Delivery happens after commit with
 at-least-once semantics.
 
-Retry schedule:
+Retry schedule (after each failed attempt):
   attempt 1: immediately (next_attempt_at = created_at)
   attempt 2: 1 minute later
   attempt 3: 5 minutes later
   attempt 4: 30 minutes later
   attempt 5+: every 2 hours
-  after 8 hours from created_at: mark manual_retry_required
+  past 72 hours from created_at: row is deleted and the action is logged
+  loudly as lost. Sized so a Friday-afternoon SMTP outage plus a Monday-
+  morning restart still falls inside the retry window.
 """
 
 import json
@@ -25,7 +27,7 @@ OUTBOX_TABLE = "outbox"
 # Retry delays in seconds after each failed attempt
 RETRY_DELAYS = [60, 300, 1800]
 RETRY_DEFAULT = 7200
-AUTO_WINDOW = 8 * 3600
+RETRY_WINDOW = 72 * 3600
 
 
 def generate_outbox_id() -> str:
@@ -121,7 +123,7 @@ def save_outbox_row(store: Storage, row: OutboxRow) -> None:
     store.overwrite(OUTBOX_TABLE, row.outbox_id, serialize_outbox(row), expires_at=0)
 
 
-def compute_next_attempt(attempt_count: int, created_at: int) -> int:
+def compute_next_attempt(attempt_count: int) -> int:
     """Compute next_attempt_at after a failure."""
     if attempt_count < len(RETRY_DELAYS):
         delay = RETRY_DELAYS[attempt_count]
@@ -130,58 +132,47 @@ def compute_next_attempt(attempt_count: int, created_at: int) -> int:
     return int(time.time()) + delay
 
 
-def mark_attempt_failed(store: Storage, row: OutboxRow, error: str) -> None:
-    """Record a failed delivery attempt and schedule retry or expire."""
+def mark_attempt_failed(store: Storage, row: OutboxRow, error: str) -> bool:
+    """Record a failed delivery attempt.
+
+    Returns True if the row was abandoned (deleted) because the retry window
+    is exhausted; the caller is expected to log the lost action loudly.
+    """
     now = int(time.time())
     row.last_attempt_at = now
     row.attempt_count += 1
     row.last_error = error
 
-    next_at = compute_next_attempt(row.attempt_count, row.created_at)
-    if next_at >= row.created_at + AUTO_WINDOW:
-        row.status = "manual_retry_required"
-    else:
-        row.next_attempt_at = next_at
+    next_at = compute_next_attempt(row.attempt_count)
+    if next_at >= row.created_at + RETRY_WINDOW:
+        store.delete(OUTBOX_TABLE, row.outbox_id)
+        return True
 
+    row.next_attempt_at = next_at
     save_outbox_row(store, row)
+    return False
 
 
 def mark_attempt_succeeded(store: Storage, row: OutboxRow) -> None:
-    """Record a successful delivery attempt."""
-    now = int(time.time())
-    row.last_attempt_at = now
-    row.attempt_count += 1
-    row.status = "succeeded"
-    save_outbox_row(store, row)
+    """Delete the row: the side effect was delivered, nothing more to do."""
+    store.delete(OUTBOX_TABLE, row.outbox_id)
 
 
 def list_pending_outbox(store: Storage, now: int) -> list[OutboxRow]:
-    """List outbox rows eligible for automatic dispatch."""
-    cutoff = now - AUTO_WINDOW
+    """List outbox rows eligible for automatic dispatch.
+
+    Rows older than the retry window are still returned: the next attempt
+    will fail-and-delete in mark_attempt_failed, which is where the loud
+    log happens. We never silently strand a pending row.
+    """
     rows = []
     for key in store.list_keys(OUTBOX_TABLE):
         result = store.get(OUTBOX_TABLE, key)
         if result is None:
             continue
         row = deserialize_outbox(result[0])
-        if (
-            row.status == "pending"
-            and row.next_attempt_at <= now
-            and row.created_at > cutoff
-        ):
+        if row.status == "pending" and row.next_attempt_at <= now:
             rows.append(row)
     return rows
 
 
-def list_outbox_since(store: Storage, since: int) -> list[OutboxRow]:
-    """List outbox rows for manual drain (ignores 8h window)."""
-    rows = []
-    for key in store.list_keys(OUTBOX_TABLE):
-        result = store.get(OUTBOX_TABLE, key)
-        if result is None:
-            continue
-        row = deserialize_outbox(result[0])
-        if row.status != "succeeded" and row.created_at >= since:
-            rows.append(row)
-    rows.sort(key=lambda r: r.created_at)
-    return rows

@@ -8,6 +8,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -17,9 +18,12 @@ from pathlib import Path
 
 RESTIC_REPO = "/mnt/backup/restic"
 RESTIC_PW_FILE = "/mnt/backup/.restic-password"
+BACKUP_MOUNT = Path("/mnt/backup")
+BACKEND_DIR = Path("/home/backend/dodeka")
 BACKUP_LOG = Path("/home/backend/log/backup.log")
 LOGROTATE_CONFIG = Path("/etc/logrotate.d/dodeka-backup")
 MAX_BACKUP_AGE_MINUTES = 30
+GIB = 1024**3
 
 ENVIRONMENTS = ("production", "demo")
 SERVICES = (
@@ -67,6 +71,47 @@ def section(title: str) -> None:
     print()
     print(title)
     print("-" * len(title))
+
+
+def format_bytes(size: int) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(size) < 1024 or unit == "TiB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{size} {unit}"
+        size /= 1024
+    raise AssertionError("unreachable")
+
+
+def disk_status(
+    path: Path,
+    label: str,
+    *,
+    warn_free: int,
+    fail_free: int,
+    warn_used_percent: float = 85.0,
+    fail_used_percent: float = 95.0,
+    must_be_mount: bool = False,
+) -> bool:
+    if not path.exists():
+        return status_line("FAIL", label, f"{path} missing")
+
+    if must_be_mount and not path.is_mount():
+        return status_line("FAIL", label, f"{path} exists but is not a mount point")
+
+    usage = shutil.disk_usage(path)
+    used_percent = usage.used / usage.total * 100
+    detail = (
+        f"{format_bytes(usage.free)} free of {format_bytes(usage.total)} "
+        f"({used_percent:.1f}% used)"
+    )
+
+    if usage.free < fail_free or used_percent >= fail_used_percent:
+        state = "FAIL"
+    elif usage.free < warn_free or used_percent >= warn_used_percent:
+        state = "WARN"
+    else:
+        state = "OK"
+
+    return status_line(state, label, detail)
 
 
 def parse_systemctl_value(output: str, key: str) -> str:
@@ -140,6 +185,27 @@ def check_cron() -> bool:
         all_ok &= status_line("OK", "backup logrotate", str(LOGROTATE_CONFIG))
     else:
         all_ok &= status_line("WARN", "backup logrotate", f"{LOGROTATE_CONFIG} missing")
+
+    return all_ok
+
+
+def check_disk_space() -> bool:
+    section("Disk space")
+    all_ok = True
+
+    all_ok &= disk_status(
+        BACKUP_MOUNT,
+        "backup volume",
+        warn_free=2 * GIB,
+        fail_free=512 * 1024**2,
+        must_be_mount=True,
+    )
+    all_ok &= disk_status(
+        BACKEND_DIR,
+        "backend filesystem",
+        warn_free=5 * GIB,
+        fail_free=1 * GIB,
+    )
 
     return all_ok
 
@@ -223,6 +289,7 @@ def main() -> int:
     checks = [
         check_services(),
         check_cron(),
+        check_disk_space(),
         check_backups(),
     ]
 

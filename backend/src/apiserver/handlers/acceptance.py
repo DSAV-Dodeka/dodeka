@@ -13,7 +13,6 @@ from freetser.server import StorageQueue
 
 from apiserver.data.outbox import (
     get_outbox_row,
-    list_outbox_since,
     list_pending_outbox,
     mark_attempt_failed,
     mark_attempt_succeeded,
@@ -57,7 +56,7 @@ def attempt_outbox_row(
 ) -> None:
     """Attempt delivery for one outbox row."""
     row = store_queue.execute(lambda store: get_outbox_row(store, outbox_id))
-    if row is None or row.status == "succeeded":
+    if row is None:
         return
 
     if row.kind != "send_registration_invite":
@@ -80,9 +79,22 @@ def attempt_outbox_row(
 
     if success:
         store_queue.execute(lambda store: mark_attempt_succeeded(store, row))
-    else:
-        store_queue.execute(
-            lambda store: mark_attempt_failed(store, row, "send failed")
+        return
+
+    abandoned = store_queue.execute(
+        lambda store: mark_attempt_failed(store, row, "send failed")
+    )
+    if abandoned:
+        logger.error(
+            "OUTBOX ABANDONED: action lost after %s attempts over %ss. "
+            "outbox_id=%s kind=%s subject=%s/%s payload=%s",
+            row.attempt_count + 1,
+            int(time.time()) - row.created_at,
+            row.outbox_id,
+            row.kind,
+            row.subject_kind,
+            row.subject_id,
+            row.payload,
         )
 
 
@@ -95,26 +107,6 @@ def dispatch_pending_outbox(
     """Process all pending outbox rows eligible for dispatch."""
     now = int(time.time())
     rows = store_queue.execute(lambda store: list_pending_outbox(store, now))
-    for row in rows:
-        attempt_outbox_row(
-            store_queue,
-            row.outbox_id,
-            frontend_origin,
-            smtp_config,
-            smtp_send,
-        )
-    return len(rows)
-
-
-def drain_outbox_since(
-    store_queue: StorageQueue,
-    since: int,
-    frontend_origin: str,
-    smtp_config: SmtpConfig | None,
-    smtp_send: bool,
-) -> int:
-    """Manual drain: attempt all unsucceeded rows since a timestamp."""
-    rows = store_queue.execute(lambda store: list_outbox_since(store, since))
     for row in rows:
         attempt_outbox_row(
             store_queue,

@@ -97,6 +97,13 @@ Controls the dev orchestrator (started by `uv run dev`).
 ### `ba` / `backend-actions` - Backend Management
 
 Sends commands to the backend private server. Requires the backend to be running.
+By default this targets the `test` environment.
+
+Use `--env` to target a deployed environment by loading its `.env` file:
+
+```bash
+uv run --frozen --no-dev ba --env demo get-admin-credentials
+```
 
 **Database & system:**
 

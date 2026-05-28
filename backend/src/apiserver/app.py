@@ -48,6 +48,12 @@ from apiserver.handlers.auth import (
 )
 from apiserver.handlers.acceptance import start_outbox_dispatcher
 from apiserver.handlers.features.birthdays import birthdays_handler
+from apiserver.handlers.features.private_kv import (
+    admin_get_private_handler,
+    admin_list_private_handler,
+    admin_set_private_handler,
+    get_private_handler,
+)
 from apiserver.private import create_private_handler, start_private_server
 from apiserver.server import (
     InvalidHeaders,
@@ -174,6 +180,18 @@ def handler_with_client(
     def h_birthdays():
         return birthdays_handler(store_queue)
 
+    def h_get_private():
+        return get_private_handler(req, headers, auth_client, store_queue)
+
+    def h_admin_get_private():
+        return admin_get_private_handler(req, store_queue)
+
+    def h_admin_set_private():
+        return admin_set_private_handler(req, store_queue)
+
+    def h_admin_list_private():
+        return admin_list_private_handler(store_queue)
+
     route_table = {
         # Auth
         "/auth/request_registration": {
@@ -246,6 +264,23 @@ def handler_with_client(
         # Member routes
         "/members/birthdays/": {
             "GET": RouteEntry(h_birthdays, PermissionConfig.require("member"))
+        },
+        # Private key-value store
+        "/members/private/": {
+            "POST": RouteEntry(
+                h_get_private,
+                PermissionConfig.public(),
+                requires_credentials=True,
+            )
+        },
+        "/admin/private_kv/get/": {
+            "POST": RouteEntry(h_admin_get_private, PermissionConfig.require("admin"))
+        },
+        "/admin/private_kv/set/": {
+            "POST": RouteEntry(h_admin_set_private, PermissionConfig.require("admin"))
+        },
+        "/admin/private_kv/list/": {
+            "GET": RouteEntry(h_admin_list_private, PermissionConfig.require("admin"))
         },
         "/auth/session_info/": {
             "GET": RouteEntry(
