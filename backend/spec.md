@@ -96,21 +96,21 @@ The outbox is internal. Admin-performable operations such as
 `resend_registration_invite` are separate commands, not direct views onto the
 outbox.
 
-The backend must run an automatic outbox dispatcher once on startup and then at
-least once per minute while healthy. Each pass selects rows with
-`status = "pending"`, `next_attempt_at <= now`, and `created_at > now - 8
-hours`.
+The backend runs an automatic outbox dispatcher once on startup and then once
+per minute while healthy. Each pass selects persisted rows with
+`status = "pending"` and `next_attempt_at <= now`.
 
 Retry timing is fixed:
 
 - new row: `attempt_count = 0`, `next_attempt_at = created_at`
 - after failures: retry in `1 minute`, then `5 minutes`, then `30 minutes`,
   then every `2 hours`
-- if the next automatic retry would be at or after `created_at + 8 hours`,
-  stop automatic retry and mark the row `manual_retry_required`
+- if the next automatic retry would be at or after `created_at + 72 hours`,
+  delete the outbox row and log the lost action loudly
 
-Older rows are retried only through operator tooling such as
-`drain_outbox_since(since)`.
+Rows are also deleted after successful delivery. The earlier planned
+`manual_retry_required` terminal state and bulk `drain_outbox_since(since)`
+replay contract are not implemented in the current backend.
 
 ## Core Model
 
@@ -190,8 +190,21 @@ The backend may normalize and expose selected fields such as:
 - names
 - cancellation date
 - birth date
-- address details
-- federation-managed financial fields when present
+- gender
+
+The current implementation imports only:
+
+- `bondsnummer`
+- `voornaam`
+- `tussenvoegsel`
+- `achternaam`
+- `geslacht`
+- `geboortedatum`
+- `email`
+- `opzegdatum`
+
+Address details and federation-managed financial fields are planned examples
+of future Volta-managed data, not fields currently stored by the backend.
 
 But only `bondsnummer` has special identity semantics. Other Volta-managed
 fields are treated generically.
@@ -294,10 +307,11 @@ state in this spec. Acceptance happens before signup completion.
 #### `registration_status(registration_id)`
 
 - resolves the pending registration
-- returns whether it exists
+- returns 404 if it does not exist
 - returns whether it is accepted
 - returns the current `signup_token` when a Faroe signup session is active,
   otherwise `null`
+- returns the registration email
 
 This endpoint is used after the user follows an email link containing
 `registration_id`.
@@ -527,10 +541,14 @@ order:
      the imported given-name prefix key
    - this catches missing infixes in either source, for example `van Tester`
      versus `Tester`
+   - the current implementation only adds this reason when the same candidate
+     did not already match by exact full name or partial name
    - add reason `name_forgiving`
 
 If the same subject matches more than one rule, it appears only once and its
-`reasons` list contains every matching reason.
+`reasons` list contains every matching reason, except that the current
+implementation does not add `name_forgiving` when `name_exact` or
+`name_partial` already matched.
 
 ### Candidate Ordering And Limit
 
@@ -707,10 +725,16 @@ For each departed linked live user, the backend:
 1. deletes the user row
 2. deletes `users_by_email`
 3. deletes `users_by_bondsnummer`
-4. deletes any Dodeka-managed per-user data
+4. deletes the standard Faroe/Dodeka user keys
+5. removes the `member` permission
 
 Live users without `bondsnummer` are never auto-removed by sync because sync
 has no authoritative identity link for them.
+
+Linked pending registrations are not reported as departed and are not cleaned
+up by `complete_sync`. This means an accepted/invited registration may remain
+after its `bondsnummer` disappears from the import or is cancelled if the
+person never completed signup. Admins can delete those registrations manually.
 
 ## Important Cases
 
@@ -811,6 +835,9 @@ Currently the closed set is:
 
 - `resend_registration_invite`
 
+Delete actions are implemented as separate admin endpoints, not as
+`available_actions` entries in the registration read model.
+
 ### `SyncMatchCandidate`
 
 One candidate suggested for admin review:
@@ -898,9 +925,14 @@ One persisted sync-review decision:
 The singleton sync-session state row stored at `sync_state["current"]`:
 
 - `in_progress: boolean`
+- optional `file_modified_at: int`
 
 The optimistic concurrency token for sync operations is not stored in the row
 payload. It is the built-in `freetser` counter returned alongside that row.
+
+`file_modified_at` is the optional filesystem modification time of the
+imported CSV, sent by the frontend as seconds since epoch. It is informational
+and is returned while a sync session is active.
 
 ### `OutboxRow`
 
@@ -921,22 +953,19 @@ One internal durable backend side-effect row:
 Current `status` values are:
 
 - `pending`
-- `succeeded`
-- `manual_retry_required`
 
 Status meanings are:
 
 - `pending`: not yet delivered and still tracked by the automatic retry
   schedule
-- `succeeded`: delivered successfully
-- `manual_retry_required`: not delivered and no longer eligible for automatic
-  retry
 
-While a row is still within the automatic retry window, a failed attempt keeps
-it in `pending` and updates `next_attempt_at` to the next scheduled retry
-time. When the automatic window closes without success, the row becomes
-`manual_retry_required`. A successful manual replay changes the row to
-`succeeded`; a failed manual replay leaves it `manual_retry_required`.
+Successful rows are deleted. Rows that exhaust the 72-hour retry window are
+also deleted and logged as abandoned. While a row is still within the automatic
+retry window, a failed attempt keeps it in `pending` and updates
+`next_attempt_at` to the next scheduled retry time.
+
+Earlier drafts included persisted `succeeded` and `manual_retry_required`
+states. Those are not implemented in the current backend.
 
 The current closed set of durable outbox kinds is:
 
@@ -956,6 +985,7 @@ The sync preview response must return:
 
 - `sync_in_progress: boolean`
 - `sync_state_counter: int`
+- `file_modified_at: int | null`
 - `can_complete: boolean`
 - `review_required: SyncReviewItem[]`
 - `registrations_created: CreatedRegistrationSyncRecord[]`
@@ -968,12 +998,28 @@ The sync preview response must return:
 This is what the admin frontend uses to explain the exact effects of the next
 sync completion step.
 
+`volta_data_changes` includes every imported row, including rows without field
+diffs, plus rows that exist in current `volta_data` but are absent from the
+import with `incoming_volta_data: null`.
+
+The admin UI may label these fields differently:
+
+| Backend field | Admin UI label |
+|---|---|
+| `review_required` | Review required |
+| `registrations_created` | New registrations |
+| `registrations_accepted` | Matched registrations |
+| `pending_registrations_updated` | Existing registrations |
+| `live_users_enriched` | Current members |
+| `departed_users` | Departed members |
+| `volta_data_changes` | Import data overview |
+
 ### `Complete Sync` Result
 
-`complete_sync` may return top-level counts, but it must also return enough
-structured detail for the frontend to report exactly what changed.
+`complete_sync` currently returns top-level counts for the categories applied
+by the storage callback.
 
-At minimum, the result must identify:
+The fuller planned contract would identify:
 
 - which Volta rows were inserted, replaced, or removed
 - which registrations were created
@@ -981,6 +1027,29 @@ At minimum, the result must identify:
 - which pending registrations were updated
 - which live users were refreshed
 - which live users were removed as departed
+
+The current HTTP implementation does not return the full structured item
+lists. The structured item-level detail is available in the preceding
+`sync_status` preview.
+
+## Frontend Sync Safety Notes
+
+These notes describe frontend behavior that uses the backend read models. They
+do not require extra backend state beyond `sync_status`.
+
+Before calling `complete_sync`, the admin UI may show one confirmation modal
+when any destructive or stale-data warning applies:
+
+- the imported file is older than one day, based on `file_modified_at`
+- `departed_users` is non-empty
+
+The modal should combine all applicable warnings and then either cancel or call
+`complete_sync`. When no warnings apply, the frontend can call `complete_sync`
+directly.
+
+The backend stores and returns `file_modified_at` only as metadata. The value
+comes from the browser `File.lastModified` field, converted to seconds since
+epoch.
 
 ## Sessions And Permissions
 
@@ -1070,6 +1139,8 @@ The core admin operations are:
 - `sync_status`
 - `accept_registration`
 - `resend_registration_invite`
+- `delete_registration`
+- `delete_user`
 - `resolve_sync_match`
 - `link_bondsnummer`
 - `complete_sync`
@@ -1085,7 +1156,8 @@ It:
 - returns either an imported-row count or a structured validation error from
   the storage helper
 - runs as one storage callback
-- updates `sync_state["current"]` to `{"in_progress": true}`
+- updates `sync_state["current"]` to `{"in_progress": true}` and stores
+  optional `file_modified_at` when provided
 - stores the imported rows as the new pending snapshot in `sync`
 - clears any older pending review decisions in `sync_decisions`
 - does not itself create, delete, relink, accept, or email any registrations
@@ -1145,6 +1217,37 @@ It:
 This operation does not change the registration’s canonical identity state.
 It does not use the outbox because the admin caller is already the retry path.
 
+### `delete_registration`
+
+`delete_registration` is the direct admin cleanup path for pending
+registrations.
+
+It:
+
+- resolves the pending registration by `registration_id`
+- deletes the registration row
+- deletes its email index
+- deletes its bondsnummer index when present
+
+This is how admins clean up departed linked registrations and other
+registrations that sync does not manage automatically.
+
+### `delete_user`
+
+`delete_user` is the direct admin cleanup path for live user accounts.
+
+It:
+
+- resolves the live user by `user_id`
+- rejects system users
+- deletes the standard Faroe/Dodeka user keys
+- deletes `users_by_email`
+- deletes the bondsnummer link when present
+- removes the `member` permission
+
+This uses the same practical cleanup shape as departed-user removal. Other
+permission keys may expire naturally according to the permission TTL model.
+
 ### `resolve_sync_match`
 
 `resolve_sync_match` records one explicit admin decision for one unresolved
@@ -1194,8 +1297,8 @@ It:
   `bondsnummer`
 
 Linking a registration by `bondsnummer` does not itself create a live user. It
-only moves that registration into the “accepted registration with bondsnummer”
-bucket.
+sets `accepted=True` and moves that registration into the “accepted
+registration with bondsnummer” bucket.
 
 ### `complete_sync`
 
@@ -1206,7 +1309,8 @@ It:
 
 - requires the current `sync_state_counter`
 - fails if no pending sync session exists
-- fails if `review_required` is non-empty
+- fails if any non-cancelled imported row is unresolved; equivalently,
+  `sync_status.review_required` must be empty
 - replaces `volta_data` with the imported snapshot
 - applies the pending sync decisions to registrations and live-user links
 - applies linked-registration email rewrites
@@ -1228,26 +1332,17 @@ effects use the outbox in this spec.
 
 ## Operational Tooling
 
-The backend must also expose operator tooling for bulk replay of durable
-outbox rows. This is not required to be a public frontend route.
+The backend exposes private/operator tooling for inspecting durable outbox
+rows. This is not a public frontend route.
 
 At minimum, the tooling contract must include:
 
-- `drain_outbox_since(since)`
+- `list_outbox`
 
-`drain_outbox_since(since)` attempts every outbox row with `status !=
-"succeeded"` and `created_at >= since`.
-
-It must process those rows in ascending `created_at` order and update
-`last_attempt_at`, `attempt_count`, and `last_error` exactly like the
-automatic dispatcher. It ignores the eight-hour automatic cutoff.
-
-This exists for recovery after crashes, power loss, outages, or long SMTP
-failures:
-
-- automatic replay only covers outbox rows younger than eight hours
-- operator tooling supports bulk replay for older outbox rows from a specified
-  date or timestamp
+Earlier drafts required a bulk replay command named `drain_outbox_since(since)`.
+That command is not implemented. Recovery currently relies on the automatic
+startup/periodic dispatcher for persisted pending rows within the 72-hour retry
+window.
 
 ## Core Tables
 
@@ -1267,4 +1362,6 @@ failures:
 | `metadata` | key | value | Global counters and backend metadata |
 | `system_users` | normalized email | `b"1"` | Users excluded from sync departure checks |
 | `session_cache` | `session_token` | session JSON | Cache of validated Faroe sessions |
+| `birthdays` | `user_id` | birthday JSON | Dodeka-owned projection rebuilt from applied Volta data |
+| `private` | string key | `{"role": permission, "value": JSON}` | Permission-gated private key-value data |
 | `tokens` | `{kind}:{email}` | auxiliary token data | Local testing/tooling mirror for verification codes |

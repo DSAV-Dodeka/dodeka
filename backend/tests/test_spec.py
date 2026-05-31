@@ -1,7 +1,7 @@
 """Contract tests for the backend specification.
 
 These tests target the `registration_id` / `user_id` /
-`bondsnummer` model described in `backend/docs/spec.md`.
+`bondsnummer` model described in `backend/spec.md`.
 """
 
 import csv
