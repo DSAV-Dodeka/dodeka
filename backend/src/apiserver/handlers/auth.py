@@ -211,6 +211,7 @@ def set_session(
     smtp_config=None,
     smtp_send: bool = False,
     frontend_origin: str = "",
+    environment: str = "production",
 ) -> Response:
     """Handle /auth/set_session/ — validate and set session cookie."""
     try:
@@ -237,8 +238,11 @@ def set_session(
     cookie = SimpleCookie()
     cookie[cookie_name] = session_token
     cookie[cookie_name]["httponly"] = True
-    cookie[cookie_name]["samesite"] = "None"
-    cookie[cookie_name]["secure"] = True
+    if environment == "production":
+        cookie[cookie_name]["samesite"] = "None"
+        cookie[cookie_name]["secure"] = True
+    else:
+        cookie[cookie_name]["samesite"] = "Lax"
     cookie[cookie_name]["path"] = "/"
     cookie[cookie_name]["max-age"] = max_session_age
 
@@ -251,7 +255,7 @@ def set_session(
     )
 
 
-def clear_session(req: Request) -> Response:
+def clear_session(req: Request, environment: str = "production") -> Response:
     """Handle /auth/clear_session/ — clear session cookie."""
     secondary = False
     if req.body:
@@ -263,7 +267,8 @@ def clear_session(req: Request) -> Response:
 
     cookie_name = SESSION_COOKIE_SECONDARY if secondary else SESSION_COOKIE_PRIMARY
     logger.info(f"clear_session: Clearing {cookie_name} cookie")
-    return Response.empty(headers=[make_clear_session_cookie_header(cookie_name)])
+    header = make_clear_session_cookie_header(cookie_name, environment)
+    return Response.empty(headers=[header])
 
 
 def session_info(
@@ -271,6 +276,7 @@ def session_info(
     req: Request,
     headers: dict[str, str],
     store_queue: StorageQueue,
+    environment: str = "production",
 ) -> Response:
     """Handle /auth/session_info/ — returns current user info and permissions.
 
@@ -294,7 +300,7 @@ def session_info(
         return Response.json(
             {"error": "invalid_session"},
             status_code=401,
-            headers=[make_clear_session_cookie_header(cookie_name)],
+            headers=[make_clear_session_cookie_header(cookie_name, environment)],
         )
 
     timestamp = int(time.time())
@@ -318,7 +324,7 @@ def session_info(
         return Response.json(
             {"error": "invalid_session"},
             status_code=401,
-            headers=[make_clear_session_cookie_header(cookie_name)],
+            headers=[make_clear_session_cookie_header(cookie_name, environment)],
         )
 
     session = session_result

@@ -79,6 +79,7 @@ def handler_with_client(
     frontend_origin: str,
     smtp_config: SmtpConfig | None = None,
     smtp_send: bool = False,
+    environment: str = "production",
 ) -> Response:
     """Dispatch a request to its handler based on the route table."""
     if store_queue is None:
@@ -103,13 +104,14 @@ def handler_with_client(
             smtp_config,
             smtp_send,
             frontend_origin,
+            environment,
         )
 
     def h_clear_sess():
-        return clear_session(req)
+        return clear_session(req, environment)
 
     def h_sess_info():
-        return session_info(auth_client, req, headers, store_queue)
+        return session_info(auth_client, req, headers, store_queue, environment)
 
     def h_add_perm():
         return add_user_permission(req, store_queue)
@@ -432,6 +434,7 @@ def run_with_settings(
             settings.frontend_origin,
             settings.smtp,
             settings.smtp_send,
+            settings.environment,
         )
 
     if ready_event is None:

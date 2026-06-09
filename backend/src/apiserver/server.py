@@ -205,13 +205,17 @@ def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
 
 def make_clear_session_cookie_header(
     cookie_name: str = SESSION_COOKIE_PRIMARY,
+    environment: str = "production",
 ) -> tuple[bytes, bytes]:
     """Create a Set-Cookie header that clears a session cookie."""
     cookie = SimpleCookie()
     cookie[cookie_name] = ""
     cookie[cookie_name]["httponly"] = True
-    cookie[cookie_name]["samesite"] = "None"
-    cookie[cookie_name]["secure"] = True
+    if environment == "production":
+        cookie[cookie_name]["samesite"] = "None"
+        cookie[cookie_name]["secure"] = True
+    else:
+        cookie[cookie_name]["samesite"] = "Lax"
     cookie[cookie_name]["path"] = "/"
     cookie[cookie_name]["max-age"] = 0
     return (b"Set-Cookie", cookie[cookie_name].OutputString().encode("utf-8"))
