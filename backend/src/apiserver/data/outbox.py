@@ -174,5 +174,3 @@ def list_pending_outbox(store: Storage, now: int) -> list[OutboxRow]:
         if row.status == "pending" and row.next_attempt_at <= now:
             rows.append(row)
     return rows
-
-

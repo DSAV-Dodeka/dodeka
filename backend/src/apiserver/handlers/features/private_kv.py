@@ -37,7 +37,7 @@ def _parse_record(raw: bytes) -> tuple[str, Any] | None:
     """Decode a stored record into ``(role, value)``. Returns None on corruption."""
     try:
         record = json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         return None
     if not isinstance(record, dict):
         return None
@@ -176,6 +176,7 @@ def admin_set_private_handler(req: Request, store_queue: StorageQueue) -> Respon
 
 def admin_list_private_handler(store_queue: StorageQueue) -> Response:
     """Handle GET /admin/private_kv/list/ — list of ``{key, required_role}``."""
+
     def fetch(store: Storage) -> list[tuple[str, bytes | None]]:
         keys = list_private_keys(store)
         return [(k, get_private_record(store, k)) for k in keys]
