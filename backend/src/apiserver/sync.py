@@ -200,10 +200,10 @@ def parse_csv(content: str) -> list[VoltaRow]:
     if lines:
         cleaned_lines = [lines[0].strip()]
         for line in lines[1:]:
-            line = line.strip()
-            if line.startswith('"') and line.endswith('"'):
-                line = line[1:-1].replace('""', '"')
-            cleaned_lines.append(line)
+            stripped = line.strip()
+            if stripped.startswith('"') and stripped.endswith('"'):
+                stripped = stripped[1:-1].replace('""', '"')
+            cleaned_lines.append(stripped)
         content = "\n".join(cleaned_lines)
 
     entries = []
