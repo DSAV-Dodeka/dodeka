@@ -193,6 +193,19 @@ def is_cancelled(opzegdatum: str, today: date | None = None) -> bool:
 def parse_csv(content: str) -> list[VoltaRow]:
     if content.startswith("\ufeff"):
         content = content[1:]
+
+    # Some exports wrap each data row in outer quotes — unwrap them so
+    # csv.DictReader can parse the fields correctly.
+    lines = content.splitlines()
+    if lines:
+        cleaned_lines = [lines[0].strip()]
+        for line in lines[1:]:
+            stripped = line.strip()
+            if stripped.startswith('"') and stripped.endswith('"'):
+                stripped = stripped[1:-1].replace('""', '"')
+            cleaned_lines.append(stripped)
+        content = "\n".join(cleaned_lines)
+
     entries = []
     reader = csv.DictReader(io.StringIO(content))
     if reader.fieldnames is not None:
