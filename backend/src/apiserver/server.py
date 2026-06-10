@@ -6,6 +6,7 @@ Application-specific route tables and startup live in ``app.py``.
 
 import enum
 import logging
+import sys
 import time
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
@@ -203,6 +204,21 @@ def get_cookie_value(headers: dict[str, str], cookie_name: str) -> str | None:
     return None
 
 
+def apply_session_cookie_security(
+    cookie: SimpleCookie, cookie_name: str, environment: str
+) -> None:
+    """Apply HttpOnly / SameSite / Secure / Path to a session cookie.
+
+    Secure is dropped only on macOS in the test env: Safari rejects Secure
+    cookies on the HTTP loopback (https://bugs.webkit.org/show_bug.cgi?id=281149).
+    """
+    cookie[cookie_name]["httponly"] = True
+    cookie[cookie_name]["samesite"] = "Strict"
+    cookie[cookie_name]["path"] = "/"
+    if not (environment == "test" and sys.platform == "darwin"):
+        cookie[cookie_name]["secure"] = True
+
+
 def make_clear_session_cookie_header(
     cookie_name: str = SESSION_COOKIE_PRIMARY,
     environment: str = "production",
@@ -210,13 +226,7 @@ def make_clear_session_cookie_header(
     """Create a Set-Cookie header that clears a session cookie."""
     cookie = SimpleCookie()
     cookie[cookie_name] = ""
-    cookie[cookie_name]["httponly"] = True
-    if environment == "production":
-        cookie[cookie_name]["samesite"] = "None"
-        cookie[cookie_name]["secure"] = True
-    else:
-        cookie[cookie_name]["samesite"] = "Lax"
-    cookie[cookie_name]["path"] = "/"
+    apply_session_cookie_security(cookie, cookie_name, environment)
     cookie[cookie_name]["max-age"] = 0
     return (b"Set-Cookie", cookie[cookie_name].OutputString().encode("utf-8"))
 

@@ -31,6 +31,7 @@ from apiserver.server import (
     InvalidSessionToken,
     SESSION_COOKIE_PRIMARY,
     SESSION_COOKIE_SECONDARY,
+    apply_session_cookie_security,
     get_cookie_value,
     make_clear_session_cookie_header,
     validate_session,
@@ -237,13 +238,7 @@ def set_session(
 
     cookie = SimpleCookie()
     cookie[cookie_name] = session_token
-    cookie[cookie_name]["httponly"] = True
-    if environment == "production":
-        cookie[cookie_name]["samesite"] = "None"
-        cookie[cookie_name]["secure"] = True
-    else:
-        cookie[cookie_name]["samesite"] = "Lax"
-    cookie[cookie_name]["path"] = "/"
+    apply_session_cookie_security(cookie, cookie_name, environment)
     cookie[cookie_name]["max-age"] = max_session_age
 
     cookie_header = cookie[cookie_name].OutputString()
