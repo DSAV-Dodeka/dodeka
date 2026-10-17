@@ -30,6 +30,8 @@ from typing import Any
 
 from freetser import Storage
 
+from apiserver.data.features.fotos import validate_foto_card
+
 
 @dataclass(frozen=True)
 class Collection:
@@ -45,8 +47,16 @@ class Collection:
     """Upper bound on one encoded item, so a single row can't grow unbounded."""
 
 
-# The committee collections that exist; see the module docstring to add one.
-COLLECTIONS: dict[str, Collection] = {}
+COLLECTIONS: dict[str, Collection] = {
+    # Het Fotoboek (/leden/fotos): every member sees the cards, FOCUS edits.
+    "fotos": Collection(
+        table="collection_fotos",
+        read_role="member",
+        write_role="focus",
+        validate=validate_foto_card,
+        max_item_bytes=1_000_000,
+    ),
+}
 
 COLLECTION_TABLES = [c.table for c in COLLECTIONS.values()]
 
