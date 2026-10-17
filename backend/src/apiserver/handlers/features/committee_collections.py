@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import secrets
+import time
 from typing import Any
 
 from freetser import Request, Response, Storage
@@ -25,6 +26,7 @@ from freetser.server import StorageQueue
 from apiserver.data.client import AuthClient
 from apiserver.data.features.committee_collections import (
     COLLECTIONS,
+    SERVER_FIELDS,
     Collection,
     delete_item,
     item_exists,
@@ -120,7 +122,9 @@ def save_collection_item_handler(
     """Handle POST /members/collections/save/ — body ``{collection, item}``.
 
     Creates the item, or replaces the one with the same ``item.id``. Without an
-    id the backend generates one. Returns ``{"item": {"id": ..., **fields}}``.
+    id the backend generates one. ``created_at`` is set by the backend (kept
+    when replacing); a ``created_at`` sent by the client is ignored. Returns
+    ``{"item": {"id": ..., "created_at": ..., **fields}}``.
     """
     parsed = parse_collection_body(req)
     if isinstance(parsed, Response):
@@ -135,7 +139,7 @@ def save_collection_item_handler(
     item = body.get("item")
     if not isinstance(item, dict):
         return Response.text("item must be a JSON object", status_code=400)
-    fields = {k: v for k, v in item.items() if k != "id"}
+    fields = {k: v for k, v in item.items() if k not in SERVER_FIELDS}
     item_id = item.get("id")
     if item_id is None:
         item_id = secrets.token_urlsafe(9)
@@ -155,14 +159,16 @@ def save_collection_item_handler(
             status_code=413,
         )
 
-    def write(store: Storage) -> None:
-        put_item(store, collection, item_id, item_bytes)
+    timestamp = int(time.time())
 
-    store_queue.execute(write)
+    def write(store: Storage) -> int:
+        return put_item(store, collection, item_id, fields, timestamp)
+
+    created_at = store_queue.execute(write)
     logger.info(
         f"collection save: {collection.table}/{item_id} ({len(item_bytes)} bytes)"
     )
-    return Response.json({"item": {"id": item_id, **fields}})
+    return Response.json({"item": {"id": item_id, "created_at": created_at, **fields}})
 
 
 def delete_collection_item_handler(

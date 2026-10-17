@@ -60,9 +60,12 @@ COLLECTIONS: dict[str, Collection] = {
 
 COLLECTION_TABLES = [c.table for c in COLLECTIONS.values()]
 
+# Fields the backend owns: clients can't set them, they are added on read.
+SERVER_FIELDS = frozenset({"id", "created_at"})
+
 
 def list_items(store: Storage, collection: Collection) -> list[dict[str, Any]]:
-    """All items of a collection as ``{"id": ..., **fields}``, sorted by id."""
+    """All items as ``{"id": ..., "created_at": ..., **fields}``, sorted by id."""
     items: list[dict[str, Any]] = []
     for item_id in sorted(store.list_keys(collection.table)):
         result = store.get(collection.table, item_id)
@@ -78,10 +81,26 @@ def item_exists(store: Storage, collection: Collection, item_id: str) -> bool:
 
 
 def put_item(
-    store: Storage, collection: Collection, item_id: str, item_bytes: bytes
-) -> None:
-    """Create the item, or replace it if the id already exists."""
+    store: Storage,
+    collection: Collection,
+    item_id: str,
+    fields: dict[str, Any],
+    timestamp: int,
+) -> int:
+    """Create the item, or replace it if the id already exists.
+
+    Stores ``created_at`` (unix seconds) next to the fields: ``timestamp`` for
+    a new item, the original value when replacing one. Returns it.
+    """
+    created_at = timestamp
+    existing = store.get(collection.table, item_id)
+    if existing is not None:
+        stored_created_at = json.loads(existing[0].decode("utf-8")).get("created_at")
+        if isinstance(stored_created_at, int):
+            created_at = stored_created_at
+    item_bytes = json.dumps({**fields, "created_at": created_at}).encode("utf-8")
     store.overwrite(collection.table, item_id, item_bytes, expires_at=0)
+    return created_at
 
 
 def delete_item(store: Storage, collection: Collection, item_id: str) -> bool:

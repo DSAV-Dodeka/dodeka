@@ -112,9 +112,16 @@ def test_focus_member_manages_cards_one_at_a_time(backend_url, members) -> None:
     assert second.status_code == 200, second.text
     second_id = second.json()["item"]["id"]
 
-    # Editing one card leaves the other untouched
-    edited = save_foto(backend_url, members.focus, card(id="nsk-baan", name="NSK"))
+    created_at = first.json()["item"]["created_at"]
+    assert isinstance(created_at, int)
+
+    # Editing one card leaves the other untouched; created_at is kept and a
+    # client-sent created_at is ignored
+    edited = save_foto(
+        backend_url, members.focus, card(id="nsk-baan", name="NSK", created_at=1)
+    )
     assert edited.status_code == 200, edited.text
+    assert edited.json()["item"]["created_at"] == created_at
     items = {i["id"]: i for i in list_fotos(backend_url, members.plain).json()["items"]}
     assert items["nsk-baan"]["name"] == "NSK"
     assert items[second_id]["name"] == "Borrel"
