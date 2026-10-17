@@ -20,8 +20,14 @@ def get_private_record(store: Storage, key: str) -> bytes | None:
 
 
 def set_private_record(store: Storage, key: str, record_bytes: bytes) -> None:
-    """Store the encoded ``{role, value}`` record under ``key``."""
-    store.add(PRIVATE_TABLE, key, record_bytes, expires_at=0)
+    """Store the encoded ``{role, value}`` record under ``key``.
+
+    Creates the key, or replaces its current record: the admin Private tab
+    re-saves the whole JSON document every time, so replacing is the normal
+    case. (``store.add`` only inserts and raised ``EntryAlreadyExists`` for an
+    existing key, so every save after the first one failed with a 500.)
+    """
+    store.overwrite(PRIVATE_TABLE, key, record_bytes, expires_at=0)
 
 
 def list_private_keys(store: Storage) -> list[str]:
