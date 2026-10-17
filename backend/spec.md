@@ -1095,6 +1095,59 @@ It does not return a `pending_approval` flag in this spec. Pending
 approval is represented only by pending registrations, not by a partially live
 user state.
 
+## Committee Collections
+
+Lists of items a committee manages from its own page, such as the cards in
+Het Fotoboek (`/leden/fotos`), edited by FOCUS.
+
+Each collection is its own table with **one row per item**: key = item id,
+value = the item's JSON without the id. Items are saved and deleted one at a
+time, so editing one item never touches the others.
+
+Who may do what is fixed in code, in `COLLECTIONS`
+(`data/features/committee_collections.py`):
+
+| Collection | Table | Read | Write | Item shape |
+|---|---|---|---|---|
+| `fotos` | `collection_fotos` | `member` | `focus` | `validate_foto_card` in `data/features/fotos.py` |
+
+Admins can always read and write every collection. Admins configure nothing
+per collection: granting a member the committee's permission tag is enough.
+
+**Security boundary:** a committee permission only grants writing to the
+tables of the collections that name it as `write_role`. The collection routes
+read and write nothing but the requested collection's own table, and a
+committee permission unlocks no other route. So a committee can't change
+users, registrations, permissions, other committees' data or anything else.
+
+### Routes
+
+The same three routes serve every collection; the body names it.
+
+- `POST /members/collections/list/` `{collection}`: returns `{items}`, each
+  item as `{id, ...fields}`. Needs the read role or `admin`.
+- `POST /members/collections/save/` `{collection, item}`: creates the item, or
+  replaces the item with the same `item.id`. Without an id the backend
+  generates one. Returns `{item}`. Needs the write role or `admin`.
+  - 400 if the item fails the collection's shape check or the id is invalid
+    (1-64 letters, digits, `-`, `_`)
+  - 413 if the encoded item exceeds the collection's `max_item_bytes`
+- `POST /members/collections/delete/` `{collection, id}`: needs the write role
+  or `admin`. 404 if no item has that id.
+
+All three return 404 for an unknown collection and 403 without the right
+permission. They accept the primary or the secondary session cookie.
+
+### Adding a collection for another committee
+
+1. Write a validator for one item's shape (like `validate_foto_card`).
+2. Add an entry to `COLLECTIONS`: table name, read role, write role,
+   validator, max item size. The table is created automatically because
+   `COLLECTION_TABLES` is part of `DB_TABLES`.
+3. Build the page in the frontend on the three routes above.
+
+Concurrent edits of the **same** item are last-write-wins.
+
 ## Email Notifications
 
 There are two categories of email.
@@ -1364,4 +1417,5 @@ window.
 | `session_cache` | `session_token` | session JSON | Cache of validated Faroe sessions |
 | `birthdays` | `user_id` | birthday JSON | Dodeka-owned projection rebuilt from applied Volta data |
 | `private` | string key | `{"role": permission, "value": JSON}` | Permission-gated private key-value data |
+| `collection_<name>` | item id | item JSON | One table per committee collection, see "Committee Collections" |
 | `tokens` | `{kind}:{email}` | auxiliary token data | Local testing/tooling mirror for verification codes |
