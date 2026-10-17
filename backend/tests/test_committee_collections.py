@@ -57,7 +57,7 @@ def card(**overrides) -> dict:
     base = {
         "name": "NSK Baan",
         "date": "2026-06-14",
-        "type": "Wedstrijd",
+        "types": ["Wedstrijd"],
         "links": [{"label": "dump", "url": "https://example.com/dump"}],
     }
     return {**base, **overrides}
@@ -91,10 +91,26 @@ def test_validate_foto_card() -> None:
     assert validate_foto_card(card()) == []
     assert validate_foto_card(card(image="data:image/jpeg;base64,AAAA")) == []
     assert validate_foto_card(card(seizoen="25/26")) == []
+    # Several days, several types, still being edited
+    assert (
+        validate_foto_card(
+            card(
+                date="2026-06-13",
+                end_date="2026-06-14",
+                types=["Wedstrijd", "Gezelligheid"],
+                in_progress=True,
+            )
+        )
+        == []
+    )
 
     assert validate_foto_card(card(name=" "))
     assert validate_foto_card(card(date="14-06-2026"))
-    assert validate_foto_card(card(type="Feest"))
+    assert validate_foto_card(card(end_date="2026-06-12"))  # before date
+    assert validate_foto_card(card(types=[]))
+    assert validate_foto_card(card(types=["Feest"]))
+    assert validate_foto_card(card(types=["Reis", "Reis"]))
+    assert validate_foto_card(card(in_progress="ja"))
     assert validate_foto_card(card(seizoen="2025"))
     assert validate_foto_card(card(image="javascript:alert(1)"))
     assert validate_foto_card(card(links=[{"label": "x", "url": "ftp://x"}]))
@@ -108,7 +124,9 @@ def test_focus_member_manages_cards_one_at_a_time(backend_url, members) -> None:
     first = save_foto(backend_url, members.focus, card(id="nsk-baan"))
     assert first.status_code == 200, first.text
     assert first.json()["item"]["id"] == "nsk-baan"
-    second = save_foto(backend_url, members.focus, card(name="Borrel", type="Overig"))
+    second = save_foto(
+        backend_url, members.focus, card(name="Borrel", types=["Gezelligheid"])
+    )
     assert second.status_code == 200, second.text
     second_id = second.json()["item"]["id"]
 

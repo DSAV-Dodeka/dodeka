@@ -1125,10 +1125,13 @@ users, registrations, permissions, other committees' data or anything else.
 The same three routes serve every collection; the body names it.
 
 - `POST /members/collections/list/` `{collection}`: returns `{items}`, each
-  item as `{id, ...fields}`. Needs the read role or `admin`.
+  item as `{id, created_at, ...fields}`. Needs the read role or `admin`.
 - `POST /members/collections/save/` `{collection, item}`: creates the item, or
   replaces the item with the same `item.id`. Without an id the backend
   generates one. Returns `{item}`. Needs the write role or `admin`.
+  - `id` and `created_at` are owned by the backend: `created_at` (unix
+    seconds) is set when the item is created and kept when it is replaced; a
+    `created_at` sent by the client is ignored
   - 400 if the item fails the collection's shape check or the id is invalid
     (1-64 letters, digits, `-`, `_`)
   - 413 if the encoded item exceeds the collection's `max_item_bytes`
