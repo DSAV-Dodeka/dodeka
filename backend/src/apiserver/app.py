@@ -48,6 +48,11 @@ from apiserver.handlers.auth import (
 )
 from apiserver.handlers.acceptance import start_outbox_dispatcher
 from apiserver.handlers.features.birthdays import birthdays_handler
+from apiserver.handlers.features.committee_collections import (
+    delete_collection_item_handler,
+    list_collection_handler,
+    save_collection_item_handler,
+)
 from apiserver.handlers.features.private_kv import (
     admin_get_private_handler,
     admin_list_private_handler,
@@ -185,6 +190,15 @@ def handler_with_client(
     def h_get_private():
         return get_private_handler(req, headers, auth_client, store_queue)
 
+    def h_list_collection():
+        return list_collection_handler(req, headers, auth_client, store_queue)
+
+    def h_save_collection_item():
+        return save_collection_item_handler(req, headers, auth_client, store_queue)
+
+    def h_delete_collection_item():
+        return delete_collection_item_handler(req, headers, auth_client, store_queue)
+
     def h_admin_get_private():
         return admin_get_private_handler(req, store_queue)
 
@@ -271,6 +285,27 @@ def handler_with_client(
         "/members/private/": {
             "POST": RouteEntry(
                 h_get_private,
+                PermissionConfig.public(),
+                requires_credentials=True,
+            )
+        },
+        # Committee collections (fotoboek, ...): the handlers check the
+        # collection's read/write role from COLLECTIONS themselves.
+        "/members/collections/list/": {
+            "POST": RouteEntry(
+                h_list_collection, PermissionConfig.public(), requires_credentials=True
+            )
+        },
+        "/members/collections/save/": {
+            "POST": RouteEntry(
+                h_save_collection_item,
+                PermissionConfig.public(),
+                requires_credentials=True,
+            )
+        },
+        "/members/collections/delete/": {
+            "POST": RouteEntry(
+                h_delete_collection_item,
                 PermissionConfig.public(),
                 requires_credentials=True,
             )
